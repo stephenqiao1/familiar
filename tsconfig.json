@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/contracts" },
+    { "path": "packages/core" },
+    { "path": "packages/engine-echo" },
+    { "path": "packages/minecraft" },
+    { "path": "apps/run-bot" }
+  ]
+}

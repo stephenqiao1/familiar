@@ -1,0 +1,12 @@
+{
+  "name": "@familiar/run-bot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@familiar/contracts": "workspace:*",
+    "@familiar/core": "workspace:*",
+    "@familiar/engine-echo": "workspace:*",
+    "@familiar/minecraft": "workspace:*"
+  }
+}
