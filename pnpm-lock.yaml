@@ -29,6 +29,9 @@ importers:
       '@familiar/engine-echo':
         specifier: workspace:*
         version: link:../../packages/engine-echo
+      '@familiar/engine-jev':
+        specifier: workspace:*
+        version: link:../../packages/engine-jev
       '@familiar/minecraft':
         specifier: workspace:*
         version: link:../../packages/minecraft
@@ -51,6 +54,15 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/engine-jev:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@typesafe-ai/sdk':
+        specifier: ^0.7.0
+        version: 0.7.0
+
   packages/minecraft:
     dependencies:
       '@familiar/contracts':
@@ -59,6 +71,12 @@ importers:
       mineflayer:
         specifier: ^4.39.0
         version: 4.39.0
+      mineflayer-pathfinder:
+        specifier: ^2.4.5
+        version: 2.4.5
+      vec3:
+        specifier: ^0.1.10
+        version: 0.1.10
 
 packages:
 
@@ -198,6 +216,10 @@ packages:
 
   '@types/readable-stream@4.0.25':
     resolution: {integrity: sha512-7GsxL8Wd5X3jh73/qgW7WCnbBvGSdD8U3E4Jiuus3/8I+PN20DtlkJtwFhr/sImXfDDQ2Z03i/9wNiIF3TVSsw==}
+
+  '@typesafe-ai/sdk@0.7.0':
+    resolution: {integrity: sha512-Yg3OZArCQMJx98ut8QVkhx3rFo9ON7pz8Hjzv8c3FGz69Sk8jYftLOlz+Wf6kq6jol/1m08aBnjRAzJr2x3GoQ==}
+    engines: {node: '>=22'}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -584,6 +606,9 @@ packages:
   minecraft-protocol@1.68.0:
     resolution: {integrity: sha512-atAGg/fhIVqyK6voWvED5QA+4ah65PNwpoDnkHawWhVzQbwFii77KcF6OpsU/Xlbi0o9GpihHiPdORSxXEA+Ug==}
     engines: {node: '>=22'}
+
+  mineflayer-pathfinder@2.4.5:
+    resolution: {integrity: sha512-Jh3JnUgRLwhMh2Dugo4SPza68C41y+NPP5sdsgxRu35ydndo70i1JJGxauVWbXrpNwIxYNztUw78aFyb7icw8g==}
 
   mineflayer@4.39.0:
     resolution: {integrity: sha512-HptE++dIG55aRmT7GIj3QComS6MhEXstE3RJSuYMFhLtobsQhJJsqWmY9ObfiLp84MrS6Q4Em+wUH0rVQMXLJw==}
@@ -1001,6 +1026,8 @@ snapshots:
     dependencies:
       '@types/node': 20.19.43
 
+  '@typesafe-ai/sdk@0.7.0': {}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
 
@@ -1303,6 +1330,18 @@ snapshots:
       yggdrasil: 1.8.0
     transitivePeerDependencies:
       - encoding
+      - supports-color
+
+  mineflayer-pathfinder@2.4.5:
+    dependencies:
+      minecraft-data: 3.119.0
+      prismarine-block: 1.23.0
+      prismarine-entity: 2.6.0
+      prismarine-item: 1.18.0
+      prismarine-nbt: 2.8.0
+      prismarine-physics: 1.11.1
+      vec3: 0.1.10
+    transitivePeerDependencies:
       - supports-color
 
   mineflayer@4.39.0:

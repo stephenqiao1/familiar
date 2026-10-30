@@ -1,4 +1,6 @@
 import mineflayer, { type Bot } from "mineflayer";
+import { pathfinder } from "mineflayer-pathfinder";
+import { createDefaultMovements } from "./movements.js";
 
 export interface ConnectOptions {
   host: string;
@@ -11,6 +13,7 @@ export function connect({ host, port, username }: ConnectOptions): Promise<Bot> 
   const where = `${host}:${port} as ${username}`;
   // Errors are reported through the rejection below (and by the app after spawn), not printed by mineflayer.
   const bot = mineflayer.createBot({ host, port, username, hideErrors: true });
+  bot.loadPlugin(pathfinder);
 
   return new Promise((resolve, reject) => {
     const fail = (message: string) => {
@@ -20,6 +23,7 @@ export function connect({ host, port, username }: ConnectOptions): Promise<Bot> 
     };
     const onSpawn = () => {
       cleanup();
+      bot.pathfinder.setMovements(createDefaultMovements(bot));
       resolve(bot);
     };
     const onKicked = (reason: unknown) => fail(`kicked (${formatReason(reason)})`);

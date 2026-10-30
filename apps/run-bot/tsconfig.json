@@ -4,12 +4,27 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"],
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ],
   "references": [
-    { "path": "../../packages/contracts" },
-    { "path": "../../packages/core" },
-    { "path": "../../packages/engine-echo" },
-    { "path": "../../packages/minecraft" }
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/engine-echo"
+    },
+    {
+      "path": "../../packages/engine-jev"
+    },
+    {
+      "path": "../../packages/minecraft"
+    }
   ]
 }

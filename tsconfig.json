@@ -1,10 +1,23 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/contracts" },
-    { "path": "packages/core" },
-    { "path": "packages/engine-echo" },
-    { "path": "packages/minecraft" },
-    { "path": "apps/run-bot" }
+    {
+      "path": "packages/contracts"
+    },
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/engine-echo"
+    },
+    {
+      "path": "packages/engine-jev"
+    },
+    {
+      "path": "packages/minecraft"
+    },
+    {
+      "path": "apps/run-bot"
+    }
   ]
 }

@@ -6,4 +6,6 @@ import type { State } from "./state.js";
 export interface DecisionEngine {
   name: string;
   decide(state: State, questions: Question[]): Promise<Answer[]>;
+  /** The engine's own timing of its most recent decide call, if it measures one. */
+  lastTiming?(): { totalMs: number } | null;
 }

@@ -4,8 +4,15 @@
     "composite": false,
     "noEmit": true,
     "paths": {
-      "@familiar/*": ["./packages/*/src/index.ts"]
-    }
+      "@familiar/*": [
+        "./packages/*/src/index.ts"
+      ]
+    },
+    "allowImportingTsExtensions": true
   },
-  "include": ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts", "apps/*/scripts/**/*.ts"]
+  "include": [
+    "packages/*/src/**/*.test.ts",
+    "apps/*/src/**/*.test.ts",
+    "apps/*/scripts/**/*.ts"
+  ]
 }
