@@ -3,7 +3,7 @@ import { ACTION_QUESTION_ID } from "./questions/build-action-question.js";
 import { NO_TARGET, TARGET_QUESTION_ID } from "./questions/build-target-question.js";
 
 /**
- * M0–M2 rule (the Arbiter replaces this in M3): the next_action choice picks the skill; anything
+ * The next_action choice picks the skill; anything
  * else means keep going. The "target" choice is attached when it isn't "none" and
  * `acceptsTarget(skill, target)` says the skill can use it.
  */

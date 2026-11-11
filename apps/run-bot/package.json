@@ -4,10 +4,15 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@familiar/arbiter": "workspace:*",
     "@familiar/contracts": "workspace:*",
     "@familiar/core": "workspace:*",
+    "@familiar/engine-claude": "workspace:*",
     "@familiar/engine-echo": "workspace:*",
     "@familiar/engine-jev": "workspace:*",
-    "@familiar/minecraft": "workspace:*"
+    "@familiar/minecraft": "workspace:*",
+    "@familiar/region-instinct": "workspace:*",
+    "@familiar/region-neocortex": "workspace:*",
+    "@familiar/region-reflex": "workspace:*"
   }
 }

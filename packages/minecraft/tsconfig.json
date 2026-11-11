@@ -4,7 +4,21 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../contracts" }]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../contracts"
+    },
+    {
+      "path": "../region-instinct"
+    },
+    {
+      "path": "../region-reflex"
+    }
+  ]
 }

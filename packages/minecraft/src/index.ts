@@ -41,3 +41,4 @@ export { parseTarget, type Target } from "./target.js";
 export { walkTo } from "./walk-to.js";
 export { bestWeapon, bestWeaponOf } from "./weapons.js";
 export { assignWood, type WoodJob } from "./wood-plan.js";
+export * from "./brain/index.js";

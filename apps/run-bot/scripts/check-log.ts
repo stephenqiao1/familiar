@@ -39,14 +39,14 @@ for (let i = 1; i < entries.length; i++) {
 }
 if (entries[0] && entries[0].tick !== 0) problems.push(`ticks 0–${entries[0].tick - 1}: missing (tick errored)`);
 
-const latencies = entries.map((e) => e.engineLatencyMs);
+const latencies = entries.map((e) => e.decideMs);
 const span = entries.length > 1 ? (entries.at(-1)!.timestamp - entries[0]!.timestamp) / 1000 : 0;
 
 console.log(`file:     ${file}`);
 console.log(`lines:    ${lines.length} (${entries.length} valid JSON)`);
 console.log(`ticks:    ${entries.length} over ${span.toFixed(1)}s`);
 if (latencies.length) {
-  console.log(`latency:  median ${median(latencies).toFixed(3)}ms, max ${Math.max(...latencies).toFixed(3)}ms`);
+  console.log(`decide:   median ${median(latencies).toFixed(3)}ms, max ${Math.max(...latencies).toFixed(3)}ms`);
 }
 console.log(problems.length ? `errors:\n  ${problems.join("\n  ")}` : "errors:   none");
 process.exitCode = problems.length ? 1 : 0;

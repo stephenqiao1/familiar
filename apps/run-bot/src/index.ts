@@ -7,7 +7,7 @@ async function main(): Promise<void> {
   const command = parseCommand(process.argv.slice(2));
   switch (command.kind) {
     case "loop":
-      return runLoop(command.server, command.engine);
+      return runLoop(command.server, command.brain);
     case "skills":
       return listSkills();
     case "skill":

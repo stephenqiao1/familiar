@@ -15,6 +15,6 @@
     "@familiar/contracts": "workspace:*"
   },
   "devDependencies": {
-    "@familiar/engine-echo": "workspace:*"
+    "@familiar/arbiter": "workspace:*"
   }
 }

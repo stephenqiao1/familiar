@@ -1,9 +1,11 @@
 export type { Action } from "./action.js";
 export type { Answer, ChoiceAnswer, NoulAnswer, ScoreAnswer } from "./answer.js";
+export type { Arbiter, Candidate, Goal, Proposal, Region, RegionOutput, Signal, Workspace } from "./brain.js";
 export type { DecisionEngine } from "./engine.js";
 export type { FirstSeen } from "./first-seen.js";
+export type { Plan, Planner, PlanRequest } from "./planner.js";
 export type { Choice, Noul, Question, Score } from "./question.js";
 export type { RunningSkill, Skill, SkillResult } from "./skill.js";
 export type { SkillEvent } from "./skill-event.js";
 export type { State } from "./state.js";
-export type { TickLog } from "./tick-log.js";
+export type { RegionLog, TickLog } from "./tick-log.js";

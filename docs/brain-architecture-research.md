@@ -130,11 +130,13 @@ apps/run-bot/
 
 Log every tick's proposals, urgencies, the winner, and the reason. Then you can answer questions like "how often did reflexes override the cortex?" or "what happens to survival with the neocortex removed?" — the brain equivalent of lesion studies.
 
-## 4. Decisions for you
+## 4. Decisions made
 
-1. **Should the LLM choose actions directly, or only set goals?** Recommendation: goals only (closer to the brain, and LLMs are slow).
-2. **How should the Arbiter decide?** Recommendation: start with "highest urgency, ties to the faster layer"; make it learnable later.
-3. **Should regions be packages or files?** Recommendation: files inside `minecraft/regions/` for now; only split into packages if they get large.
+1. The LLM only plans and sets goals.
+2. The Arbiter picks the highest urgency; ties go to the faster layer.
+3. Each region is its own package.
+
+This is now built; see [brain.md](brain.md).
 
 ## 5. Suggested order of work
 

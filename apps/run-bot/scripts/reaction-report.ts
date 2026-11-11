@@ -26,16 +26,15 @@ console.log("Reactions to new hostile mobs");
 if (sightings.length === 0) console.log("  none seen");
 for (const { seen, from } of sightings) console.log(`  ${describeReaction(seen, from)}`);
 
-const jev = ticks.map((t) => t.engineLatencyMs);
+const instinct = ticks.map(instinctMs);
 const total = ticks.map(tickTime);
 const minutes = (ticks.at(-1)!.timestamp - ticks[0]!.timestamp) / 60_000;
-const encodeLogged = ticks.every((t) => t.encodeMs !== undefined);
 
 console.log("\nWhole run");
-console.log(`  engine latency     median ${ms(percentile(jev, 0.5))}  p90 ${ms(percentile(jev, 0.9))}`);
+console.log(`  instinct latency   median ${ms(percentile(instinct, 0.5))}  p90 ${ms(percentile(instinct, 0.9))}`);
 console.log(
   `  total tick time    median ${ms(percentile(total, 0.5))}  p90 ${ms(percentile(total, 0.9))}` +
-    (encodeLogged ? "  (encode + decide + start skill)" : "  (encode time not in this log: decide + start skill only)"),
+    "  (encode + decide + start skill)",
 );
 console.log(`  calls per minute   ${minutes > 0 ? (ticks.length / minutes).toFixed(1) : "n/a"}  over ${(minutes * 60).toFixed(0)}s`);
 
@@ -45,7 +44,7 @@ function describeReaction(seen: FirstSeen, from: number): string {
   for (const t of ticks.slice(from)) {
     const start = t.skillEvents?.find((e) => e.type === "started" && REACTIONS.has(e.skill) && e.timestamp >= seen.timestamp);
     if (start) {
-      return `${what} -> ${start.skill} started after ${start.timestamp - seen.timestamp} ms (tick ${t.tick}, engine latency ${ms(t.engineLatencyMs)})`;
+      return `${what} -> ${start.skill} started after ${start.timestamp - seen.timestamp} ms (tick ${t.tick}, via ${t.winner?.region ?? "?"}, decided in ${ms(t.decideMs)})`;
     }
   }
   return `${what} -> no attack or flee before the log ends`;
@@ -54,8 +53,13 @@ function describeReaction(seen: FirstSeen, from: number): string {
 /** Encode, plus decide and (if a skill started this tick) starting it; otherwise encode + decide. */
 function tickTime(t: TickLog): number {
   const started = t.skillEvents?.find((e) => e.type === "started" && e.timestamp >= t.timestamp);
-  const decideAndAct = started ? Math.max(started.timestamp - t.timestamp, t.engineLatencyMs) : t.engineLatencyMs;
-  return (t.encodeMs ?? 0) + decideAndAct;
+  const decideAndAct = started ? Math.max(started.timestamp - t.timestamp, t.decideMs) : t.decideMs;
+  return t.encodeMs + decideAndAct;
+}
+
+/** How long the instinct region took this tick (0 if it didn't run). */
+function instinctMs(t: TickLog): number {
+  return t.regions.find((r) => r.region === "instinct")?.ms ?? 0;
 }
 
 function percentile(values: number[], p: number): number {

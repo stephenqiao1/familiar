@@ -48,10 +48,13 @@ const log = {
   tick: 0,
   timestamp: 0,
   state,
-  questions,
-  answers,
-  engineLatencyMs: 1,
+  encodeMs: 1,
+  decideMs: 1,
+  regions: [{ region: "instinct", layer: 1, ms: 1, proposals: [{ action: { skill: "mine" }, urgency: 0.5, reason: "ore nearby" }] }],
+  winner: null,
   action: { keepGoing: true },
+  goal: null,
+  signals: {},
 } satisfies TickLog;
 
 describe("contracts", () => {

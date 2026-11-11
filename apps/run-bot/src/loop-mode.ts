@@ -1,25 +1,10 @@
 import type { Action, SkillEvent, TickLog } from "@familiar/contracts";
-import {
-  answersToAction,
-  buildActionQuestion,
-  buildTargetQuestion,
-  createLogger,
-  createLoop,
-  createSkillExecutor,
-  defaultLogPath,
-} from "@familiar/core";
-import {
-  createFirstSeenTracker,
-  encodeState,
-  isSignificantChange,
-  listTargets,
-  MINER_CONTEXT,
-  minecraftSkills,
-  minerQuestions,
-  type MinecraftCtx,
-} from "@familiar/minecraft";
-import type { EngineName, ServerArgs } from "./args.js";
-import { createEngine } from "./create-engine.js";
+import { highestUrgency } from "@familiar/arbiter";
+import { createBrainLoop, createLogger, createSkillExecutor, defaultLogPath } from "@familiar/core";
+import { createFirstSeenTracker, encodeState, isSignificantChange, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
+import type { BrainArgs, ServerArgs } from "./args.js";
+import { createBrain } from "./brain.js";
+import { createEngine, createPlanner } from "./create-engine.js";
 import { formatSkillEvent } from "./format-skill-event.js";
 import { formatTick } from "./format-tick.js";
 import { joinWithBase } from "./join.js";
@@ -27,27 +12,27 @@ import { joinWithBase } from "./join.js";
 const ROLE = "miner";
 
 /**
- * The decision loop: each tick encodes the state, asks the engine the Miner's questions in one
- * request, and starts the chosen skill (with the chosen target, if the skill accepts it) through
- * the skill executor if it differs from the one running. The other answers are only logged for now.
+ * The decision loop: each tick encodes the state, runs the brain's regions, and starts the
+ * winning proposal's skill through the skill executor if it differs from the one running.
  * Runs until Ctrl+C.
  */
-export async function runLoop(server: ServerArgs, engineName: EngineName): Promise<void> {
+export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   const { bot, base } = await joinWithBase(server);
-  const engine = createEngine(engineName);
-  const logPath = defaultLogPath(ROLE);
-  console.log(`Engine: ${engine.name}. Logging to ${logPath}`);
-
+  const engine = createEngine(brainArgs.engine);
+  const planner = createPlanner(brainArgs.planner);
   const ctx: MinecraftCtx = { bot, base, log: (msg) => console.log(`    ${msg}`) };
+  const regions = createBrain({ engine, planner, skills: minecraftSkills, ctx }, brainArgs.regions);
+  const logPath = defaultLogPath(ROLE);
+  console.log(`Regions: ${regions.map((r) => r.name).join(", ")}. Engine: ${engine.name}. Planner: ${planner.name}.`);
+  console.log(`Logging to ${logPath}`);
+
   const pendingEvents: SkillEvent[] = [];
-  const executor = createSkillExecutor({
-    skills: minecraftSkills,
-    ctx,
-    onEvent(event) {
-      pendingEvents.push(event);
-      console.log(`  ${formatSkillEvent(event)}`);
-    },
-  });
+  const onEvent = (event: SkillEvent) => {
+    pendingEvents.push(event);
+    loop.workspace.addEvent(event);
+    console.log(`  ${formatSkillEvent(event)}`);
+  };
+  const executor = createSkillExecutor({ skills: minecraftSkills, ctx, onEvent });
 
   /** Starts the chosen skill unless it is the one already running. */
   async function act(action: Action): Promise<void> {
@@ -55,30 +40,22 @@ export async function runLoop(server: ServerArgs, engineName: EngineName): Promi
     await executor.start(action.skill, action.target);
   }
 
-  /** Whether `skill` can run with `target` right now. */
-  const acceptsTarget = (skill: string, target: string) =>
-    minecraftSkills.find((s) => s.name === skill)?.canRun(ctx, target) ?? false;
-
   const fileLogger = createLogger(logPath);
   const firstSeen = createFirstSeenTracker();
   let encoded = 0;
-  const loop = createLoop({
-    engine,
-    questions: (state) =>
-      minerQuestions({
-        nextAction: buildActionQuestion(minecraftSkills, ctx, MINER_CONTEXT),
-        target: buildTargetQuestion(listTargets(state)),
-      }),
-    toAction: (answers) => answersToAction(answers, acceptsTarget),
+  const loop = createBrainLoop({
+    regions,
+    arbiter: highestUrgency,
     getState: () => encodeState(bot, encoded++, { base, current: executor.current() }),
+    current: () => executor.current(),
     onAction: act,
     isSignificantChange,
     logger: {
       log(entry: TickLog) {
         const seen = firstSeen(entry.state);
-        const withEvents: TickLog = { ...entry, skillEvents: pendingEvents.splice(0), ...(seen.length ? { firstSeen: seen } : {}) };
-        fileLogger.log(withEvents);
-        console.log(formatTick(withEvents));
+        const full: TickLog = { ...entry, skillEvents: pendingEvents.splice(0), ...(seen.length ? { firstSeen: seen } : {}) };
+        fileLogger.log(full);
+        console.log(formatTick(full));
       },
     },
   });

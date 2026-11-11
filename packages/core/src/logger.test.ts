@@ -10,10 +10,13 @@ function entry(tick: number): TickLog {
     tick,
     timestamp: 1000 + tick,
     state: { schemaVersion: 1, tick, timestamp: 1000 + tick, data: {} },
-    questions: [],
-    answers: [],
-    engineLatencyMs: 0,
+    encodeMs: 0,
+    decideMs: 0,
+    regions: [],
+    winner: null,
     action: { keepGoing: true },
+    goal: null,
+    signals: {},
   };
 }
 

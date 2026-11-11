@@ -6,49 +6,46 @@ const base: TickLog = {
   tick: 3,
   timestamp: 0,
   state: { schemaVersion: 2, tick: 3, timestamp: 0, data: {} },
-  questions: [],
-  answers: [],
-  engineLatencyMs: 184.4,
-  action: { skill: "idle" },
+  encodeMs: 1,
+  decideMs: 184.4,
+  regions: [],
+  winner: null,
+  action: { keepGoing: true },
+  goal: null,
+  signals: {},
 };
 
 describe("formatTick", () => {
-  it("shows the next_action answer, latency and skill events", () => {
+  it("shows the action, the winning region and skill events", () => {
     const entry: TickLog = {
       ...base,
-      answers: [{ kind: "choice", id: "next_action", choice: "attack", probabilities: { attack: 0.76, flee: 0.24 }, confidence: 0.68 }],
-      action: { skill: "attack" },
+      action: { skill: "attack", target: "entity:42" },
+      winner: { region: "reflex", layer: 0, urgency: 1, reason: "zombie 4 blocks away", action: { skill: "attack", target: "entity:42" } },
       skillEvents: [
         { skill: "idle", type: "interrupted", timestamp: 0 },
-        { skill: "attack", type: "started", timestamp: 0 },
+        { skill: "attack", target: "entity:42", type: "started", timestamp: 0 },
       ],
-    };
-    expect(formatTick(entry)).toBe("tick 3  attack p=0.76 conf=0.68  184ms  | idle interrupted, attack started");
-  });
-
-  it("shows the other answers compactly, and skill targets", () => {
-    const entry: TickLog = {
-      ...base,
-      answers: [
-        { kind: "choice", id: "next_action", choice: "attack", probabilities: { attack: 0.5 }, confidence: 0.4 },
-        { kind: "choice", id: "target", choice: "entity:42", probabilities: { "entity:42": 0.9 }, confidence: 0.9 },
-        { kind: "noul", id: "in_danger", value: 0.812 },
-        { kind: "score", id: "mining_spot_quality", score: 3.46, confidence: 0.5 },
-      ],
-      skillEvents: [{ skill: "attack", target: "entity:42", type: "started", timestamp: 0 }],
     };
     expect(formatTick(entry)).toBe(
-      "tick 3  attack p=0.50 conf=0.40  184ms  target=entity:42 in_danger=0.81 mining_spot_quality=3.5  | attack (entity:42) started",
+      'tick 3  attack (entity:42) <- reflex 1.00 "zombie 4 blocks away"  184ms  | idle interrupted, attack (entity:42) started',
     );
   });
 
-  it("falls back to the action without a next_action answer", () => {
-    expect(formatTick(base)).toBe("tick 3  idle  184ms");
-    expect(formatTick({ ...base, action: { keepGoing: true } })).toBe("tick 3  keep going  184ms");
+  it("shows signals, a newly arrived goal, and region errors", () => {
+    const entry: TickLog = {
+      ...base,
+      signals: { in_danger: { value: 0.812, source: "instinct", at: 0 } },
+      goal: { text: "find iron", steps: [], reason: "", setBy: "neocortex", setAt: 0 },
+      regions: [
+        { region: "instinct", layer: 1, ms: 1500, proposals: [], error: "timed out after 1500 ms" },
+        { region: "neocortex", layer: 2, background: true, ms: 4000, proposals: [] },
+      ],
+    };
+    expect(formatTick(entry)).toBe('tick 3  keep going  184ms  in_danger=0.81  new goal="find iron"  ! instinct: timed out after 1500 ms');
   });
 
   it("shows failure reasons", () => {
     const entry: TickLog = { ...base, skillEvents: [{ skill: "eat", type: "failed", reason: "cannot run", timestamp: 0 }] };
-    expect(formatTick(entry)).toBe("tick 3  idle  184ms  | eat failed (cannot run)");
+    expect(formatTick(entry)).toBe("tick 3  keep going  184ms  | eat failed (cannot run)");
   });
 });

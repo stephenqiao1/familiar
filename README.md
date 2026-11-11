@@ -1,6 +1,8 @@
 # Familiar
 
-Familiar is a set of AI players for Minecraft, each with a role (the first is the Miner), driven by a fast decision model called Jev. It is a pnpm monorepo of small packages that talk only through shared types in `@familiar/contracts`. Only `@familiar/minecraft` touches Minecraft or Mineflayer; the core and every decision engine stay game-agnostic so they can be reused in other projects.
+Familiar is a set of AI players for Minecraft, each with a role (the first is the Miner). Each bot has a brain built from separate parts (regions): **reflex** (plain rules), **instinct** (the fast decision model Jev) and **neocortex** (an LLM that sets goals). The parts share one workspace and an arbiter picks what to do. See [docs/brain.md](docs/brain.md).
+
+It is a pnpm monorepo of small packages that talk only through shared types in `@familiar/contracts`. Only `@familiar/minecraft` touches Minecraft or Mineflayer; the core, the brain regions and every decision engine stay game-agnostic so they can be reused in other projects.
 
 ## Requirements
 
@@ -32,4 +34,6 @@ java -Xmx2G -jar server.jar nogui
 pnpm start -- --host localhost --port 25565 --name Miner
 ```
 
-The bot joins as `Miner` and prints one line per tick (tick, action, engine latency). Every tick is also appended to `logs/miner-<timestamp>.jsonl`. Press Ctrl+C to stop; the bot logs out cleanly.
+Add `--engine jev` to use Jev for instinct, `--planner claude` to use Claude for the neocortex (needs `ANTHROPIC_API_KEY` in `.env`), and `--regions reflex,instinct` to run with only some regions.
+
+The bot joins as `Miner` and prints one line per tick (tick, action, which region won and why, time to decide). Every tick is also appended to `logs/miner-<timestamp>.jsonl`. Press Ctrl+C to stop; the bot logs out cleanly.

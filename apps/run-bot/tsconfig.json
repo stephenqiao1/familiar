@@ -12,10 +12,16 @@
   ],
   "references": [
     {
+      "path": "../../packages/arbiter"
+    },
+    {
       "path": "../../packages/contracts"
     },
     {
       "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/engine-claude"
     },
     {
       "path": "../../packages/engine-echo"
@@ -25,6 +31,15 @@
     },
     {
       "path": "../../packages/minecraft"
+    },
+    {
+      "path": "../../packages/region-instinct"
+    },
+    {
+      "path": "../../packages/region-neocortex"
+    },
+    {
+      "path": "../../packages/region-reflex"
     }
   ]
 }

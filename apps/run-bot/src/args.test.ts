@@ -8,17 +8,22 @@ describe("parseCommand", () => {
     expect(parseCommand(["--", "--host", "example", "--port", "25566", "--name", "Bob"])).toEqual({
       kind: "loop",
       server: { host: "example", port: 25566, name: "Bob" },
-      engine: "echo",
+      brain: { engine: "echo", planner: "echo" },
     });
   });
 
   it("defaults to localhost:25565 as Miner", () => {
-    expect(parseCommand([])).toEqual({ kind: "loop", server: local, engine: "echo" });
+    expect(parseCommand([])).toEqual({ kind: "loop", server: local, brain: { engine: "echo", planner: "echo" } });
   });
 
-  it("picks the decision engine", () => {
-    expect(parseCommand(["--engine", "jev"])).toMatchObject({ kind: "loop", engine: "jev" });
+  it("picks the decision engine and planner", () => {
+    expect(parseCommand(["--engine", "jev", "--planner", "claude"])).toMatchObject({ kind: "loop", brain: { engine: "jev", planner: "claude" } });
     expect(() => parseCommand(["--engine", "gpt"])).toThrow(/Unknown --engine/);
+    expect(() => parseCommand(["--planner", "gpt"])).toThrow(/Unknown --planner/);
+  });
+
+  it("reads --regions as a comma-separated list", () => {
+    expect(parseCommand(["--regions", "reflex, instinct"])).toMatchObject({ brain: { regions: ["reflex", "instinct"] } });
   });
 
   it("lists skills", () => {

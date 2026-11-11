@@ -8,14 +8,26 @@ export interface ServerArgs {
 
 export type EngineName = "echo" | "jev";
 const ENGINES: readonly EngineName[] = ["echo", "jev"];
+export type PlannerName = "echo" | "claude";
+const PLANNERS: readonly PlannerName[] = ["echo", "claude"];
+
+/** How to build the brain for the decision loop. */
+export interface BrainArgs {
+  engine: EngineName;
+  planner: PlannerName;
+  /** Only these regions (for lesion experiments). Unset: all of them. */
+  regions?: string[];
+}
 
 export type Command =
-  | { kind: "loop"; server: ServerArgs; engine: EngineName }
+  | { kind: "loop"; server: ServerArgs; brain: BrainArgs }
   | { kind: "skills" }
   | { kind: "skill"; server: ServerArgs; skill: string; target?: string; interruptAfterMs?: number; lingerMs?: number };
 
 /**
  * (no command) [--engine echo|jev]                   run the decision loop (default engine: echo)
+ *   [--planner echo|claude]                          what the neocortex plans with (default: echo)
+ *   [--regions reflex,instinct,...]                  run only these regions (default: all)
  * skills                                             list skills
  * skill <name> [--target t] [--interrupt-after s]    run one skill
  *   [--linger s]                                     stay connected s seconds after it ends
@@ -33,6 +45,8 @@ export function parseCommand(argv: string[]): Command {
       "interrupt-after": { type: "string" },
       linger: { type: "string" },
       engine: { type: "string", default: "echo" },
+      planner: { type: "string", default: "echo" },
+      regions: { type: "string" },
     },
   });
   const [command, skill, ...extra] = positionals;
@@ -44,7 +58,12 @@ export function parseCommand(argv: string[]): Command {
     if (!ENGINES.includes(values.engine as EngineName)) {
       throw new Error(`Unknown --engine "${values.engine}". Use: ${ENGINES.join(" | ")}`);
     }
-    return { kind: "loop", server, engine: values.engine as EngineName };
+    if (!PLANNERS.includes(values.planner as PlannerName)) {
+      throw new Error(`Unknown --planner "${values.planner}". Use: ${PLANNERS.join(" | ")}`);
+    }
+    const brain: BrainArgs = { engine: values.engine as EngineName, planner: values.planner as PlannerName };
+    if (values.regions !== undefined) brain.regions = values.regions.split(",").map((r) => r.trim()).filter(Boolean);
+    return { kind: "loop", server, brain };
   }
   if (command === "skills" && skill === undefined) return { kind: "skills" };
   if (command === "skill" && skill !== undefined && extra.length === 0) {

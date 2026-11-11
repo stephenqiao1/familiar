@@ -5,6 +5,9 @@
       "path": "packages/contracts"
     },
     {
+      "path": "packages/arbiter"
+    },
+    {
       "path": "packages/core"
     },
     {
@@ -12,6 +15,18 @@
     },
     {
       "path": "packages/engine-jev"
+    },
+    {
+      "path": "packages/engine-claude"
+    },
+    {
+      "path": "packages/region-reflex"
+    },
+    {
+      "path": "packages/region-instinct"
+    },
+    {
+      "path": "packages/region-neocortex"
     },
     {
       "path": "packages/minecraft"
