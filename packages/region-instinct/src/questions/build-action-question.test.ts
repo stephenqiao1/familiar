@@ -27,6 +27,12 @@ describe("buildActionQuestion", () => {
     expect(q.prompt).not.toContain("broken");
   });
 
+  it("always offers the running skill, marked as in progress, even if it could not be started now", () => {
+    const q = buildActionQuestion(skills, { hungry: false }, undefined, "eat");
+    expect(q.options).toEqual(["idle", "eat"]);
+    expect(q.prompt).toContain("- eat: eat description (in progress: choose it to keep going)");
+  });
+
   it("includes a skill once it can run", () => {
     const q = buildActionQuestion(skills, { hungry: true });
     expect(q.options).toEqual(["idle", "eat"]);

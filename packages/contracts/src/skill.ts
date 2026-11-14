@@ -9,6 +9,10 @@ export interface Skill<Ctx> {
   name: string;
   /** One line. Later used to build Jev's option list. */
   description: string;
+  /** Can do harm or put the agent in danger (attacking, entering danger). Patience holds these back. */
+  risky?: boolean;
+  /** Needs care while it runs (fighting, handling storage). Focus rises for these. */
+  demanding?: boolean;
   canRun(ctx: Ctx, target?: string): boolean;
   /** Must stop promptly when `signal` aborts. */
   run(ctx: Ctx, target: string | undefined, signal: AbortSignal): Promise<SkillResult>;

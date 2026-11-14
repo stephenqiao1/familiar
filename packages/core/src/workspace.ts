@@ -49,8 +49,12 @@ export function createWorkspace(): WorkspaceStore {
         get recentEvents() {
           return [...events];
         },
-        setGoal({ text, steps, reason }) {
-          goal = { text, steps: [...steps], reason, setBy: region, setAt: Date.now() };
+        setGoal({ text, steps, reason, wants = [], watchFor = [], stepsDone = 0, stepDoneAt = null }) {
+          const copies = { steps: [...steps], wants: wants.map((w) => ({ ...w })), watchFor: [...watchFor] };
+          goal = { text, reason, ...copies, stepsDone, stepDoneAt, setBy: region, setAt: Date.now() };
+        },
+        clearGoal() {
+          goal = null;
         },
         setSignal(name, value) {
           signals[name] = { value: clamp01(value), source: region, at: Date.now() };

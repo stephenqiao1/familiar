@@ -24,7 +24,8 @@ export interface BrainLoopOptions {
   logger: { log(entry: TickLog): void };
   /** Shared memory. Default: a new one (reachable as `loop.workspace`). */
   workspace?: WorkspaceStore;
-  intervalMs?: number;
+  /** Time between regular ticks, in ms; a function is asked before each one. Default: 500. */
+  intervalMs?: number | (() => number);
   /** Where tick errors go. Default: console.error. */
   onError?: (error: unknown, tick: number) => void;
   /**
@@ -139,7 +140,8 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
   function startDueBackground(): void {
     const now = performance.now();
     for (const [region, bg] of background) {
-      if (bg.running || now - bg.lastStart < region.everyMs) continue;
+      const due = now - bg.lastStart >= region.everyMs || region.dueNow?.(workspace.viewFor(region.name));
+      if (bg.running || !due) continue;
       bg.lastStart = now;
       bg.running = runRegion(region).then((log) => {
         bg.proposals = log.proposals;
@@ -166,7 +168,7 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
     let decideMs = 0;
     const settleEarly = () => {
       if (early || !arbiter.settledEarly) return;
-      early = arbiter.settledEarly(candidates, [...pending].map((r) => r.layer));
+      early = arbiter.settledEarly(candidates, [...pending].map((r) => r.layer), workspace.viewFor("arbiter"));
       if (!early) return;
       decideMs = performance.now() - started;
       const action = early.action;
@@ -184,7 +186,7 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       }),
     );
 
-    const winner = early ?? arbiter.pick(candidates);
+    const winner = early ?? arbiter.pick(candidates, workspace.viewFor("arbiter"));
     const action: Action = winner?.action ?? { keepGoing: true };
     if (acting) {
       await acting;
@@ -223,7 +225,7 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
 
   function scheduleRegular(): void {
     clearTimeout(regular);
-    if (!stopped) regular = setTimeout(() => startTick(), intervalMs);
+    if (!stopped) regular = setTimeout(() => startTick(), typeof intervalMs === "function" ? intervalMs() : intervalMs);
   }
 
   function checkForChange(): void {

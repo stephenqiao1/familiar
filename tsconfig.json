@@ -26,7 +26,13 @@
       "path": "packages/region-instinct"
     },
     {
-      "path": "packages/region-neocortex"
+      "path": "packages/region-prefrontal"
+    },
+    {
+      "path": "packages/neuromodulators"
+    },
+    {
+      "path": "packages/memory"
     },
     {
       "path": "packages/minecraft"

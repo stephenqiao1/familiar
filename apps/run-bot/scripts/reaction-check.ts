@@ -27,7 +27,7 @@ await sleep(EVERY_MS / 2);
 for (let i = 1; i <= EVENTS; i++) {
   rcon("kill @e[type=zombie]");
   await sleep(1500);
-  const reply = rcon(`execute at Miner run summon ${ZOMBIE}`);
+  const reply = rcon(`execute at Player run summon ${ZOMBIE}`);
   console.log(`zombie ${i}/${EVENTS}: ${reply}`);
   await sleep(EVERY_MS - 1500);
 }

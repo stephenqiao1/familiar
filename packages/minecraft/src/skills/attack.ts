@@ -16,6 +16,8 @@ const SWING_MS = 650; // just over a sword's attack cooldown
 /** Fights a mob until it dies, escapes past 16 blocks, or the bot's health gets low. */
 export const attack: Skill<MinecraftCtx> = {
   name: "attack",
+  risky: true,
+  demanding: true,
   description: "Fight a mob (default: the nearest hostile) with the best weapon available.",
 
   canRun(ctx, target) {

@@ -1,5 +1,5 @@
 // M1 check: runs every skill through the CLI, to completion and with --interrupt-after 2,
-// and checks (via a spectator bot) that the Miner stops moving and digging within 1 s of an interrupt.
+// and checks (via a spectator bot) that the Player stops moving within 1 s of an interrupt.
 // Needs: the local test server (docker container familiar-mc) and a fresh `pnpm build`.
 //   node apps/run-bot/scripts/skill-check.ts
 import { spawn } from "node:child_process";
@@ -7,7 +7,7 @@ import { moduleRuleViolations } from "./skill-check/module-rule.ts";
 import { startObserver, type Observer } from "./skill-check/observer.ts";
 import { rcon } from "./skill-check/rcon.ts";
 import { runCli, type CliRun } from "./skill-check/run-cli.ts";
-import { ATTACK_SPOTS, FLEE_START, FLEE_ZOMBIE, OBSERVER_SPOT, setUpTestWorld, summonZombie, TUNNEL_START } from "./skill-check/test-world.ts";
+import { ATTACK_SPOTS, FLEE_START, FLEE_ZOMBIE, OBSERVER_SPOT, setUpTestWorld, summonZombie } from "./skill-check/test-world.ts";
 
 const INTERRUPT_AFTER_S = 2;
 const LINGER_S = 2;
@@ -19,6 +19,8 @@ interface Step {
   skill: string;
   mode: Mode;
   target?: string;
+  /** What to carry, for the storage skills (item:count,...). */
+  wants?: string;
   /** Overrides the default --interrupt-after for this run (position steps use it to wait). */
   interruptAfterS?: number;
   before?: () => void;
@@ -38,23 +40,21 @@ const freshZombie = (at: string) => () => {
   rcon("kill @e[type=zombie]");
   summonZombie(at);
 };
-/** Keeps the observer hovering just above the Miner, so it stays in tracking range. */
-const followMiner = () => rcon("execute as Observer at Miner run tp @s ~ ~6 ~");
+/** Keeps the observer hovering just above the Player, so it stays in tracking range. */
+const followPlayer = () => rcon("execute as Observer at Player run tp @s ~ ~6 ~");
 const night = () => {
   rcon("difficulty peaceful");
   rcon("time set 14000");
 };
 
 const PLAN: Step[] = [
-  { skill: "craft_pickaxe", mode: "complete" },
-  { skill: "craft_pickaxe", mode: "interrupt", skipIfFast: true },
   { skill: "go_to", mode: "interrupt", target: "pos:-28,63,40" },
   { skill: "go_to", mode: "complete", target: "pos:-40,63,10" },
   { skill: "return_to_base", mode: "interrupt" },
   { skill: "return_to_base", mode: "complete" },
   { skill: "idle", mode: "interrupt" },
   // Get hungry: stand still for 8 s with a strong hunger effect.
-  { skill: "idle", mode: "position", interruptAfterS: 14, onStarted: () => rcon("effect give Miner hunger 12 100 true") },
+  { skill: "idle", mode: "position", interruptAfterS: 14, onStarted: () => rcon("effect give Player hunger 12 100 true") },
   { skill: "eat", mode: "interrupt" },
   { skill: "eat", mode: "complete" },
   { skill: "attack", mode: "complete", before: () => summonZombie(ATTACK_SPOTS[0]!) },
@@ -65,22 +65,17 @@ const PLAN: Step[] = [
   { skill: "go_to", mode: "position", target: FLEE_START, before: () => rcon("kill @e[type=zombie]") },
   { skill: "flee", mode: "interrupt", before: freshZombie(FLEE_ZOMBIE) },
   { skill: "return_to_base", mode: "position", before: () => rcon("kill @e[type=zombie]") },
-  { skill: "mine_block", mode: "complete", target: "nearest:iron_ore" },
-  { skill: "mine_block", mode: "interrupt", target: "nearest:iron_ore", skipIfFast: true },
-  { skill: "go_to", mode: "position", target: TUNNEL_START },
-  { skill: "dig_tunnel", mode: "interrupt", target: "west" },
-  { skill: "dig_tunnel", mode: "complete", target: "west" },
-  { skill: "place_torch", mode: "complete" },
-  { skill: "place_torch", mode: "interrupt", skipIfFast: true },
-  { skill: "deposit_items", mode: "interrupt" },
-  { skill: "deposit_items", mode: "complete" },
+  // Stand-in for a goal: keep the sword and some food, store the rest; then fetch it back.
+  { skill: "deposit_items", mode: "interrupt", wants: "stone_sword:1,cooked_beef:2" },
+  { skill: "deposit_items", mode: "complete", wants: "stone_sword:1,cooked_beef:2" },
+  { skill: "take_items", mode: "complete", wants: "stone_sword:1,cooked_beef:6" },
   { skill: "sleep", mode: "interrupt", before: night },
   { skill: "sleep", mode: "complete", before: night },
 ];
 
 async function main(): Promise<void> {
   keepAwake();
-  const observer = await startObserver("Miner", OBSERVER_SPOT);
+  const observer = await startObserver("Player", OBSERVER_SPOT);
   console.log("Setting up the test world...");
   await setUpTestWorld().catch((error: unknown) => {
     observer.quit();
@@ -102,11 +97,12 @@ async function main(): Promise<void> {
       step.before?.();
       const args = ["skill", step.skill, "--linger", String(LINGER_S)];
       if (step.target) args.push("--target", step.target);
+      if (step.wants) args.push("--wants", step.wants);
       const interruptAfter = step.interruptAfterS ?? (step.mode === "interrupt" ? INTERRUPT_AFTER_S : undefined);
       if (interruptAfter !== undefined) args.push("--interrupt-after", String(interruptAfter));
 
       const run = await runCli(args, () => {
-        followMiner();
+        followPlayer();
         step.onStarted?.();
       });
       const result = measure(run, observer);
@@ -137,7 +133,7 @@ function keepAwake(): void {
 function measure(run: CliRun, observer: Observer): Result {
   const durationMs = run.startedAt !== undefined && run.endedAt !== undefined ? run.endedAt - run.startedAt : null;
   const sightings = observer.sightingsBetween(run.startedAt ?? run.exitedAt, run.exitedAt);
-  // No sightings at all means the observer couldn't see the Miner: the stop time is unknown.
+  // No sightings at all means the observer couldn't see the Player: the stop time is unknown.
   if (run.interruptAt === undefined || sightings === 0) return { run, durationMs, stopMs: null, sightings };
   const last = observer.lastActivitySince(run.interruptAt);
   return { run, durationMs, stopMs: last === null ? 0 : last - run.interruptAt, sightings };

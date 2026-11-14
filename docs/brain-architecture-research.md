@@ -28,7 +28,7 @@ Five well-known ideas fit this project directly.
 
 **a. Layers that run at different speeds (Brooks' subsumption architecture, 1986).**
 Fast, simple layers sit underneath slow, smart ones. A fast layer can override a slow one in an emergency. This matches the brain: spinal reflexes (milliseconds) → brainstem/limbic drives (fast) → cortex (slow, deliberate).
-→ *Reflex (rules) runs every tick, Instinct (Jev) runs every tick or two, Neocortex (LLM) runs every few seconds in the background.*
+→ *Reflex (rules) runs every tick, Instinct (Jev) runs every tick or two, Prefrontal cortex (LLM) runs every few seconds in the background.*
 
 **b. One shared "workspace" everyone reads and writes (Global Workspace Theory — Baars 1988, Dehaene).**
 Brain regions don't call each other directly. They post information to a shared stage, and what wins attention gets broadcast to everyone.
@@ -55,7 +55,7 @@ ACT-R is literally: separate modules, each with a small "buffer" others can read
              └───────▲───────────────▲───────────────────▲───────────────┘
                      │ read/write    │ read/write        │ read/write
                ┌─────┴────┐    ┌─────┴─────┐      ┌──────┴──────┐
-               │  Reflex  │    │ Instinct  │      │  Neocortex  │   ← "regions"
+               │  Reflex  │    │ Instinct  │      │ Prefrontal  │   ← "regions"
                │ (rules)  │    │  (Jev)    │      │   (LLM)     │
                │ every tick│   │ every tick│      │ every ~5 s  │
                └─────┬────┘    └─────┬─────┘      └──────┬──────┘
@@ -72,7 +72,7 @@ ACT-R is literally: separate modules, each with a small "buffer" others can read
 
 ```ts
 interface Region {
-  name: string;                 // "reflex", "instinct", "neocortex"
+  name: string;                 // "reflex", "instinct", "prefrontal"
   everyMs: number;              // how often it runs
   run(ws: Workspace): Promise<Proposal[]> | Proposal[];
 }
@@ -94,7 +94,7 @@ interface Proposal {
 |---|---|---|---|
 | Reflex | Plain TS rules | state | Proposals with urgency 1.0 in emergencies (lava, mob close, low health) |
 | Instinct | Jev | state, `goal`, drives | Skill proposals each tick; drive levels (fear, hunger) |
-| Neocortex | LLM | state, recent events, failures | `goal` / plan; occasionally a proposal |
+| Prefrontal cortex | LLM | state, recent events, failures | `goal` / plan; occasionally a proposal |
 
 Engines (Jev, LLM, echo) stay as interchangeable *tools* a region uses, not regions themselves. So you could try "Instinct powered by a small LLM" by changing one line.
 
@@ -102,7 +102,7 @@ Engines (Jev, LLM, echo) stay as interchangeable *tools* a region uses, not regi
 
 - **One file lists the brain:** e.g. `apps/run-bot/src/brain.ts`
   ```ts
-  export const brain = [reflex(rules), instinct(jev), neocortex(llm)];
+  export const brain = [reflex(rules), instinct(jev), prefrontal(llm)];
   ```
 - **Add a region:** create one file, add one line to that list.
 - **Turn a region off for an experiment:** delete or comment one line (or a `--regions reflex,instinct` flag).
@@ -121,14 +121,14 @@ packages/
     regions/
       reflex.ts       rules → proposals
       instinct.ts     Jev questions → proposals
-      neocortex.ts    LLM → goals
+      prefrontal.ts    LLM → goals
 apps/run-bot/
   brain.ts          the one list of regions
 ```
 
 ### Built-in research value
 
-Log every tick's proposals, urgencies, the winner, and the reason. Then you can answer questions like "how often did reflexes override the cortex?" or "what happens to survival with the neocortex removed?" — the brain equivalent of lesion studies.
+Log every tick's proposals, urgencies, the winner, and the reason. Then you can answer questions like "how often did reflexes override the cortex?" or "what happens to survival with the prefrontal cortex removed?" — the brain equivalent of lesion studies.
 
 ## 4. Decisions made
 
@@ -142,7 +142,7 @@ This is now built; see [brain.md](brain.md).
 
 1. Add `Region`, `Proposal`, `Workspace` types and the Arbiter (no behaviour change: wrap today's Jev setup as the only region).
 2. Pull the reflex rules out of the prompt/skills into a Reflex region.
-3. Add the LLM engine and Neocortex region writing goals; feed `goal` into Jev's questions.
+3. Add the LLM engine and Prefrontal cortex region writing goals; feed `goal` into Jev's questions.
 4. Add per-region logging and a `--regions` flag for lesion experiments.
 
 ## References

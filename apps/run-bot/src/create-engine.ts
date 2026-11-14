@@ -9,7 +9,7 @@ export function createEngine(name: EngineName): DecisionEngine {
   return name === "jev" ? new JevEngine() : new EchoEngine();
 }
 
-/** The planner the neocortex region uses. */
+/** The planner the prefrontal region uses. */
 export function createPlanner(name: PlannerName): Planner {
   return name === "claude" ? new ClaudePlanner() : new EchoPlanner();
 }

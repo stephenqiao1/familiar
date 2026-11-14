@@ -1,0 +1,21 @@
+export {
+  createMemory,
+  distance,
+  FACT_SUPPORT,
+  feelingNear,
+  memoryNotes,
+  STARTING_STRENGTH,
+  STRONG,
+  type ConsolidationPhase,
+  type Fact,
+  type KnownPlace,
+  type Memory,
+  type MemoryEvent,
+  type MemoryKind,
+  type MemoryOptions,
+  type MemoryStore,
+  type Outcome,
+  type Place,
+  type RecallQuery,
+} from "./memory.js";
+export { createMemoryRegion, type MemoryMoment, type MemoryRegionOptions, type MemoryTrigger } from "./memory-region.js";

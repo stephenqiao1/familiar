@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import type { ItemWant } from "@familiar/contracts";
 
 export interface ServerArgs {
   host: string;
@@ -22,15 +23,16 @@ export interface BrainArgs {
 export type Command =
   | { kind: "loop"; server: ServerArgs; brain: BrainArgs }
   | { kind: "skills" }
-  | { kind: "skill"; server: ServerArgs; skill: string; target?: string; interruptAfterMs?: number; lingerMs?: number };
+  | { kind: "skill"; server: ServerArgs; skill: string; target?: string; interruptAfterMs?: number; lingerMs?: number; wants?: ItemWant[] };
 
 /**
  * (no command) [--engine echo|jev]                   run the decision loop (default engine: echo)
- *   [--planner echo|claude]                          what the neocortex plans with (default: echo)
+ *   [--planner echo|claude]                          what the prefrontal cortex plans with (default: echo)
  *   [--regions reflex,instinct,...]                  run only these regions (default: all)
  * skills                                             list skills
  * skill <name> [--target t] [--interrupt-after s]    run one skill
  *   [--linger s]                                     stay connected s seconds after it ends
+ *   [--wants bread:8,torch:16]                       what to carry (for take_items, deposit_items)
  * Any command also takes --host, --port and --name.
  */
 export function parseCommand(argv: string[]): Command {
@@ -40,10 +42,11 @@ export function parseCommand(argv: string[]): Command {
     options: {
       host: { type: "string", default: "localhost" },
       port: { type: "string", default: "25565" },
-      name: { type: "string", default: "Miner" },
+      name: { type: "string", default: "Player" },
       target: { type: "string" },
       "interrupt-after": { type: "string" },
       linger: { type: "string" },
+      wants: { type: "string" },
       engine: { type: "string", default: "echo" },
       planner: { type: "string", default: "echo" },
       regions: { type: "string" },
@@ -71,6 +74,7 @@ export function parseCommand(argv: string[]): Command {
     if (values.target !== undefined) result.target = values.target;
     if (values["interrupt-after"] !== undefined) result.interruptAfterMs = seconds(values["interrupt-after"], "--interrupt-after") * 1000;
     if (values.linger !== undefined) result.lingerMs = seconds(values.linger, "--linger") * 1000;
+    if (values.wants !== undefined) result.wants = parseWants(values.wants);
     return result;
   }
   throw new Error(`Unknown command "${positionals.join(" ")}". Use: skills | skill <name> [--target t] [--interrupt-after s]`);
@@ -80,4 +84,14 @@ function seconds(raw: string, flag: string): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) throw new Error(`Invalid ${flag} "${raw}"`);
   return n;
+}
+
+/** "bread:8,torch:16" → [{ item: "bread", count: 8 }, { item: "torch", count: 16 }]. */
+function parseWants(raw: string): ItemWant[] {
+  return raw.split(",").map((part) => {
+    const [item, count] = part.split(":").map((s) => s.trim());
+    const n = Number(count);
+    if (!item || !Number.isInteger(n) || n < 1) throw new Error(`Invalid --wants "${part}". Use item:count, e.g. bread:8`);
+    return { item, count: n };
+  });
 }

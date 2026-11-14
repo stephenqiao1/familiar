@@ -50,7 +50,7 @@ const log = {
   state,
   encodeMs: 1,
   decideMs: 1,
-  regions: [{ region: "instinct", layer: 1, ms: 1, proposals: [{ action: { skill: "mine" }, urgency: 0.5, reason: "ore nearby" }] }],
+  regions: [{ region: "instinct", layer: 1, ms: 1, proposals: [{ action: { skill: "eat" }, urgency: 0.5, reason: "hungry" }] }],
   winner: null,
   action: { keepGoing: true },
   goal: null,

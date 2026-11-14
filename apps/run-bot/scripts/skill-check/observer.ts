@@ -1,4 +1,4 @@
-// A spectator bot that watches the Miner and timestamps every move and dig it sees.
+// A spectator bot that watches the Player and timestamps every move and dig it sees.
 import { connect } from "@familiar/minecraft";
 import { rcon } from "./rcon.ts";
 

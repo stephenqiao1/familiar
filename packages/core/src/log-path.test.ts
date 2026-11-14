@@ -5,6 +5,6 @@ import { defaultLogPath } from "./log-path.js";
 describe("defaultLogPath", () => {
   it("builds logs/<role>-<timestamp>.jsonl", () => {
     const at = new Date("2026-10-30T12:00:00.000Z");
-    expect(defaultLogPath("miner", at)).toBe(join("logs", "miner-2026-10-30T12-00-00.000Z.jsonl"));
+    expect(defaultLogPath("player", at)).toBe(join("logs", "player-2026-10-30T12-00-00.000Z.jsonl"));
   });
 });

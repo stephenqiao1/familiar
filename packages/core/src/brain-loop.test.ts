@@ -122,7 +122,7 @@ describe("createBrainLoop", () => {
     function planner(everyMs: number, delayMs: number) {
       const runs: number[] = [];
       const region: Region = {
-        name: "neocortex",
+        name: "prefrontal",
         layer: 2,
         everyMs,
         async run(ws: Workspace) {
@@ -155,8 +155,8 @@ describe("createBrainLoop", () => {
       expect(runs).toEqual([500]);
       expect(logs.map((l) => l.tick)).toEqual([0, 1, 2, 3]);
       expect(seen).toEqual([undefined, undefined, undefined, "goal 1"]);
-      expect(logs[3]!.goal).toMatchObject({ text: "goal 1", setBy: "neocortex" });
-      expect(logs[3]!.regions).toContainEqual(expect.objectContaining({ region: "neocortex", background: true }));
+      expect(logs[3]!.goal).toMatchObject({ text: "goal 1", setBy: "prefrontal" });
+      expect(logs[3]!.regions).toContainEqual(expect.objectContaining({ region: "prefrontal", background: true }));
     });
 
     it("runs again once everyMs has passed", async () => {

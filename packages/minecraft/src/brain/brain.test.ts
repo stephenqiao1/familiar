@@ -3,28 +3,16 @@ import type { Skill, State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { SCHEMA_VERSION } from "../encode/encode-state.js";
 import type { MinecraftStateData } from "../encode/state-data.js";
+import { fakeData } from "../encode/state.test-helper.js";
+import { createChestMemory } from "../chest-memory.js";
 import { describeSituation } from "./situation.js";
 import { eatWhenStarving, fightOrFlight } from "./reflexes.js";
 import { withGoal } from "./instinct.js";
 
+/** A bot 12 blocks from base carrying a sword and bread. */
 function data(over: { self?: Partial<MinecraftStateData["self"]>; mobs?: MinecraftStateData["nearby"]["mobs"] } = {}): MinecraftStateData {
-  return {
-    time: { isNight: false, lightLevel: 15 },
-    self: {
-      health: 20,
-      food: 20,
-      heldItem: "stone_pickaxe",
-      bestWeapon: "stone_sword",
-      pickaxeDurabilityPct: 80,
-      inventoryFullPct: 10,
-      torches: 4,
-      foodItems: 2,
-      distanceToBase: 12,
-      ...over.self,
-    },
-    nearby: { ores: [{ id: "pos:1,2,3", type: "iron_ore", dist: 5 }], hazards: [], mobs: over.mobs ?? [] },
-    current: null,
-  };
+  const self = { heldItem: "stone_sword", bestWeapon: "stone_sword", inventoryFullPct: 10, foodItems: 2, inventory: { stone_sword: 1, bread: 2 }, distanceToBase: 12 };
+  return fakeData({ self: { ...self, ...over.self }, nearby: { mobs: over.mobs ?? [] } });
 }
 
 function workspace(d: MinecraftStateData) {
@@ -69,21 +57,43 @@ describe("withGoal", () => {
   it("adds the goal and steps to the context", () => {
     const store = workspace(data());
     expect(withGoal("ctx", store.viewFor("i"))).toBe("ctx");
-    store.viewFor("neocortex").setGoal({ text: "find iron", steps: ["dig down", "branch mine"], reason: "" });
-    expect(withGoal("ctx", store.viewFor("i"))).toBe("ctx\nCurrent goal: find iron Steps: dig down; branch mine.");
+    store.viewFor("prefrontal").setGoal({ text: "build a shelter", steps: ["gather wood", "build walls"], reason: "" });
+    expect(withGoal("ctx", store.viewFor("i"))).toBe("ctx\nCurrent goal: build a shelter Steps: gather wood; build walls.");
+  });
+
+  it("marks the planner's goal less important as its weight falls, and drops it while the planner is offline", () => {
+    const store = workspace(data());
+    store.viewFor("prefrontal").setGoal({ text: "build", steps: [], reason: "" });
+    const alarm = store.viewFor("noradrenaline");
+    alarm.setSignal("planner_weight", 0.5);
+    expect(withGoal("ctx", store.viewFor("i"))).toBe("ctx\nCurrent goal (less important right now than staying safe): build");
+    alarm.setSignal("planner_offline", 1);
+    expect(withGoal("ctx", store.viewFor("i"))).toBe("ctx");
+    // A retreat goal set by the alarm system itself always counts.
+    alarm.setGoal({ text: "retreat", steps: [], reason: "" });
+    expect(withGoal("ctx", store.viewFor("i"))).toBe("ctx\nCurrent goal: retreat");
   });
 });
 
 describe("describeSituation", () => {
   it("describes the bot, its surroundings, recent events and abilities", () => {
     const store = workspace(data({ mobs: [zombie] }));
-    store.addEvent({ skill: "mine_block", type: "failed", reason: "no pickaxe", timestamp: 0 });
+    store.addEvent({ skill: "eat", type: "failed", reason: "no food", timestamp: 0 });
     const skill = { name: "flee", description: "Run away." } as Skill<unknown>;
-    const text = describeSituation(store.viewFor("neocortex"), [skill]);
+    const text = describeSituation(store.viewFor("prefrontal"), [skill]);
     expect(text).toContain("Health 20/20, food 20/20 (2 food items).");
-    expect(text).toContain("Ores nearby: iron_ore at 5.");
     expect(text).toContain("Mobs nearby: hostile zombie at 4.");
-    expect(text).toContain("Recent: mine_block failed (no pickaxe).");
+    expect(text).toContain("Recent: eat failed (no food).");
     expect(text).toContain("- flee: Run away.");
+    expect(text).toContain("Carrying: 1 stone_sword, 2 bread.");
+  });
+
+  it("describes what the remembered chests held, base chest first", () => {
+    const chests = createChestMemory();
+    chests.remember("pos:9,9,9", { torch: 16 }, 20);
+    chests.remember("pos:1,2,3", { bread: 8 }, 10);
+    const text = describeSituation(workspace(data()).viewFor("prefrontal"), [], { chests, baseChest: "pos:1,2,3" });
+    expect(text).toContain("Storage (as last seen):\n- base chest pos:1,2,3: 8 bread\n- chest pos:9,9,9: 16 torch");
+    expect(describeSituation(workspace(data()).viewFor("prefrontal"), [], { chests: createChestMemory(), baseChest: "pos:1,2,3" })).toContain("Storage: no chest opened yet");
   });
 });

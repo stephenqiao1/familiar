@@ -1,17 +1,17 @@
 import { Vec3 } from "vec3";
 import type { EncodableBot } from "./encodable-bot.js";
 import { posId, scanBlocks } from "./scan-blocks.js";
+import { DEFAULT_LIMIT } from "./scan-mobs.js";
 import type { Nearby } from "./state-data.js";
 
 const RADIUS = 8;
-const LIMIT = 10;
 const BIG_DROP = 3;
 const FIRE = new Set(["lava", "fire", "soul_fire"]);
 
-/** Lava, fire, and drops of 3+ blocks within 8 blocks, nearest 10. */
-export function scanHazards(bot: EncodableBot): Nearby[] {
+/** Lava, fire, and drops of 3+ blocks within 8 blocks, the nearest `limit`. */
+export function scanHazards(bot: EncodableBot, limit = DEFAULT_LIMIT): Nearby[] {
   const me = bot.entity.position;
-  const blocks = scanBlocks(bot, (name) => FIRE.has(name), RADIUS, LIMIT).map((pos) => ({
+  const blocks = scanBlocks(bot, (name) => FIRE.has(name), RADIUS, limit).map((pos) => ({
     pos,
     type: bot.blockAt(pos)?.name === "lava" ? "lava" : "fire",
   }));
@@ -19,7 +19,7 @@ export function scanHazards(bot: EncodableBot): Nearby[] {
   return hazards
     .map((h) => ({ id: posId(h.pos), type: h.type, dist: Math.round(h.pos.distanceTo(me)) }))
     .sort((a, b) => a.dist - b.dist)
-    .slice(0, LIMIT);
+    .slice(0, limit);
 }
 
 /**

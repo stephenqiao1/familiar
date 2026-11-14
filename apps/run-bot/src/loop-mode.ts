@@ -1,15 +1,61 @@
 import type { Action, SkillEvent, TickLog } from "@familiar/contracts";
-import { highestUrgency } from "@familiar/arbiter";
-import { createBrainLoop, createLogger, createSkillExecutor, defaultLogPath } from "@familiar/core";
-import { createFirstSeenTracker, encodeState, isSignificantChange, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
+import { createBrainLoop, createLogger, createSkillExecutor, createWorkspace, defaultLogPath } from "@familiar/core";
+import { feelingNear, type Place } from "@familiar/memory";
+import {
+  createFirstSeenTracker,
+  encodeState,
+  isSignificantChange,
+  minecraftSkills,
+  posId,
+  situationOf,
+  withTrust,
+  type MinecraftCtx,
+  type MinecraftStateData,
+  type RememberedLookup,
+} from "@familiar/minecraft";
+import {
+  ALARM_SIGNAL,
+  chanceOfPayoff,
+  createAttention,
+  createPersistence,
+  FOCUS_SIGNAL,
+  INTERRUPT_SIGNAL,
+  NEUTRAL_BUDGET,
+  REWARD_SIGNAL,
+  trustOf,
+} from "@familiar/neuromodulators";
 import type { BrainArgs, ServerArgs } from "./args.js";
-import { createBrain } from "./brain.js";
+import { loadBotConfig } from "./bot-config.js";
+import { createArbiter, createBrain, patienceOf } from "./brain.js";
 import { createEngine, createPlanner } from "./create-engine.js";
+import {
+  chestsFile,
+  loadChests,
+  loadMemories,
+  loadNovelty,
+  loadScorebook,
+  memoriesFile,
+  noveltyFile,
+  saveChests,
+  saveMemories,
+  saveNovelty,
+  saveScorebook,
+  scorebookFile,
+} from "./memory-store.js";
 import { formatSkillEvent } from "./format-skill-event.js";
 import { formatTick } from "./format-tick.js";
 import { joinWithBase } from "./join.js";
 
-const ROLE = "miner";
+const ROLE = "player";
+/** How often to save what the bot has learned and remembers, so a crash loses at most this much. */
+const SAVE_LEARNING_MS = 30_000;
+/** The regular time between ticks, and the shortest it gets at full alarm. */
+const TICK_MS = 500;
+const FASTEST_TICK_MS = 150;
+/** Above this alarm the bot attends only to threats. */
+const NARROW_ABOVE = 0.6;
+/** One in-game day, in ms. */
+const GAME_DAY_MS = 1_200_000;
 
 /**
  * The decision loop: each tick encodes the state, runs the brain's regions, and starts the
@@ -17,36 +63,160 @@ const ROLE = "miner";
  * Runs until Ctrl+C.
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
+  // Read the settings first, so a bad bots.json stops the bot before it joins.
+  const { personality, patience, noradrenaline, focus: focusSettings, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner);
-  const ctx: MinecraftCtx = { bot, base, log: (msg) => console.log(`    ${msg}`) };
-  const regions = createBrain({ engine, planner, skills: minecraftSkills, ctx }, brainArgs.regions);
+  const scorebook = await loadScorebook(scorebookFile(server.name));
+  const novelty = await loadNovelty(noveltyFile(server.name));
+  const chests = await loadChests(chestsFile(server.name));
+  const memory = await loadMemories(memoriesFile(server.name), { halfLifeMs: memorySettings.halfLifeDays * GAME_DAY_MS });
+  /** Keeps the fixed known places up to date: base chest, bed, and every chest the bot has opened. */
+  const namePlaces = () => {
+    const at = (p: { x: number; y: number; z: number }): Place => ({ x: p.x, y: p.y, z: p.z, dimension: bot.game.dimension });
+    memory.namePlace("base chest", at(base.chest));
+    memory.namePlace("bed", at(base.bed));
+    for (const id of Object.keys(chests.entries())) {
+      const [x, y, z] = id.replace("pos:", "").split(",").map(Number) as [number, number, number];
+      if (id !== posId(base.chest)) memory.namePlace(`chest ${id}`, at({ x, y, z }));
+    }
+  };
+  namePlaces();
+  const workspace = createWorkspace();
+  const view = workspace.viewFor("run-bot");
+  const focus = () => view.signals[FOCUS_SIGNAL]?.value ?? focusSettings.resting;
+
+  // Focus, effect a: a remembered chest is believed only while trust in it (fading with age) is
+  // above focus. Otherwise it reads as unknown, so the bot goes and checks. Every lookup is logged.
+  const lookups: RememberedLookup[] = [];
+  const trustHalfLifeMs = focusSettings.trustHalfLifeMinutes * 60_000;
+  const believedChests =
+    focusSettings.sensesVsMemory > 0 ? withTrust(chests, (seenAt) => trustOf(Date.now() - seenAt, trustHalfLifeMs) > focus(), (lookup) => lookups.push(lookup)) : chests;
+  // Focus, effect b: how much nearby detail and how many memories are taken in.
+  const attention = createAttention();
+  const budget = () => (focusSettings.attention > 0 ? attention.budget(focus(), Date.now()) : NEUTRAL_BUDGET);
+  let swamped: string | null = null;
+  /** What the focus region logs each tick: remembered values used or rejected, and attention warnings. */
+  const focusNotes = () => {
+    const remembered = lookups.splice(0);
+    const warning = swamped;
+    swamped = null;
+    return { ...(remembered.length ? { remembered } : {}), ...(warning ? { attention: warning } : {}) };
+  };
+
+  const ctx: MinecraftCtx = {
+    bot,
+    base,
+    wants: () => workspace.goal()?.wants ?? [],
+    chests: believedChests,
+    log: (msg) => console.log(`    ${msg}`),
+  };
+  const storage = { chests: believedChests, baseChest: posId(base.chest) };
+  const persistence = createPersistence({
+    patience: () => patienceOf(view, patience),
+    chanceOf: (skill) => chanceOfPayoff(scorebook.get(situationOf(view.state), skill)),
+    strength: patience.persistence,
+  });
+  const regions = createBrain(
+    {
+      engine,
+      planner,
+      scorebook,
+      novelty,
+      personality,
+      patience,
+      noradrenaline,
+      focus: focusSettings,
+      focusNotes,
+      memoriesForPlanner: () => budget().remembered,
+      memory,
+      persistence,
+      storage,
+      skills: minecraftSkills,
+      ctx,
+    },
+    brainArgs.regions,
+  );
   const logPath = defaultLogPath(ROLE);
   console.log(`Regions: ${regions.map((r) => r.name).join(", ")}. Engine: ${engine.name}. Planner: ${planner.name}.`);
+  console.log(`Personality: resting DA ${personality.restingDA}, learning step ${personality.learningRate}, novelty bonus ${personality.noveltyBonus}.`);
+  console.log(
+    `Patience: resting ${patience.resting}, time constant ${patience.timeConstantSeconds}s, effects: persistence ${patience.persistence}, horizon ${patience.horizon}, brake ${patience.brake}.`,
+  );
+  console.log(
+    `Alarm: gain ${noradrenaline.alarmGain}, fades in ${noradrenaline.alarmDecaySeconds}s. Search: resting ${noradrenaline.searchResting}. Memories: ${memory.entries().memories.length} remembered.`,
+  );
+  console.log(`Focus: resting ${focusSettings.resting}, trust in remembered things halves every ${focusSettings.trustHalfLifeMinutes} min.`);
   console.log(`Logging to ${logPath}`);
 
   const pendingEvents: SkillEvent[] = [];
   const onEvent = (event: SkillEvent) => {
     pendingEvents.push(event);
-    loop.workspace.addEvent(event);
+    workspace.addEvent(event);
+    persistence.observe(event);
     console.log(`  ${formatSkillEvent(event)}`);
   };
-  const executor = createSkillExecutor({ skills: minecraftSkills, ctx, onEvent });
+  const executor = createSkillExecutor({ skills: minecraftSkills, ctx, onEvent, defaultTimeoutMs: persistence.backstopMs() });
 
-  /** Starts the chosen skill unless it is the one already running. */
+  const alarm = () => view.signals[ALARM_SIGNAL]?.value ?? 0;
+  let lastReward = 0;
+  let lastInterrupt = 0;
+  /** The skill that was running when this tick's state was read. */
+  let runningAtTick: string | undefined;
+  /**
+   * Every tick: gives up on the running skill if its time is up (a reward restarts its clock);
+   * otherwise starts the chosen skill unless it is the one already running. An alarm interrupt
+   * stops the running skill when nothing new takes its place.
+   */
   async function act(action: Action): Promise<void> {
-    if (!("skill" in action) || action.skill === executor.current()?.skill) return;
+    const now = Date.now();
+    const reward = view.signals[REWARD_SIGNAL];
+    if (reward && reward.at !== lastReward && reward.value > 0) persistence.progress(now);
+    lastReward = reward?.at ?? lastReward;
+    const gaveUp = persistence.giveUpReason(now);
+    if (gaveUp) return executor.abandon(gaveUp);
+    const interrupt = view.signals[INTERRUPT_SIGNAL];
+    const interrupted = interrupt !== undefined && interrupt.at !== lastInterrupt && interrupt.value > 0;
+    lastInterrupt = interrupt?.at ?? lastInterrupt;
+    if (!("skill" in action) || action.skill === executor.current()?.skill) return interrupted ? executor.interrupt() : undefined;
+    // The choice was to keep going with a skill that has finished since the tick began: it is done, not due again.
+    if (action.skill === runningAtTick && executor.current() === null) return;
     await executor.start(action.skill, action.target);
   }
 
   const fileLogger = createLogger(logPath);
   const firstSeen = createFirstSeenTracker();
   let encoded = 0;
+  let deaths = 0;
+  bot.on("death", () => {
+    deaths++;
+  });
   const loop = createBrainLoop({
     regions,
-    arbiter: highestUrgency,
-    getState: () => encodeState(bot, encoded++, { base, current: executor.current() }),
+    workspace,
+    arbiter: createArbiter({ scorebook, personality, patience, persistence, skills: minecraftSkills }),
+    getState: () => {
+      const { x, y, z } = bot.entity.position.floored();
+      const limit = budget().nearby;
+      runningAtTick = executor.current()?.skill;
+      const state = encodeState(bot, encoded++, {
+        base,
+        current: executor.current(),
+        deaths,
+        memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
+        narrow: noradrenaline.focus > 0 && alarm() > NARROW_ABOVE,
+        limit,
+      });
+      if (focusSettings.attention > 0) {
+        const { nearby } = state.data as unknown as MinecraftStateData;
+        const hitLimit = [nearby.hazards, nearby.mobs, nearby.blocks, nearby.players].some((list) => list.length >= limit);
+        swamped = attention.report(hitLimit, Date.now()) ?? swamped;
+      }
+      return state;
+    },
+    // Alarm shortens the time between ticks, down to the fastest the loop allows.
+    intervalMs: () => TICK_MS - (noradrenaline.focus > 0 ? alarm() : 0) * (TICK_MS - FASTEST_TICK_MS),
     current: () => executor.current(),
     onAction: act,
     isSignificantChange,
@@ -60,6 +230,17 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     },
   });
 
+  const saveLearning = () => {
+    namePlaces();
+    return Promise.all([
+      saveScorebook(scorebook, scorebookFile(server.name)),
+      saveNovelty(novelty, noveltyFile(server.name)),
+      saveChests(chests, chestsFile(server.name)),
+      saveMemories(memory, memoriesFile(server.name)),
+    ]).catch((error) => console.error(`Could not save what the bot learned: ${error}`));
+  };
+  const saveTimer = setInterval(() => void saveLearning(), SAVE_LEARNING_MS);
+
   let stopping = false;
   async function shutdown(reason: string, exitCode: number): Promise<void> {
     if (stopping) return;
@@ -67,6 +248,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     console.log(`Stopping (${reason})...`);
     await loop.stop();
     await executor.interrupt();
+    clearInterval(saveTimer);
+    await saveLearning();
     await fileLogger.close();
     bot.quit();
     process.exitCode = exitCode;

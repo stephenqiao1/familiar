@@ -100,13 +100,24 @@ describe("createSkillExecutor", () => {
     expect(executor.current()).toBeNull();
   });
 
+  it("abandons a running skill as failed with the reason given", async () => {
+    const walk = pendingSkill("walk");
+    const { executor, types } = setup([walk.skill]);
+    await executor.start("walk");
+    await executor.abandon("gave up after 90 s");
+    expect(types()).toEqual(["walk:started", "walk:failed(gave up after 90 s)"]);
+    expect(executor.current()).toBeNull();
+    await executor.abandon("nothing running");
+    expect(types()).toHaveLength(2);
+  });
+
   it("reports a throwing skill as failed and keeps working", async () => {
     const boom: Skill<Ctx> = {
       name: "boom",
       description: "always throws",
       canRun: () => true,
       run: async () => {
-        throw new Error("pickaxe broke");
+        throw new Error("tool broke");
       },
     };
     const walk = pendingSkill("walk");
@@ -116,7 +127,7 @@ describe("createSkillExecutor", () => {
     await tick();
     await executor.start("walk");
 
-    expect(types()).toEqual(["boom:started", "boom:failed(pickaxe broke)", "walk:started"]);
+    expect(types()).toEqual(["boom:started", "boom:failed(tool broke)", "walk:started"]);
   });
 
   it("reports an unknown skill as failed without stopping the running one", async () => {
@@ -133,7 +144,7 @@ describe("createSkillExecutor", () => {
   it("reports a skill that cannot run as failed", async () => {
     const mine: Skill<Ctx> = {
       name: "mine",
-      description: "needs a pickaxe",
+      description: "needs a tool",
       canRun: (ctx) => ctx.canMine,
       run: async () => ({ status: "done" }),
     };

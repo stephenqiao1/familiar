@@ -2,27 +2,17 @@ import { describe, expect, it } from "vitest";
 import type { State } from "@familiar/contracts";
 import { isSignificantChange } from "./is-significant-change.js";
 import type { MinecraftStateData } from "./state-data.js";
+import { fakeState } from "./state.test-helper.js";
 
 type Patch = { health?: number; inventoryFullPct?: number; mobs?: MinecraftStateData["nearby"]["mobs"]; current?: MinecraftStateData["current"] };
 
+/** A half-full bot that is idling unless told otherwise. */
 function state(p: Patch = {}): State {
-  const data: MinecraftStateData = {
-    time: { isNight: false, lightLevel: 15 },
-    self: {
-      health: p.health ?? 20,
-      food: 20,
-      heldItem: null,
-      bestWeapon: null,
-      pickaxeDurabilityPct: null,
-      inventoryFullPct: p.inventoryFullPct ?? 50,
-      torches: 0,
-      foodItems: 0,
-      distanceToBase: 0,
-    },
-    nearby: { ores: [], hazards: [], mobs: p.mobs ?? [] },
+  return fakeState({
+    self: { health: p.health ?? 20, inventoryFullPct: p.inventoryFullPct ?? 50 },
+    nearby: { mobs: p.mobs ?? [] },
     current: p.current === undefined ? { skill: "idle", target: null, secondsRunning: 3 } : p.current,
-  };
-  return { schemaVersion: 2, tick: 0, timestamp: 0, data: { ...data } };
+  });
 }
 
 const zombie = (id: number, dist: number) => ({ id: `entity:${id}`, type: "zombie", dist, hostile: true });

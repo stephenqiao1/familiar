@@ -1,5 +1,5 @@
 import type { Answer, DecisionEngine, Proposal, Question, Region, Workspace } from "@familiar/contracts";
-import { answersToAction } from "./answers-to-action.js";
+import { actionFor } from "./answers-to-action.js";
 import { ACTION_QUESTION_ID } from "./questions/build-action-question.js";
 
 export interface InstinctOptions {
@@ -44,26 +44,32 @@ export function createInstinctRegion(options: InstinctOptions): Region {
 export interface ActionProposalOptions {
   /** Whether a skill can use a target; targets it can't use are dropped. */
   acceptsTarget?: (skill: string, target: string) => boolean;
-  /** Urgency given at full confidence. Keeping it below 1 leaves room for reflexes. Default: 0.8. */
+  /** Urgency given at probability 1. Keeping it below 1 leaves room for reflexes. Default: 0.8. */
   maxUrgency?: number;
+  /** Most options to propose. Default: 3. */
+  maxOptions?: number;
+  /** Options less likely than this are left out. Default: 0.1. */
+  minProbability?: number;
 }
 
 /**
- * One proposal from the next_action (and target) answers, with urgency = confidence × maxUrgency.
- * None if next_action wasn't answered.
+ * The engine's most likely next_action options (and the target, for skills that accept it), one
+ * proposal each, with urgency = probability × maxUrgency. Offering a few options, not just the
+ * top one, lets the arbiter weigh them. None if next_action wasn't answered.
  */
-export function actionProposal(answers: Answer[], { acceptsTarget, maxUrgency = 0.8 }: ActionProposalOptions = {}): Proposal[] {
+export function actionProposal(answers: Answer[], options: ActionProposalOptions = {}): Proposal[] {
+  const { acceptsTarget, maxUrgency = 0.8, maxOptions = 3, minProbability = 0.1 } = options;
   const choice = answers.find((a) => a.kind === "choice" && a.id === ACTION_QUESTION_ID);
   if (choice?.kind !== "choice") return [];
-  const action = answersToAction(answers, acceptsTarget);
-  const p = choice.probabilities[choice.choice] ?? 0;
-  return [
-    {
-      action,
-      urgency: choice.confidence * maxUrgency,
-      reason: `chose ${choice.choice} (p=${p.toFixed(2)}, conf=${choice.confidence.toFixed(2)})`,
-    },
-  ];
+  return Object.entries(choice.probabilities)
+    .filter(([, p]) => p >= minProbability)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, maxOptions)
+    .map(([skill, p]) => ({
+      action: actionFor(skill, answers, acceptsTarget),
+      urgency: p * maxUrgency,
+      reason: `${skill === choice.choice ? "chose" : "option"} ${skill} (p=${p.toFixed(2)}, conf=${choice.confidence.toFixed(2)})`,
+    }));
 }
 
 function shareSignals(ws: Workspace, questions: Question[], answers: Answer[]): void {

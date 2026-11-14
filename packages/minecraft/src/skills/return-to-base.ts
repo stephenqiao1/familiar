@@ -12,7 +12,8 @@ export const returnToBase: Skill<MinecraftCtx> = {
   description: "Walk back to the base chest.",
 
   canRun(ctx) {
-    return ctx.base?.chest !== undefined;
+    // Already there: walking back would end at once.
+    return ctx.base?.chest !== undefined && ctx.bot.entity.position.distanceTo(ctx.base.chest) > RANGE + 1;
   },
 
   async run(ctx, _target, signal) {

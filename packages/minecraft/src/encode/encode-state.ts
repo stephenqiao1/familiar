@@ -3,25 +3,40 @@ import type { Base } from "../base.js";
 import type { EncodableBot } from "./encodable-bot.js";
 import { encodeSelf } from "./encode-self.js";
 import { scanHazards } from "./scan-hazards.js";
-import { scanMobs } from "./scan-mobs.js";
-import { scanOres } from "./scan-ores.js";
+import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
+import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 9;
 
 export interface EncodeContext {
   base: Base;
   /** The skill executor's current() result. */
   current: RunningSkill | null;
+  /** Times the bot has died since it joined. */
+  deaths: number;
+  /** How this place feels from memory, if anything is remembered close by. Default: nothing. */
+  memory?: MinecraftStateData["memory"];
+  /** How many of each kind of nearby thing to keep (focus sets it). Default: 10. */
+  limit?: number;
+  /** Narrow attention (high alarm): keep threats, drop friendly mobs and useful blocks. Default: false. */
+  narrow?: boolean;
 }
 
 /** Turns the bot's view of the world into a compact, game-agnostic State. */
 export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext): State {
   const now = Date.now();
+  const limit = ctx.limit ?? DEFAULT_LIMIT;
   const data: MinecraftStateData = {
     time: { isNight: !bot.time.isDay, lightLevel: lightLevel(bot) },
-    self: encodeSelf(bot, ctx.base.chest),
-    nearby: { ores: scanOres(bot), hazards: scanHazards(bot), mobs: scanMobs(bot) },
+    self: encodeSelf(bot, ctx.base.chest, ctx.deaths),
+    nearby: {
+      hazards: scanHazards(bot, limit),
+      mobs: ctx.narrow ? scanMobs(bot, limit).filter((m) => m.hostile) : scanMobs(bot, limit),
+      blocks: ctx.narrow ? [] : scanUsefulBlocks(bot, limit),
+      players: scanPlayers(bot, limit),
+    },
+    memory: ctx.memory ?? null,
     current: ctx.current && {
       skill: ctx.current.skill,
       target: ctx.current.target ?? null,
@@ -31,8 +46,15 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
   return { schemaVersion: SCHEMA_VERSION, tick, timestamp: now, data: { ...data } };
 }
 
-/** The brighter of block light and sky light where the bot stands. */
+/** How much darker the sky is at night: the game dims sky light by this much. */
+const NIGHT_SKY_DIMMING = 11;
+
+/**
+ * The brighter of block light and sky light where the bot stands. A block's sky light is how open
+ * it is to the sky, whatever the time, so at night it is dimmed the way the game dims it.
+ */
 function lightLevel(bot: EncodableBot): number {
   const here = bot.blockAt(bot.entity.position.floored());
-  return here ? Math.max(here.light, here.skyLight) : 0;
+  if (!here) return 0;
+  return Math.max(here.light, here.skyLight - (bot.time.isDay ? 0 : NIGHT_SKY_DIMMING), 0);
 }

@@ -33,7 +33,7 @@ describe("createInstinctRegion", () => {
 
   it("builds questions from the workspace", async () => {
     const store = createWorkspace();
-    store.viewFor("neocortex").setGoal({ text: "find iron", steps: [], reason: "" });
+    store.viewFor("prefrontal").setGoal({ text: "build a shelter", steps: [], reason: "" });
     let prompt = "";
     const region = createInstinctRegion({
       engine: new EchoEngine(),
@@ -43,18 +43,30 @@ describe("createInstinctRegion", () => {
       },
     });
     await region.run(store.viewFor("instinct"), signal);
-    expect(prompt).toBe("Goal: find iron");
+    expect(prompt).toBe("Goal: build a shelter");
   });
 });
 
 describe("actionProposal", () => {
-  const choice: Answer = { kind: "choice", id: "next_action", choice: "attack", probabilities: { attack: 0.6 }, confidence: 0.5 };
+  const choice: Answer = {
+    kind: "choice",
+    id: "next_action",
+    choice: "attack",
+    probabilities: { attack: 0.5, flee: 0.25, eat: 0.12, idle: 0.08, sleep: 0.05 },
+    confidence: 0.5,
+  };
   const target: Answer = { kind: "choice", id: "target", choice: "entity:1", probabilities: {}, confidence: 1 };
 
-  it("scales urgency by confidence and keeps accepted targets", () => {
-    expect(actionProposal([choice, target], { acceptsTarget: () => true, maxUrgency: 0.6 })).toEqual([
-      { action: { skill: "attack", target: "entity:1" }, urgency: 0.3, reason: "chose attack (p=0.60, conf=0.50)" },
+  it("proposes the likeliest options above 10%, urgency scaled by probability", () => {
+    expect(actionProposal([choice, target], { acceptsTarget: (skill) => skill !== "eat", maxUrgency: 0.6 })).toEqual([
+      { action: { skill: "attack", target: "entity:1" }, urgency: 0.3, reason: "chose attack (p=0.50, conf=0.50)" },
+      { action: { skill: "flee", target: "entity:1" }, urgency: 0.15, reason: "option flee (p=0.25, conf=0.50)" },
+      { action: { skill: "eat" }, urgency: expect.closeTo(0.072), reason: "option eat (p=0.12, conf=0.50)" },
     ]);
+  });
+
+  it("proposes at most maxOptions", () => {
+    expect(actionProposal([choice], { maxOptions: 1 }).map((p) => p.action)).toEqual([{ skill: "attack" }]);
   });
 
   it("proposes nothing without a next_action answer", () => {

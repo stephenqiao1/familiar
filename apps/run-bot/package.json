@@ -10,9 +10,11 @@
     "@familiar/engine-claude": "workspace:*",
     "@familiar/engine-echo": "workspace:*",
     "@familiar/engine-jev": "workspace:*",
+    "@familiar/memory": "workspace:*",
     "@familiar/minecraft": "workspace:*",
+    "@familiar/neuromodulators": "workspace:*",
     "@familiar/region-instinct": "workspace:*",
-    "@familiar/region-neocortex": "workspace:*",
+    "@familiar/region-prefrontal": "workspace:*",
     "@familiar/region-reflex": "workspace:*"
   }
 }

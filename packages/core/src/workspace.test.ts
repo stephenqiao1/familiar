@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { createWorkspace } from "./workspace.js";
 
+describe("clearGoal", () => {
+  it("drops the goal", () => {
+    const store = createWorkspace();
+    store.viewFor("prefrontal").setGoal({ text: "g", steps: [], reason: "" });
+    store.viewFor("noradrenaline").clearGoal();
+    expect(store.goal()).toBeNull();
+  });
+});
+
 describe("createWorkspace", () => {
   it("stamps each region's writes with its name", () => {
     const store = createWorkspace();
-    store.viewFor("neocortex").setGoal({ text: "find iron", steps: ["dig down"], reason: "need tools" });
+    store.viewFor("prefrontal").setGoal({ text: "build a shelter", steps: ["gather wood"], reason: "night is coming" });
     store.viewFor("instinct").setSignal("fear", 0.4);
 
     const reader = store.viewFor("reflex");
-    expect(reader.goal).toMatchObject({ text: "find iron", setBy: "neocortex" });
+    expect(reader.goal).toMatchObject({ text: "build a shelter", setBy: "prefrontal" });
     expect(reader.signals.fear).toMatchObject({ value: 0.4, source: "instinct" });
   });
 

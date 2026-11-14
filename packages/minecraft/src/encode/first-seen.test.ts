@@ -6,7 +6,7 @@ const state = (timestamp: number, mobs: { id: string; type: string; dist: number
   schemaVersion: 2,
   tick: 0,
   timestamp,
-  data: { nearby: { ores: [], hazards: [], mobs } },
+  data: { nearby: { hazards: [], mobs } },
 });
 const zombie = { id: "entity:7", type: "zombie", dist: 12, hostile: true };
 const cow = { id: "entity:8", type: "cow", dist: 3, hostile: false };

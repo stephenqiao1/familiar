@@ -19,7 +19,9 @@ export const flee: Skill<MinecraftCtx> = {
   description: "Run away from a mob (default: the nearest hostile), heading toward base when possible.",
 
   canRun(ctx, target) {
-    return resolveMobTarget(ctx.bot, target, SAFE_DISTANCE) !== null;
+    // Nothing to flee from, or already safe from it: fleeing would end at once.
+    const threat = resolveMobTarget(ctx.bot, target, SAFE_DISTANCE);
+    return threat !== null && !isSafe(ctx.bot, threat);
   },
 
   async run(ctx, target, signal) {

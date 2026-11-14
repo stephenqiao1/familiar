@@ -1,0 +1,46 @@
+{
+  "Player": {
+    "personality": {
+      "restingDA": 0.5,
+      "learningRate": 0.1,
+      "noveltyBonus": 0.5
+    },
+    "patience": {
+      "resting": 0.5,
+      "timeConstantSeconds": 60,
+      "persistence": 1,
+      "horizon": 1,
+      "brake": 1
+    },
+    "noradrenaline": {
+      "alarmGain": 1,
+      "alarmDecaySeconds": 30,
+      "searchResting": 0.3,
+      "searchTimeConstantSeconds": 90,
+      "inCharge": 1,
+      "interrupt": 1,
+      "focus": 1,
+      "memoryTag": 1,
+      "patienceLink": 1,
+      "switching": 1,
+      "widerOptions": 1,
+      "tellPlanner": 1
+    },
+    "focus": {
+      "resting": 0.5,
+      "timeConstantSeconds": 45,
+      "trustHalfLifeMinutes": 10,
+      "factSupport": 3,
+      "sensesVsMemory": 1,
+      "attention": 1,
+      "memoryWrite": 1,
+      "consolidation": 1,
+      "cuePulse": 1,
+      "learningWindow": 1,
+      "noisyOrChanged": 1
+    },
+    "memory": {
+      "halfLifeDays": 2
+    }
+  }
+}

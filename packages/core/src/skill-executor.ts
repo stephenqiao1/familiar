@@ -4,6 +4,7 @@ export interface SkillExecutorOptions<Ctx> {
   skills: Skill<Ctx>[];
   ctx: Ctx;
   onEvent: (event: SkillEvent) => void;
+  /** How long a skill may run before it is stopped (it then fails with "timeout"). Default: 120 000. */
   defaultTimeoutMs?: number;
 }
 
@@ -12,11 +13,15 @@ export interface SkillExecutor {
   start(name: string, target?: string): Promise<void>;
   /** Aborts the running skill and resolves once it has settled. */
   interrupt(): Promise<void>;
+  /** Gives up on the running skill: aborts it, and it ends as failed with this reason. */
+  abandon(reason: string): Promise<void>;
   current(): RunningSkill | null;
 }
 
 interface Run extends RunningSkill {
   controller: AbortController;
+  /** Set when the run was stopped as a failure (timed out or given up on). */
+  failure?: string;
   settled: Promise<void>;
 }
 
@@ -50,22 +55,22 @@ export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): Sk
     await running.settled;
   }
 
+  function fail(run: Run, reason: string): void {
+    run.failure = reason;
+    run.controller.abort(new Error(reason));
+  }
+
   function launch(skill: Skill<Ctx>, target: string | undefined): void {
     const controller = new AbortController();
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort(new Error("timeout"));
-    }, defaultTimeoutMs);
-
     const run: Run = { skill: skill.name, target, startedAt: Date.now(), controller, settled: Promise.resolve() };
+    const timer = setTimeout(() => fail(run, "timeout"), defaultTimeoutMs);
     running = run;
     emit({ skill: skill.name, target, type: "started" });
 
     run.settled = settle(skill, target, controller.signal).then((result) => {
       clearTimeout(timer);
       if (running === run) running = null;
-      emit({ skill: skill.name, target, ...finalResult(result, controller.signal.aborted, timedOut) });
+      emit({ skill: skill.name, target, ...finalResult(result, controller.signal.aborted, run.failure) });
     });
   }
 
@@ -100,6 +105,13 @@ export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): Sk
     interrupt() {
       return enqueue(stopRunning);
     },
+    abandon(reason) {
+      return enqueue(async () => {
+        if (!running) return;
+        fail(running, reason);
+        await running.settled;
+      });
+    },
     current() {
       return running && { skill: running.skill, target: running.target, startedAt: running.startedAt };
     },
@@ -107,9 +119,9 @@ export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): Sk
 }
 
 /** A skill that finished "done" keeps that result; otherwise an abort decides the outcome. */
-function finalResult(result: SkillResult, aborted: boolean, timedOut: boolean): Pick<SkillEvent, "type" | "reason"> {
+function finalResult(result: SkillResult, aborted: boolean, failure: string | undefined): Pick<SkillEvent, "type" | "reason"> {
   if (result.status === "done" || !aborted) return { type: result.status, reason: result.reason };
-  if (timedOut) return { type: "failed", reason: "timeout" };
+  if (failure !== undefined) return { type: "failed", reason: failure };
   return { type: "interrupted", reason: result.reason };
 }
 

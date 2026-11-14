@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseCommand } from "./args.js";
 
-const local = { host: "localhost", port: 25565, name: "Miner" };
+const local = { host: "localhost", port: 25565, name: "Player" };
 
 describe("parseCommand", () => {
   it("runs the loop with no command, reading host, port and name", () => {
@@ -12,7 +12,7 @@ describe("parseCommand", () => {
     });
   });
 
-  it("defaults to localhost:25565 as Miner", () => {
+  it("defaults to localhost:25565 as Player", () => {
     expect(parseCommand([])).toEqual({ kind: "loop", server: local, brain: { engine: "echo", planner: "echo" } });
   });
 
@@ -42,6 +42,16 @@ describe("parseCommand", () => {
 
   it("reads --linger", () => {
     expect(parseCommand(["skill", "idle", "--linger", "2"])).toMatchObject({ kind: "skill", lingerMs: 2000 });
+  });
+
+  it("runs one skill with what to carry", () => {
+    expect(parseCommand(["skill", "take_items", "--wants", "bread:8, torch:16"])).toMatchObject({
+      wants: [
+        { item: "bread", count: 8 },
+        { item: "torch", count: 16 },
+      ],
+    });
+    expect(() => parseCommand(["skill", "take_items", "--wants", "bread"])).toThrow(/Invalid --wants "bread"/);
   });
 
   it("runs one skill with no options", () => {

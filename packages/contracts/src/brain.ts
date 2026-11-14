@@ -15,17 +15,34 @@ export interface Proposal {
   reason: string;
 }
 
+/** An item a goal needs the agent to carry, and how many. */
+export interface ItemWant {
+  item: string;
+  count: number;
+}
+
 /** A goal written by a planning region. Other regions read it to guide their choices. */
 export interface Goal {
   text: string;
   steps: string[];
   reason: string;
+  /** What to carry for this goal: taking from storage fetches these, storing keeps them. */
+  wants: ItemWant[];
+  /** Kinds of things to watch for (e.g. "chest", "villager"): spotting one is a cue to act. */
+  watchFor: string[];
+  /** How many of `steps` the planner has judged finished. */
+  stepsDone: number;
+  /** When a step (of this goal or an earlier one) was last judged finished, or null if never. */
+  stepDoneAt: number | null;
   /** The region that set it. */
   setBy: string;
   setAt: number;
 }
 
-/** A named level (fear, hunger, ...) one region shares with the others. From 0 to 1. */
+/**
+ * A named level (fear, hunger, ...) one region shares with the others. From 0 to 1.
+ * TODO(mood): allow a per-signal range, so levels like mood (-1 to 1) can be shared too.
+ */
 export interface Signal {
   value: number;
   source: string;
@@ -42,8 +59,10 @@ export interface Workspace {
   readonly signals: Readonly<Record<string, Signal>>;
   /** Skill lifecycle events, oldest first, at most the last 20. */
   readonly recentEvents: readonly SkillEvent[];
-  /** Replaces the goal. `setBy` and `setAt` are filled in for you. */
-  setGoal(goal: Pick<Goal, "text" | "steps" | "reason">): void;
+  /** Replaces the goal. `setBy` and `setAt` are filled in for you; the rest default to none. */
+  setGoal(goal: Pick<Goal, "text" | "steps" | "reason"> & Partial<Pick<Goal, "wants" | "watchFor" | "stepsDone" | "stepDoneAt">>): void;
+  /** Drops the goal (e.g. when an alarm cancels the plan). */
+  clearGoal(): void;
   setSignal(name: string, value: number): void;
 }
 
@@ -58,7 +77,7 @@ export interface RegionOutput {
 export interface Region {
   /** Unique, e.g. "reflex". Used in logs and the --regions flag. */
   name: string;
-  /** Speed rank: lower is faster and wins urgency ties. Reflex 0, instinct 1, neocortex 2. */
+  /** Speed rank: lower is faster and wins urgency ties. Reflex 0, instinct 1, prefrontal 2. */
   layer: number;
   /**
    * 0: runs inside every tick, and the tick waits for it.
@@ -68,6 +87,8 @@ export interface Region {
   everyMs: number;
   /** Give up after this long (the run counts as failed). Default: no limit. */
   timeoutMs?: number;
+  /** For a background region: true to run at the next tick without waiting for `everyMs`. */
+  dueNow?(ws: Workspace): boolean;
   /** Must stop promptly when `signal` aborts. */
   run(ws: Workspace, signal: AbortSignal): RegionOutput | Promise<RegionOutput>;
 }
@@ -81,10 +102,11 @@ export interface Candidate extends Proposal {
 /** Picks the one proposal to act on (the brain's basal ganglia). */
 export interface Arbiter {
   name: string;
-  pick(candidates: Candidate[]): Candidate | null;
+  /** `ws` is the workspace after this tick's regions ran (e.g. for signals). */
+  pick(candidates: Candidate[], ws: Workspace): Candidate | null;
   /**
    * Optional shortcut for fast reactions: given the candidates so far and the layers of regions
    * still running, return the winner if nothing still running could change it; else null.
    */
-  settledEarly?(candidates: Candidate[], pendingLayers: number[]): Candidate | null;
+  settledEarly?(candidates: Candidate[], pendingLayers: number[], ws: Workspace): Candidate | null;
 }

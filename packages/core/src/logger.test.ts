@@ -26,7 +26,7 @@ describe("createLogger", () => {
 
   it("writes one JSON line per entry, in order, creating the folder", async () => {
     dir = await mkdtemp(join(tmpdir(), "familiar-"));
-    const file = join(dir, "nested", "miner.jsonl");
+    const file = join(dir, "nested", "player.jsonl");
 
     const logger = createLogger(file);
     [0, 1, 2].forEach((t) => logger.log(entry(t)));
