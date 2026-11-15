@@ -6,8 +6,10 @@ import type { Choice, Question } from "@familiar/contracts";
 
 /** Who the player is and what comes first; put before the next_action question. */
 export const PLAYER_CONTEXT =
-  "The player is a Minecraft bot. Staying alive comes first: when a hostile mob is within " +
-  "16 blocks, attack it (if healthy and armed) or flee before doing anything else.";
+  "The player is a Minecraft bot. Staying alive comes first: when a hostile mob that can reach " +
+  "the player is within 8 blocks, attack it (if healthy and armed) or flee before doing anything " +
+  "else. Do not flee from or attack a hostile mob that is more than 8 blocks away or cannot reach " +
+  "the player: it only needs watching, so keep doing what you were doing.";
 
 export const IN_DANGER: Question = {
   kind: "noul",

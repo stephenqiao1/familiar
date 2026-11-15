@@ -5,7 +5,8 @@ import { DEFAULT_LIMIT } from "./scan-mobs.js";
 import type { Nearby } from "./state-data.js";
 
 const RADIUS = 8;
-const BIG_DROP = 3;
+/** A fall of this many blocks or more hurts. */
+export const BIG_DROP = 3;
 const FIRE = new Set(["lava", "fire", "soul_fire"]);
 
 /** Lava, fire, and drops of 3+ blocks within 8 blocks, the nearest `limit`. */
@@ -42,7 +43,8 @@ function drops(bot: EncodableBot): Vec3[] {
   return found;
 }
 
-function isOpen(bot: EncodableBot, pos: Vec3): boolean {
+/** Empty space something would fall through (water breaks a fall, so it is not open). */
+export function isOpen(bot: EncodableBot, pos: Vec3): boolean {
   const block = bot.blockAt(pos);
   return block !== null && block.boundingBox === "empty" && block.name !== "water" && block.name !== "lava";
 }

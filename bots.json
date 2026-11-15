@@ -39,8 +39,28 @@
       "learningWindow": 1,
       "noisyOrChanged": 1
     },
+    "brainstem": {
+      "bravery": 0.5,
+      "gains": 1,
+      "startle": 1,
+      "orienting": 1,
+      "loadedResponses": 1,
+      "holdBack": 1,
+      "arousalGate": 1,
+      "bodySignals": 1
+    },
     "memory": {
       "halfLifeDays": 2
+    }
+  },
+  "Brave": {
+    "brainstem": {
+      "bravery": 0.8
+    }
+  },
+  "Timid": {
+    "brainstem": {
+      "bravery": 0.2
     }
   }
 }

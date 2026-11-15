@@ -4,7 +4,7 @@ import { fakeState } from "../encode/state.test-helper.js";
 import { bigSurprise, damage, hostileAppeared, threatPresent } from "./alarm.js";
 
 const ws = createWorkspace().viewFor("noradrenaline");
-const zombie = (dist: number) => ({ id: "entity:1", type: "zombie", dist, hostile: true });
+const zombie = (dist: number) => ({ id: "entity:1", type: "zombie", dist, hostile: true, reachable: true });
 const hurt = (from: number, to: number) => damage.check({ before: fakeState({ self: { health: from } }), after: fakeState({ self: { health: to } }), ws });
 
 describe("player alarm triggers", () => {

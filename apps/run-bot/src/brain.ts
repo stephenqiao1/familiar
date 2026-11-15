@@ -7,15 +7,19 @@ import {
   curiosity,
   describeSituation,
   isShock,
+  leaningOf,
+  menuSkills,
   moved,
   placeOf,
   playerAlarms,
+  playerBrainstem,
   playerFocus,
   playerInstinct,
   playerMemories,
   playerOutlook,
   playerReflexes,
   playerRewards,
+  REFLEX_NOTE,
   situationOf,
   skillsToward,
   thingsInView,
@@ -56,9 +60,10 @@ import {
   type Scorebook,
   type Thing,
 } from "@familiar/neuromodulators";
+import { createBrainstemRegion, createReflexGain, UPPER_PAUSED_SIGNAL, type BrainstemSettings } from "@familiar/region-brainstem";
 import { createInstinctRegion } from "@familiar/region-instinct";
 import { createPrefrontalRegion } from "@familiar/region-prefrontal";
-import { createReflexRegion } from "@familiar/region-reflex";
+import { createReflexRegion, REFLEX_SIGNAL } from "@familiar/region-reflex";
 
 /** How long a learning window stays open after a notable event. */
 const LEARNING_WINDOW_MS = 2000;
@@ -85,6 +90,10 @@ export interface BrainParts<Ctx> {
   noradrenaline: NoradrenalineSettings;
   /** This bot's focus temperament (from bots.json). */
   focus: FocusSettings;
+  /** This bot's brainstem temperament: bravery, and how strong each reflex-tuning part is (from bots.json). */
+  brainstem: BrainstemSettings;
+  /** Offer the primitives (look_at, step_toward, ...) on the decision menu. Default: false. */
+  showPrimitives?: boolean;
   /** Extra notes for the focus log: remembered values used or rejected, attention warnings. Default: none. */
   focusNotes?: () => Record<string, unknown>;
   /** How many memories to give the planner right now (the attention budget). Default: 5. */
@@ -107,11 +116,26 @@ export interface BrainParts<Ctx> {
  * To run without some regions (a lesion experiment): --regions reflex,instinct
  */
 export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Region[] {
-  const { engine, planner, scorebook, novelty, personality, patience, noradrenaline, focus, memory, persistence, storage, skills, ctx } = parts;
+  const { engine, planner, scorebook, novelty, personality, patience, noradrenaline, focus, brainstem, memory, persistence, storage, skills, ctx } = parts;
+  const menu = menuSkills(skills, parts.showPrimitives);
+  // With the brainstem lesioned (--regions), reflex gains stay at 1 and nothing is ever paused.
+  const hasBrainstem = !only || only.includes("brainstem");
+  const alarmOf = (ws: Workspace) => ws.signals[ALARM_SIGNAL]?.value ?? 0;
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
   const all: Region[] = [
-    createReflexRegion({ rules: playerReflexes }), //                                       layer 0, every tick
+    createReflexRegion({
+      rules: playerReflexes,
+      // The brainstem sets how strongly each soft reflex fires (alarm, bravery, the goal's hold-backs).
+      ...(hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? { gainOf: createReflexGain({ settings: brainstem, alarmOf, leaningOf }) } : {}),
+    }), //                                                                                  layer 0, every tick
+    createBrainstemRegion({
+      ...playerBrainstem(skills, ctx),
+      settings: brainstem,
+      alarmOf,
+      reflexFired: (ws) => up(ws, REFLEX_SIGNAL),
+      hardReflex: (ws) => level(ws, REFLEX_SIGNAL) >= 1,
+    }), //                                                                                  layer 0, every tick
     createFocusRegion({
       inputs: playerFocus(memory, skills),
       settings: focus,
@@ -141,7 +165,9 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     }), //                                                                                  layer 0, every tick
     createInstinctRegion({
       engine,
-      ...playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE),
+      ...playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE, parts.showPrimitives),
+      // Asleep and undisturbed: the brainstem pauses the deciding layers, so no engine calls are made.
+      paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL),
     }), //                                                                                  layer 1, every tick
     createPatienceRegion({
       inputs: playerOutlook,
@@ -152,13 +178,17 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     }), //                                                                                  layer 0, every tick
     createPrefrontalRegion({
       planner,
-      describe: (ws) => describeSituation(ws, skills, storage, memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, parts.memoriesForPlanner?.() ?? NEUTRAL_BUDGET.remembered)),
+      describe: (ws) =>
+        describeSituation(ws, menu, storage, [
+          ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, parts.memoriesForPlanner?.() ?? NEUTRAL_BUDGET.remembered),
+          ...(hasBrainstem && brainstem.holdBack > 0 ? [REFLEX_NOTE] : []),
+        ]),
       guidance: (ws) => {
         const horizon = planningHorizon(patienceOf(ws, patience), patience.horizon);
         if (!up(ws, RETHINK_SIGNAL)) return horizon;
         return { ...horizon, instruction: [RETHINK_INSTRUCTION, ...(horizon.instruction ? [horizon.instruction] : [])].join(" ") };
       },
-      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL),
+      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL),
       wake: (ws) => up(ws, REPLAN_SIGNAL),
     }), //                                                                                  layer 2, every 15 s
   ];

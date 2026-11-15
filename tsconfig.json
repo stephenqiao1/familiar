@@ -39,6 +39,9 @@
     },
     {
       "path": "apps/run-bot"
+    },
+    {
+      "path": "packages/region-brainstem"
     }
   ]
 }

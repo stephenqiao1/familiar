@@ -105,6 +105,16 @@ describe("createNoradrenalineRegion", () => {
       expect(value("replan")).toBe(0);
     });
 
+    it("keeps a goal that prepared for trouble (a loaded response or a hold-back), and says so", async () => {
+      for (const prepared of [{ holdBack: ["flee"] }, { ifThen: [{ when: "creeper", skill: "flee" }] }]) {
+        const { store, tick } = setup();
+        await tick();
+        store.viewFor("prefrontal").setGoal({ text: "stand and fight", steps: [], reason: "", ...prepared });
+        expect(await tick({ bump: 0.6 })).toMatchObject({ interrupt: true, keptGoal: expect.any(String) });
+        expect(store.goal()?.text).toBe("stand and fight");
+      }
+    });
+
     it("does not fire a second interrupt inside 20 seconds, but still reports the jump", async () => {
       const { tick, wait, value } = setup({ alarmDecaySeconds: 3 });
       await tick();

@@ -49,8 +49,8 @@ export function createWorkspace(): WorkspaceStore {
         get recentEvents() {
           return [...events];
         },
-        setGoal({ text, steps, reason, wants = [], watchFor = [], stepsDone = 0, stepDoneAt = null }) {
-          const copies = { steps: [...steps], wants: wants.map((w) => ({ ...w })), watchFor: [...watchFor] };
+        setGoal({ text, steps, reason, wants = [], watchFor = [], ifThen = [], holdBack = [], stepsDone = 0, stepDoneAt = null }) {
+          const copies = { steps: [...steps], wants: wants.map((w) => ({ ...w })), watchFor: [...watchFor], ifThen: ifThen.map((r) => ({ ...r })), holdBack: [...holdBack] };
           goal = { text, reason, ...copies, stepsDone, stepDoneAt, setBy: region, setAt: Date.now() };
         },
         clearGoal() {

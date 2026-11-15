@@ -50,3 +50,36 @@ function fallDepth(bot: WorldView, pos: Vec3): number {
   }
   return depth;
 }
+
+const HOT = new Set(["lava", "fire", "soul_fire"]);
+
+/** The bot's feet or head are in lava or fire. */
+export function inLavaOrFire(bot: WorldView): boolean {
+  const feet = bot.entity.position.floored();
+  return [feet, feet.offset(0, 1, 0)].some((pos) => HOT.has(bot.blockAt(pos)?.name ?? ""));
+}
+
+/** Somewhere to stand: solid, harmless ground with two empty, harmless blocks above it. */
+export function isSafeToStand(bot: WorldView, feet: Vec3): boolean {
+  const ground = bot.blockAt(feet.offset(0, -1, 0));
+  if (!ground || ground.boundingBox !== "block" || isDangerousBlock(ground.name)) return false;
+  return [feet, feet.offset(0, 1, 0)].every((pos) => {
+    const block = bot.blockAt(pos);
+    return block !== null && block.boundingBox === "empty" && !isDangerousBlock(block.name) && !LIQUIDS.has(block.name);
+  });
+}
+
+/** The nearest spot within `radius` (of the bot's feet) that `test` accepts, or null. */
+export function nearestSpot(bot: WorldView, radius: number, test: (pos: Vec3) => boolean): Vec3 | null {
+  const feet = bot.entity.position.floored();
+  let best: Vec3 | null = null;
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        const pos = feet.offset(dx, dy, dz);
+        if ((best === null || pos.distanceTo(feet) < best.distanceTo(feet)) && test(pos)) best = pos;
+      }
+    }
+  }
+  return best;
+}

@@ -1,4 +1,4 @@
-/** What a schemaVersion 9 Minecraft State carries in `data`. Distances are whole blocks. */
+/** What a schemaVersion 10 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
   time: { isNight: boolean; lightLevel: number };
   self: {
@@ -25,14 +25,29 @@ export interface MinecraftStateData {
     asleep: boolean;
     /** Times the bot has died since it joined. */
     deaths: number;
+    /** Breath left, 0 to 20 (20 = full). */
+    air: number;
+    /** Burning (it keeps burning for a while after leaving the fire). */
+    onFire: boolean;
+    /** Feet or head in lava. */
+    inLava: boolean;
+    /** Feet or head in water. */
+    inWater: boolean;
+    /** Off the ground with a drop of 3 or more blocks below. */
+    falling: boolean;
+    /** The last time the bot was hurt (within the last minute), and by whom if the game said. */
+    lastHurt: { msAgo: number; by: string | null } | null;
   };
   nearby: {
     hazards: Nearby[];
-    mobs: (Nearby & { hostile: boolean })[];
+    /** `reachable`: in line of sight and within 3 blocks of the bot's height (a cheap stand-in for "can get to me"). */
+    mobs: (Nearby & { hostile: boolean; reachable: boolean })[];
     /** Chests, ripe crops and bells within 16 blocks. */
     blocks: Nearby[];
     /** Other players within 24 blocks (`type` is "player"). */
     players: Nearby[];
+    /** Loud events heard in the last 2 seconds (explosions for now), with no target id. */
+    loud: { type: string; dist: number }[];
   };
   /** How this place feels from memory (the strongest good or bad memory close by), or null. */
   memory: { nearby: "good" | "bad"; kind: string } | null;

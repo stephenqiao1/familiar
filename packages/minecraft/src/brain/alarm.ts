@@ -1,5 +1,6 @@
 import type { State } from "@familiar/contracts";
 import { BAD_SURPRISE_SIGNAL, BIG_SURPRISE, changedThreshold, FOCUS_SIGNAL, type AlarmTrigger } from "@familiar/neuromodulators";
+import { STARTLE_SIGNAL } from "@familiar/region-brainstem";
 import { minecraftDataOf, nearestThreat } from "./read-state.js";
 
 // What raises the player's alarm. Each trigger says how much to add right now (0 to 1).
@@ -10,6 +11,8 @@ const MAX_HEALTH = 20;
 const DAMAGE_FOR_FULL_ALARM = MAX_HEALTH / 3;
 /** Enough on its own to count as a sudden jump (more than 0.5), so the bot drops what it was doing. */
 const HOSTILE_APPEARED = 0.6;
+/** A startle adds this on top of whatever caused it (a hit, a mob appearing). */
+const STARTLED = 0.3;
 /** A mob seen as a threat within this long is the same threat coming back, not a new one. */
 const SAME_THREAT_MS = 30_000;
 
@@ -61,12 +64,18 @@ export function bigSurprise(byFocus = false): AlarmTrigger {
   };
 }
 
+/** The brainstem was startled this tick (a hit from nowhere, a mob up close, something loud). */
+export const startled: AlarmTrigger = {
+  name: "startle",
+  check: ({ ws }) => ((ws.signals[STARTLE_SIGNAL]?.value ?? 0) > 0 ? STARTLED : 0),
+};
+
 // TODO(alarm): a hostile mob targeting the bot (the state doesn't say who a mob is after).
-// TODO(alarm): a loud nearby event: an explosion, another player being attacked (not sensed yet).
+// TODO(alarm): another player being attacked (not sensed yet). Explosions and thunder reach alarm through startle.
 
 /** Everything that raises the player's alarm. `surpriseByFocus`: let focus set how big a surprise counts. */
 export function playerAlarms(surpriseByFocus = false): AlarmTrigger[] {
-  return [damage, hostileAppeared(), bigSurprise(surpriseByFocus)];
+  return [damage, hostileAppeared(), startled, bigSurprise(surpriseByFocus)];
 }
 
 /** A threat is present (alarm does not fade): a hostile mob close by. */

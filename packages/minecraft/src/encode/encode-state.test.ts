@@ -74,7 +74,7 @@ describe("encodeState", () => {
     });
     const state = encodeState(bot, 7, { base, current: null, deaths: 2 });
 
-    expect(state).toMatchObject({ schemaVersion: 9, tick: 7 });
+    expect(state).toMatchObject({ schemaVersion: 10, tick: 7 });
     expect(state.data).toEqual({
       time: { isNight: false, lightLevel: 15 },
       self: {
@@ -93,15 +93,22 @@ describe("encodeState", () => {
         enclosed: false,
         asleep: false,
         deaths: 2,
+        air: 20,
+        onFire: false,
+        inLava: false,
+        inWater: false,
+        falling: false,
+        lastHurt: null,
       },
       nearby: {
         hazards: [{ id: "pos:0,62,5", type: "lava", dist: 5 }],
         mobs: [
-          { id: "entity:43", type: "cow", dist: 4, hostile: false },
-          { id: "entity:42", type: "zombie", dist: 6, hostile: true },
+          { id: "entity:43", type: "cow", dist: 4, hostile: false, reachable: true },
+          { id: "entity:42", type: "zombie", dist: 6, hostile: true, reachable: true },
         ],
         blocks: [],
         players: [],
+        loud: [],
       },
       memory: null,
       current: null,
@@ -110,7 +117,7 @@ describe("encodeState", () => {
 
   it("gives empty lists, not missing keys, in an empty world", () => {
     const data = dataOf(fakeBot());
-    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [] });
+    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [], loud: [] });
     expect(data.self).toMatchObject({ bestWeapon: null, foodItems: 0, inventoryFullPct: 0, inventory: {} });
     expect(data.current).toBeNull();
   });
@@ -186,7 +193,7 @@ describe("encodeState", () => {
         entities: [mob(5, "zombie", "hostile", 25, 0), mob(6, "Steve", "player", 2, 0), mob(7, "Alex", "player", 30, 0)],
       }),
     );
-    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [{ id: "entity:6", type: "player", dist: 2 }] });
+    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [{ id: "entity:6", type: "player", dist: 2 }], loud: [] });
   });
 
   it("dims the sky's light at night", () => {
@@ -244,5 +251,72 @@ describe("encodeState", () => {
 
   it("is satisfied by a real mineflayer Bot", () => {
     expectTypeOf<Bot>().toExtend<EncodableBot>();
+  });
+
+  describe("the body's senses", () => {
+    const self = (bot: EncodableBot, ctx: Partial<Parameters<typeof encodeState>[2]> = {}) =>
+      (encodeState(bot, 0, { base, current: null, deaths: 0, ...ctx }).data as unknown as MinecraftStateData).self;
+
+    it("reports air, and full air when the bot does not say", () => {
+      const diver = fakeBot();
+      diver.entity.metadata = [0, 105]; // 105 ticks of air left of 300
+      expect(self(diver).air).toBe(7);
+      expect(self(fakeBot()).air).toBe(20);
+    });
+
+    it("knows when the feet or head are in lava or water", () => {
+      expect(self(fakeBot({ blocks: { "0,63,0": "lava" } }))).toMatchObject({ inLava: true, inWater: false });
+      expect(self(fakeBot({ blocks: { "0,64,0": "water" } }))).toMatchObject({ inLava: false, inWater: true });
+      expect(self(fakeBot())).toMatchObject({ inLava: false, inWater: false });
+    });
+
+    it("is on fire when the server flags it, or when standing in fire", () => {
+      const flagged = fakeBot();
+      flagged.entity.metadata = [1];
+      expect(self(flagged).onFire).toBe(true);
+      expect(self(fakeBot({ blocks: { "0,63,0": "fire" } })).onFire).toBe(true);
+      expect(self(fakeBot()).onFire).toBe(false);
+    });
+
+    it("is falling only off the ground with 3 or more open blocks below", () => {
+      const pit = { "0,62,0": "air", "0,61,0": "air", "0,60,0": "air" };
+      const airborne = (blocks: Record<string, string>, onGround: boolean) => {
+        const bot = fakeBot({ blocks });
+        bot.entity.onGround = onGround;
+        return self(bot).falling;
+      };
+      expect(airborne(pit, false)).toBe(true);
+      expect(airborne(pit, true)).toBe(false);
+      expect(airborne({ "0,62,0": "air" }, false)).toBe(false); // a one-block hop
+    });
+
+    it("reports who last hurt the bot and how long ago, for a minute", () => {
+      const now = Date.now();
+      expect(self(fakeBot(), { lastHurt: { at: now - 500, by: "entity:9" } }).lastHurt).toMatchObject({ by: "entity:9" });
+      expect(self(fakeBot(), { lastHurt: { at: now - 500, by: null } }).lastHurt?.by).toBeNull();
+      expect(self(fakeBot(), { lastHurt: { at: now - 120_000, by: "entity:9" } }).lastHurt).toBeNull();
+    });
+
+    it("lists loud events from the last 2 seconds, with their distance", () => {
+      const now = Date.now();
+      const loud = [
+        { type: "explosion", position: new Vec3(6.5, 63, 0.5), at: now - 300 },
+        { type: "thunder", position: new Vec3(6.5, 63, 0.5), at: now - 9000 },
+        { type: "explosion", position: new Vec3(90.5, 63, 0.5), at: now },
+      ];
+      const data = encodeState(fakeBot(), 0, { base, current: null, deaths: 0, loud }).data as unknown as MinecraftStateData;
+      expect(data.nearby.loud).toEqual([{ type: "explosion", dist: 6 }]);
+    });
+
+    it("marks a hostile unreachable when a wall is in the way or it is far above or below", () => {
+      const walled = fakeBot({ entities: [mob(42, "zombie", "hostile", 5, 0)] });
+      walled.world.raycast = () => ({ name: "stone" });
+      expect(dataOf(walled).nearby.mobs[0]).toMatchObject({ reachable: false });
+      const open = fakeBot({ entities: [mob(42, "zombie", "hostile", 5, 0)] });
+      open.world.raycast = () => null;
+      expect(dataOf(open).nearby.mobs[0]).toMatchObject({ reachable: true });
+      const above = fakeBot({ entities: [{ ...mob(42, "zombie", "hostile", 5, 0), position: new Vec3(5.5, 70, 0.5) }] });
+      expect(dataOf(above).nearby.mobs[0]).toMatchObject({ reachable: false });
+    });
   });
 });

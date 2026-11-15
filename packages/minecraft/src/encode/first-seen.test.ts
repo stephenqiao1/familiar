@@ -8,8 +8,8 @@ const state = (timestamp: number, mobs: { id: string; type: string; dist: number
   timestamp,
   data: { nearby: { hazards: [], mobs } },
 });
-const zombie = { id: "entity:7", type: "zombie", dist: 12, hostile: true };
-const cow = { id: "entity:8", type: "cow", dist: 3, hostile: false };
+const zombie = { id: "entity:7", type: "zombie", dist: 12, hostile: true, reachable: true };
+const cow = { id: "entity:8", type: "cow", dist: 3, hostile: false, reachable: true };
 
 describe("createFirstSeenTracker", () => {
   it("reports a hostile mob only the first time it appears", () => {

@@ -2,7 +2,7 @@ import type { State } from "@familiar/contracts";
 import { SCHEMA_VERSION } from "../encode/encode-state.js";
 import type { MinecraftStateData } from "../encode/state-data.js";
 
-/** A hostile mob this close is a threat (it triggers fight-or-flight). */
+/** A hostile mob this close is a threat: it keeps alarm up, and the defence reflexes act inside it. */
 export const DANGER_DISTANCE = 8;
 
 /** A state's Minecraft data, or null if it is not a Minecraft state (e.g. before the first one arrives). */

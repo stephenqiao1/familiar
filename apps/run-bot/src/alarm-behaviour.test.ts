@@ -20,7 +20,7 @@ import { createArbiter } from "./brain.js";
 
 const signal = new AbortController().signal;
 const OFF: NoradrenalineSettings = { ...DEFAULT_NORADRENALINE, inCharge: 0, interrupt: 0, focus: 0, memoryTag: 0, patienceLink: 0, switching: 0, widerOptions: 0, tellPlanner: 0 };
-const zombie = { id: "entity:1", type: "zombie", dist: 3, hostile: true };
+const zombie = { id: "entity:1", type: "zombie", dist: 3, hostile: true, reachable: true };
 
 type Patch = { health?: number; x?: number; mobs?: MinecraftStateData["nearby"]["mobs"] };
 
@@ -44,8 +44,14 @@ function state(p: Patch, seconds: number): State {
       enclosed: false,
       asleep: false,
       deaths: 0,
+      air: 20,
+      onFire: false,
+      inLava: false,
+      inWater: false,
+      falling: false,
+      lastHurt: null,
     },
-    nearby: { hazards: [], mobs: p.mobs ?? [], blocks: [], players: [] },
+    nearby: { hazards: [], mobs: p.mobs ?? [], blocks: [], players: [], loud: [] },
     memory: null,
     current: null,
   };

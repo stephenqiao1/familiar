@@ -146,7 +146,11 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
       const interrupt = on(settings.interrupt) && jumped && now - (interrupts.at(-1) ?? -Infinity) >= INTERRUPT_GAP_MS;
       if (interrupt) {
         interrupts.push(now);
-        ws.clearGoal();
+        // A goal that prepared for trouble (it loaded a response or holds a reflex back) is kept:
+        // cancelling it at the first fright would undo the very thing it was set up for.
+        const prepared = ws.goal !== null && (ws.goal.ifThen.length > 0 || ws.goal.holdBack.length > 0);
+        if (prepared) notes.keptGoal = "the goal prepared for this (loaded response or hold-back), so it stays";
+        else ws.clearGoal();
         pendingReplan = true;
         if (interrupts.length > MAX_INTERRUPTS) {
           jumpyUntil = now + GUARD_WINDOW_MS;

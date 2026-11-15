@@ -3,14 +3,23 @@ import type { MinecraftStateData } from "./state-data.js";
 
 const HOSTILE_RANGE = 16;
 
+/** At or below this much air the bot is drowning. */
+const LOW_AIR = 6;
+
 /**
- * Worth deciding again right away: a new hostile mob within 16 blocks, health dropped, the
+ * Worth deciding again right away: a new hostile mob within 16 blocks, health dropped, the bot
+ * was just hurt, caught fire, fell into lava or ran low on air, something loud happened, the
  * running skill ended (finished, failed or was interrupted), or the inventory just became full.
  */
 export function isSignificantChange(prev: State, next: State): boolean {
   const a = prev.data as unknown as MinecraftStateData;
   const b = next.data as unknown as MinecraftStateData;
-  return newHostile(a, b) || b.self.health < a.self.health || skillEnded(a, b) || becameFull(a, b);
+  return newHostile(a, b) || b.self.health < a.self.health || bodyAlarm(a.self, b.self) || b.nearby.loud.length > a.nearby.loud.length || skillEnded(a, b) || becameFull(a, b);
+}
+
+function bodyAlarm(a: MinecraftStateData["self"], b: MinecraftStateData["self"]): boolean {
+  const hurtAgain = b.lastHurt !== null && (a.lastHurt === null || b.lastHurt.msAgo < a.lastHurt.msAgo);
+  return hurtAgain || (b.onFire && !a.onFire) || (b.inLava && !a.inLava) || (b.air <= LOW_AIR && a.air > LOW_AIR);
 }
 
 function newHostile(a: MinecraftStateData, b: MinecraftStateData): boolean {

@@ -66,4 +66,14 @@ describe("parseCommand", () => {
     expect(() => parseCommand(["--port", "abc"])).toThrow(/Invalid --port/);
     expect(() => parseCommand(["skill", "idle", "--interrupt-after", "soon"])).toThrow(/Invalid --interrupt-after/);
   });
+
+  it("reads --primitives and a fixed --plan for the echo planner", () => {
+    const command = parseCommand(["--primitives", "--plan", '{"goal":"Explore","ifThen":[{"when":"creeper","skill":"flee"}],"holdBack":["flee"]}']);
+    expect(command).toMatchObject({
+      kind: "loop",
+      brain: { primitives: true, plan: { goal: "Explore", steps: [], ifThen: [{ when: "creeper", skill: "flee" }], holdBack: ["flee"] } },
+    });
+    expect(() => parseCommand(["--plan", "not json"])).toThrow(/Invalid --plan/);
+    expect(() => parseCommand(["--plan", '{"steps":[]}'])).toThrow(/needs a "goal"/);
+  });
 });

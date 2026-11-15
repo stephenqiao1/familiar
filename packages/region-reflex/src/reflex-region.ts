@@ -1,13 +1,38 @@
 import type { Proposal, Region, Workspace } from "@familiar/contracts";
 
-/** One hard-wired reaction: look at the workspace, and propose an action or nothing. */
+/** A soft reflex can never reach full urgency, so it always competes and never wins outright. */
+export const SOFT_CAP = 0.95;
+/** The highest urgency any reflex proposed this tick: 0 if none fired, 1 if a hard one did. */
+export const REFLEX_SIGNAL = "reflex";
+
+/**
+ * One wired-in reaction: look at the workspace, and propose an action or nothing.
+ * - hard: life-saving. Always proposed at urgency 1; never scaled, never held back.
+ * - soft: tunable. The rule gives a base urgency; the region multiplies it by a gain and caps it
+ *   below 1, so the rest of the brain can outvote it.
+ */
 export interface ReflexRule {
   name: string;
+  kind: "hard" | "soft";
   check(ws: Workspace): Proposal | null;
+}
+
+/** One fired rule, as logged. */
+export interface FiredReflex {
+  rule: string;
+  kind: "hard" | "soft";
+  skill: string | null;
+  /** The urgency the rule itself gave. */
+  base: number;
+  gain: number;
+  /** The urgency proposed. */
+  urgency: number;
 }
 
 export interface ReflexOptions {
   rules: ReflexRule[];
+  /** How strongly a soft rule fires right now (e.g. set by the brainstem). Default: 1. Ignored for hard rules. */
+  gainOf?(rule: ReflexRule, ws: Workspace, proposal: Proposal): number;
   /** Default: "reflex". */
   name?: string;
   /** Default: 0 (the fastest layer). */
@@ -18,27 +43,29 @@ export interface ReflexOptions {
  * The fastest region: plain rules checked every tick, no model involved. Each rule that fires
  * adds one proposal. A rule that throws is skipped and named in the trace.
  */
-export function createReflexRegion({ rules, name = "reflex", layer = 0 }: ReflexOptions): Region {
+export function createReflexRegion({ rules, gainOf = () => 1, name = "reflex", layer = 0 }: ReflexOptions): Region {
   return {
     name,
     layer,
     everyMs: 0,
     run(ws) {
       const proposals: Proposal[] = [];
-      const fired: string[] = [];
+      const fired: FiredReflex[] = [];
       const errors: Record<string, string> = {};
       for (const rule of rules) {
         try {
           const proposal = rule.check(ws);
-          if (proposal) {
-            proposals.push(proposal);
-            fired.push(rule.name);
-          }
+          if (!proposal) continue;
+          const gain = rule.kind === "hard" ? 1 : gainOf(rule, ws, proposal);
+          const urgency = rule.kind === "hard" ? 1 : Math.min(SOFT_CAP, Math.max(0, proposal.urgency * gain));
+          proposals.push({ ...proposal, urgency });
+          fired.push({ rule: rule.name, kind: rule.kind, skill: "skill" in proposal.action ? proposal.action.skill : null, base: proposal.urgency, gain, urgency });
         } catch (error) {
           errors[rule.name] = error instanceof Error ? error.message : String(error);
         }
       }
-      return { proposals, trace: { fired, ...(Object.keys(errors).length ? { errors } : {}) } };
+      ws.setSignal(REFLEX_SIGNAL, Math.max(0, ...fired.map((f) => f.urgency)));
+      return { proposals, trace: { fired: fired.map((f) => f.rule), rules: fired, ...(Object.keys(errors).length ? { errors } : {}) } };
     },
   };
 }

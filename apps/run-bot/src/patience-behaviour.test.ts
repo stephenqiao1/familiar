@@ -22,7 +22,7 @@ import { createArbiter, patienceOf } from "./brain.js";
 
 const signal = new AbortController().signal;
 const OFF: PatienceSettings = { ...DEFAULT_PATIENCE, persistence: 0, horizon: 0, brake: 0 };
-const zombie = { id: "entity:1", type: "zombie", dist: 4, hostile: true };
+const zombie = { id: "entity:1", type: "zombie", dist: 4, hostile: true, reachable: true };
 
 type Patch = { health?: number; food?: number; foodItems?: number; isNight?: boolean; unarmed?: boolean; mobs?: MinecraftStateData["nearby"]["mobs"] };
 
@@ -46,8 +46,14 @@ function state(p: Patch, seconds: number): State {
       enclosed: false,
       asleep: false,
       deaths: 0,
+      air: 20,
+      onFire: false,
+      inLava: false,
+      inWater: false,
+      falling: false,
+      lastHurt: null,
     },
-    nearby: { hazards: [], mobs: p.mobs ?? [], blocks: [], players: [] },
+    nearby: { hazards: [], mobs: p.mobs ?? [], blocks: [], players: [], loud: [] },
     memory: null,
     current: null,
   };

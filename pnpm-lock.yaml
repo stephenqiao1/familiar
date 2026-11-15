@@ -205,6 +205,9 @@ importers:
       '@familiar/neuromodulators':
         specifier: workspace:*
         version: link:../../packages/neuromodulators
+      '@familiar/region-brainstem':
+        specifier: workspace:*
+        version: link:../../packages/region-brainstem
       '@familiar/region-instinct':
         specifier: workspace:*
         version: link:../../packages/region-instinct
@@ -281,6 +284,9 @@ importers:
       '@familiar/neuromodulators':
         specifier: workspace:*
         version: link:../neuromodulators
+      '@familiar/region-brainstem':
+        specifier: workspace:*
+        version: link:../region-brainstem
       '@familiar/region-instinct':
         specifier: workspace:*
         version: link:../region-instinct
@@ -302,6 +308,16 @@ importers:
         version: link:../core
 
   packages/neuromodulators:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/region-brainstem:
     dependencies:
       '@familiar/contracts':
         specifier: workspace:*

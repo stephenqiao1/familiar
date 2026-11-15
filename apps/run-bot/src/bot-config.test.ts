@@ -2,10 +2,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FOCUS, DEFAULT_NORADRENALINE, DEFAULT_PATIENCE, DEFAULT_PERSONALITY } from "@familiar/neuromodulators";
+import { DEFAULT_BRAINSTEM } from "@familiar/region-brainstem";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, memory: DEFAULT_MEMORY };
 
 let dir: string;
 let file: string;
@@ -61,5 +62,11 @@ describe("loadBotConfig", () => {
     await expect(loadBotConfig("Scout", file)).rejects.toThrow(/must map bot names/);
     await writeFile(file, "{oops");
     await expect(loadBotConfig("Scout", file)).rejects.toThrow();
+  });
+
+  it("reads brainstem settings and rejects a bad one", async () => {
+    await writeFile(file, JSON.stringify({ Brave: { brainstem: { bravery: 0.8, startle: 0 } }, Bad: { brainstem: { bravery: 1.2 } } }));
+    expect((await loadBotConfig("Brave", file)).brainstem).toEqual({ ...DEFAULT_BRAINSTEM, bravery: 0.8, startle: 0 });
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow(/brainstem.bravery must be 0 to 1/);
   });
 });

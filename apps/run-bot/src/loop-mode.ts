@@ -3,11 +3,14 @@ import { createBrainLoop, createLogger, createSkillExecutor, createWorkspace, de
 import { feelingNear, type Place } from "@familiar/memory";
 import {
   createFirstSeenTracker,
+  DEFENCE_REFLEXES,
   encodeState,
   isSignificantChange,
   minecraftSkills,
   posId,
   situationOf,
+  threatPresent,
+  trackBodyEvents,
   withTrust,
   type MinecraftCtx,
   type MinecraftStateData,
@@ -24,6 +27,8 @@ import {
   REWARD_SIGNAL,
   trustOf,
 } from "@familiar/neuromodulators";
+import { createDefenceWatch, isHeldBack, UPPER_PAUSED_SIGNAL } from "@familiar/region-brainstem";
+import { REFLEX_SIGNAL, type FiredReflex } from "@familiar/region-reflex";
 import type { BrainArgs, ServerArgs } from "./args.js";
 import { loadBotConfig } from "./bot-config.js";
 import { createArbiter, createBrain, patienceOf } from "./brain.js";
@@ -64,10 +69,10 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
-  const planner = createPlanner(brainArgs.planner);
+  const planner = createPlanner(brainArgs.planner, brainArgs.plan);
   const scorebook = await loadScorebook(scorebookFile(server.name));
   const novelty = await loadNovelty(noveltyFile(server.name));
   const chests = await loadChests(chestsFile(server.name));
@@ -128,6 +133,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       patience,
       noradrenaline,
       focus: focusSettings,
+      brainstem,
+      showPrimitives: brainArgs.primitives ?? false,
       focusNotes,
       memoriesForPlanner: () => budget().remembered,
       memory,
@@ -148,6 +155,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     `Alarm: gain ${noradrenaline.alarmGain}, fades in ${noradrenaline.alarmDecaySeconds}s. Search: resting ${noradrenaline.searchResting}. Memories: ${memory.entries().memories.length} remembered.`,
   );
   console.log(`Focus: resting ${focusSettings.resting}, trust in remembered things halves every ${focusSettings.trustHalfLifeMinutes} min.`);
+  console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}, arousal gate ${brainstem.arousalGate}.`);
   console.log(`Logging to ${logPath}`);
 
   const pendingEvents: SkillEvent[] = [];
@@ -174,12 +182,16 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     const reward = view.signals[REWARD_SIGNAL];
     if (reward && reward.at !== lastReward && reward.value > 0) persistence.progress(now);
     lastReward = reward?.at ?? lastReward;
+    // Asleep and undisturbed is the skill working, however long the night: its clock restarts.
+    if ((view.signals[UPPER_PAUSED_SIGNAL]?.value ?? 0) > 0) persistence.progress(now);
     const gaveUp = persistence.giveUpReason(now);
     if (gaveUp) return executor.abandon(gaveUp);
     const interrupt = view.signals[INTERRUPT_SIGNAL];
     const interrupted = interrupt !== undefined && interrupt.at !== lastInterrupt && interrupt.value > 0;
     lastInterrupt = interrupt?.at ?? lastInterrupt;
-    if (!("skill" in action) || action.skill === executor.current()?.skill) return interrupted ? executor.interrupt() : undefined;
+    // A hard reflex keeping its own skill going is never stopped by the fright that came with it.
+    const savingItself = (view.signals[REFLEX_SIGNAL]?.value ?? 0) >= 1 && "skill" in action;
+    if (!("skill" in action) || action.skill === executor.current()?.skill) return interrupted && !savingItself ? executor.interrupt() : undefined;
     // The choice was to keep going with a skill that has finished since the tick began: it is done, not due again.
     if (action.skill === runningAtTick && executor.current() === null) return;
     await executor.start(action.skill, action.target);
@@ -187,6 +199,26 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
 
   const fileLogger = createLogger(logPath);
   const firstSeen = createFirstSeenTracker();
+  const bodyEvents = trackBodyEvents(bot);
+  const defenceWatch = createDefenceWatch();
+  let loggedDeaths = 0;
+  /**
+   * The cost of tunable defence, made visible: if the bot dies soon after a soft defence reflex
+   * was held back or outvoted with a threat close, say so loudly, with the gain and what won.
+   */
+  const overruledDefence = (entry: TickLog) => {
+    const fired = ((entry.regions.find((r) => r.region === "reflex")?.trace?.rules as FiredReflex[] | undefined) ?? []).filter((f) => DEFENCE_REFLEXES.includes(f.rule));
+    const winnerSkill = entry.winner && "skill" in entry.winner.action ? entry.winner.action.skill : null;
+    const died = deaths > loggedDeaths;
+    loggedDeaths = deaths;
+    return defenceWatch.observe({
+      now: entry.timestamp,
+      fired: fired.map((f) => ({ rule: f.rule, skill: f.skill, gain: f.gain, urgency: f.urgency, heldBack: isHeldBack(entry.goal, f.rule, f.skill), won: entry.winner?.region === "reflex" && winnerSkill === f.skill })),
+      winner: entry.winner && { region: entry.winner.region, skill: winnerSkill, urgency: entry.winner.urgency, reason: entry.winner.reason },
+      threatClose: threatPresent(entry.state),
+      died,
+    });
+  };
   let encoded = 0;
   let deaths = 0;
   bot.on("death", () => {
@@ -204,6 +236,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         base,
         current: executor.current(),
         deaths,
+        lastHurt: bodyEvents.lastHurt(),
+        loud: bodyEvents.loud(),
         memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
         narrow: noradrenaline.focus > 0 && alarm() > NARROW_ABOVE,
         limit,
@@ -223,9 +257,15 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     logger: {
       log(entry: TickLog) {
         const seen = firstSeen(entry.state);
-        const full: TickLog = { ...entry, skillEvents: pendingEvents.splice(0), ...(seen.length ? { firstSeen: seen } : {}) };
+        const overruled = overruledDefence(entry);
+        const full: TickLog = { ...entry, skillEvents: pendingEvents.splice(0), ...(seen.length ? { firstSeen: seen } : {}), ...(overruled ? { defenceOverruledBeforeDeath: overruled } : {}) };
         fileLogger.log(full);
         console.log(formatTick(full));
+        if (overruled) {
+          const how = overruled.heldBack ? "held back by the goal" : "outvoted";
+          const winner = overruled.winner ? `${overruled.winner.region} → ${overruled.winner.skill ?? "keep going"} (urgency ${overruled.winner.urgency.toFixed(2)}: ${overruled.winner.reason})` : "nothing";
+          console.error(`!! DIED WITH DEFENCE OVERRULED: ${overruled.rule} (${overruled.skill}) was ${how}, gain ${overruled.gain.toFixed(2)}, urgency ${overruled.urgency.toFixed(2)}. Won instead: ${winner}.`);
+        }
       },
     },
   });

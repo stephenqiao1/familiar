@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import type { ItemWant, Plan, Planner, PlanRequest } from "@familiar/contracts";
+import type { Goal, ItemWant, Plan, Planner, PlanRequest } from "@familiar/contracts";
 import { z } from "zod";
 
 export interface ClaudePlannerOptions {
@@ -27,6 +27,23 @@ const PlanSchema = z.object({
       "Kinds of things to watch for while pursuing this goal, by game name (a mob type like villager, a block like chest, or player). " +
         "When one comes into view the agent heads to it at once. Empty if there is nothing to look for.",
     ),
+  ifThen: z
+    .array(
+      z.object({
+        when: z.string().describe("A kind of thing by game name, as in watchFor (e.g. creeper, villager, chest)."),
+        skill: z.string().describe("The name of one of the listed abilities to do the moment it appears."),
+      }),
+    )
+    .describe(
+      "Up to 3 responses to load in advance. The agent's fastest layer fires one the moment its thing " +
+        "appears, without waiting for you. Use it for things that will need a reaction faster than you can plan. Empty if none.",
+    ),
+  holdBack: z
+    .array(z.string())
+    .describe(
+      "Reflexes to hold back while pursuing this goal, from the list the situation gives (for example flee, when the goal is to stand and fight). " +
+        "Held-back reflexes fire much more weakly. Life-saving reflexes cannot be held back. Empty unless the goal needs it.",
+    ),
   wants: z
     .array(
       z.object({
@@ -46,7 +63,9 @@ const DEFAULT_ROLE =
   "and moment-to-moment choices; your job is to set the goal they work toward. Keep the goal " +
   "concrete and reachable with the listed abilities. Keep the current goal unless the " +
   "situation gives a reason to change it. You also decide what the agent carries: list it in " +
-  "wants, using what the situation says is in storage.";
+  "wants, using what the situation says is in storage. You can also tune the reflexes: load a " +
+  "response in ifThen for something that will need a faster reaction than you can give, and name " +
+  "in holdBack a reflex that would get in the way of the goal.";
 
 /** Plans with Claude: describes the situation, gets back a goal, steps and reason as JSON. */
 export class ClaudePlanner implements Planner {
@@ -79,14 +98,15 @@ export class ClaudePlanner implements Planner {
     );
     if (response.stop_reason === "refusal") throw new Error("planner declined to plan");
     if (!response.parsed_output) throw new Error(`planner gave no plan (stop reason: ${response.stop_reason})`);
-    return { ...response.parsed_output, wants: cleanWants(response.parsed_output.wants) };
+    const plan = response.parsed_output;
+    return { ...plan, wants: cleanWants(plan.wants), ifThen: plan.ifThen.filter((r) => r.when && r.skill).slice(0, 3), holdBack: plan.holdBack.filter(Boolean) };
   }
 }
 
 /** The user message: the current goal (if any), then the situation. */
 export function planPrompt({ situation, currentGoal }: PlanRequest): string {
   const goal = currentGoal
-    ? `Current goal: ${currentGoal.text}\nSteps (${currentGoal.stepsDone} of ${currentGoal.steps.length} done): ${currentGoal.steps.join("; ") || "none"}\nCarry: ${formatWants(currentGoal.wants)}`
+    ? `Current goal: ${currentGoal.text}\nSteps (${currentGoal.stepsDone} of ${currentGoal.steps.length} done): ${currentGoal.steps.join("; ") || "none"}\nCarry: ${formatWants(currentGoal.wants)}${formatTuning(currentGoal)}`
     : "Current goal: none yet.";
   return `${goal}\n\nSituation:\n${situation}\n\nSet the goal.`;
 }
@@ -99,6 +119,13 @@ export function cleanWants(wants: ItemWant[]): ItemWant[] {
     if (item && n > 0) byItem.set(item, n);
   }
   return [...byItem].map(([item, count]) => ({ item, count }));
+}
+
+/** The current goal's loaded responses and held-back reflexes, if it has any. */
+function formatTuning(goal: Pick<Goal, "ifThen" | "holdBack">): string {
+  const loaded = goal.ifThen.length ? `\nLoaded responses: ${goal.ifThen.map((r) => `if ${r.when} then ${r.skill}`).join("; ")}` : "";
+  const held = goal.holdBack.length ? `\nHolding back: ${goal.holdBack.join(", ")}` : "";
+  return loaded + held;
 }
 
 function formatWants(wants: ItemWant[]): string {

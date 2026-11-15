@@ -13,6 +13,7 @@ import {
   type NoradrenalineSettings,
   type PatienceSettings,
 } from "@familiar/neuromodulators";
+import { brainstemProblem, DEFAULT_BRAINSTEM, type BrainstemSettings } from "@familiar/region-brainstem";
 
 // Every bot's settings live in one file, keyed by bot name. A bot with no entry, or a setting
 // left out, gets the default. A bad value stops the bot at startup with a clear error.
@@ -28,6 +29,8 @@ export interface BotConfig {
   noradrenaline: NoradrenalineSettings;
   /** Acetylcholine temperament: focus. */
   focus: FocusSettings;
+  /** Brainstem temperament: bravery, and the strength of each part that tunes the reflexes. */
+  brainstem: BrainstemSettings;
   memory: MemorySettings;
 }
 
@@ -41,17 +44,18 @@ export const DEFAULT_MEMORY: MemorySettings = { halfLifeDays: 2 };
 export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Promise<BotConfig> {
   const bots = await readBots(file);
   const entry = bots[name] as
-    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; memory?: Partial<MemorySettings> }
+    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings>; memory?: Partial<MemorySettings> }
     | undefined;
   const personality = { ...DEFAULT_PERSONALITY, ...entry?.personality };
   const patience = { ...DEFAULT_PATIENCE, ...entry?.patience };
   const noradrenaline = { ...DEFAULT_NORADRENALINE, ...entry?.noradrenaline };
   const focus = { ...DEFAULT_FOCUS, ...entry?.focus };
+  const brainstem = { ...DEFAULT_BRAINSTEM, ...entry?.brainstem };
   const memory = { ...DEFAULT_MEMORY, ...entry?.memory };
   const memoryProblem = memory.halfLifeDays > 0 ? null : `memory.halfLifeDays must be above 0, got ${memory.halfLifeDays}`;
-  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? memoryProblem;
+  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? memoryProblem;
   if (problem) throw new Error(`${file}: bot "${name}": ${problem}`);
-  return { personality, patience, noradrenaline, focus, memory };
+  return { personality, patience, noradrenaline, focus, brainstem, memory };
 }
 
 /** The file's bots by name; none if the file is missing. Throws if it exists but is not valid. */

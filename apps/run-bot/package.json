@@ -13,6 +13,7 @@
     "@familiar/memory": "workspace:*",
     "@familiar/minecraft": "workspace:*",
     "@familiar/neuromodulators": "workspace:*",
+    "@familiar/region-brainstem": "workspace:*",
     "@familiar/region-instinct": "workspace:*",
     "@familiar/region-prefrontal": "workspace:*",
     "@familiar/region-reflex": "workspace:*"

@@ -1,13 +1,14 @@
 import type { RunningSkill, State } from "@familiar/contracts";
 import type { Base } from "../base.js";
 import type { EncodableBot } from "./encodable-bot.js";
-import { encodeSelf } from "./encode-self.js";
+import type { Vec3 } from "vec3";
+import { encodeSelf, type LastHurt } from "./encode-self.js";
 import { scanHazards } from "./scan-hazards.js";
 import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export interface EncodeContext {
   base: Base;
@@ -17,11 +18,26 @@ export interface EncodeContext {
   deaths: number;
   /** How this place feels from memory, if anything is remembered close by. Default: nothing. */
   memory?: MinecraftStateData["memory"];
+  /** When the bot was last hurt, and by whom. Default: never. */
+  lastHurt?: LastHurt | null;
+  /** Loud events heard lately (explosions, thunder). Default: none. */
+  loud?: LoudEvent[];
   /** How many of each kind of nearby thing to keep (focus sets it). Default: 10. */
   limit?: number;
   /** Narrow attention (high alarm): keep threats, drop friendly mobs and useful blocks. Default: false. */
   narrow?: boolean;
 }
+
+/** A loud event the bot heard. */
+export interface LoudEvent {
+  type: string;
+  position: Vec3;
+  at: number;
+}
+
+/** A loud event is reported for this long, and only this close. */
+const LOUD_FOR_MS = 2000;
+const LOUD_RADIUS = 32;
 
 /** Turns the bot's view of the world into a compact, game-agnostic State. */
 export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext): State {
@@ -29,12 +45,16 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
   const limit = ctx.limit ?? DEFAULT_LIMIT;
   const data: MinecraftStateData = {
     time: { isNight: !bot.time.isDay, lightLevel: lightLevel(bot) },
-    self: encodeSelf(bot, ctx.base.chest, ctx.deaths),
+    self: encodeSelf(bot, ctx.base.chest, ctx.deaths, ctx.lastHurt ?? null, now),
     nearby: {
       hazards: scanHazards(bot, limit),
       mobs: ctx.narrow ? scanMobs(bot, limit).filter((m) => m.hostile) : scanMobs(bot, limit),
       blocks: ctx.narrow ? [] : scanUsefulBlocks(bot, limit),
       players: scanPlayers(bot, limit),
+      loud: (ctx.loud ?? [])
+        .filter((e) => now - e.at <= LOUD_FOR_MS)
+        .map((e) => ({ type: e.type, dist: Math.round(e.position.distanceTo(bot.entity.position)) }))
+        .filter((e) => e.dist <= LOUD_RADIUS),
     },
     memory: ctx.memory ?? null,
     current: ctx.current && {

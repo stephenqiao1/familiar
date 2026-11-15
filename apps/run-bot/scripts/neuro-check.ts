@@ -1,4 +1,4 @@
-// Live check of the neuromodulators: runs the real bot (Jev + Claude) through scripted scenes on
+// Live check of the brain (neuromodulators, reflexes and brainstem): runs the real bot (Jev + Claude) through scripted scenes on
 // the test server and judges each from its tick log. Needs the server container running and
 // TYPESAFE_API_KEY / ANTHROPIC_API_KEY in .env.
 // Usage: pnpm neuro-check [scene ...]      (default: every scene)
@@ -21,11 +21,18 @@ interface Tick {
   tick: number;
   timestamp: number;
   regions: { region: string; proposals: unknown[]; trace?: Record<string, unknown>; error?: string }[];
-  winner: { region: string; reason: string; action: { skill?: string } } | null;
+  winner: { region: string; reason: string; urgency: number; action: { skill?: string; target?: string } } | null;
   action: { skill?: string };
-  goal: { text: string; setBy: string } | null;
+  goal: { text: string; setBy: string; ifThen?: { when: string; skill: string }[]; holdBack?: string[] } | null;
   signals: Record<string, { value: number }>;
-  state: { data: { self: { health: number; food: number; asleep: boolean }; time: { isNight: boolean }; memory: { nearby: string; kind: string } | null } };
+  state: {
+    data: {
+      self: { health: number; food: number; asleep: boolean; deaths: number; air: number; onFire: boolean; inLava: boolean; inWater: boolean; bestWeapon: string | null };
+      time: { isNight: boolean };
+      nearby: { mobs: { id: string; type: string; dist: number; hostile: boolean; reachable: boolean }[] };
+      memory: { nearby: string; kind: string } | null;
+    };
+  };
   skillEvents?: { skill: string; type: string; reason?: string }[];
 }
 
@@ -47,8 +54,14 @@ interface Scene {
   before?: string[];
   /** Server commands while it runs: [seconds after joining, command]. */
   during?: [number, string][];
+  /** Server commands after the bot has left (clean-up). */
+  after?: string[];
   /** Keep what the bot learned in earlier scenes (default: start fresh). */
   keepMemory?: boolean;
+  /** The bot to run (its settings come from bots.json). Default: Tester. Commands naming Tester are aimed at it. */
+  bot?: string;
+  /** Use the echo planner with this fixed plan instead of Claude. */
+  plan?: { goal: string; ifThen?: { when: string; skill: string }[]; holdBack?: string[] };
   /** Each check: what should be true, and whether it was. */
   checks(run: Run): [string, boolean, string?][];
 }
@@ -56,6 +69,72 @@ interface Scene {
 const ZOMBIE = `summon zombie ~2 ~ ~ {PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
 /** A quiet day with no mobs spawning (1.21.11 names the rule spawn_mobs). */
 const CALM = ["gamerule spawn_mobs false", "difficulty peaceful", "time set 1000", "weather clear", "kill @e[type=item]"];
+
+// A walled stone plaza in the sky (x 40 to 80, z 36 to 44, floor at y 150), away from the base:
+// a known flat floor with room to run, where lava, water and mobs can do no harm to the world.
+const HOME = `tp ${BOT} -8 69 14`;
+const PLAZA = [
+  "forceload add 39 35 81 45",
+  "fill 40 149 36 80 150 44 stone",
+  "fill 40 151 36 80 158 44 air",
+  "fill 39 151 35 81 152 35 glass",
+  "fill 39 151 45 81 152 45 glass",
+  "fill 39 151 35 39 152 45 glass",
+  "fill 81 151 35 81 152 45 glass",
+  "kill @e[type=!player,x=60,y=150,z=40,distance=..48]",
+];
+const TO_PLAZA = `tp ${BOT} 60.5 151 40.5`;
+const CLEAR_PLAZA = ["kill @e[type=!player,x=60,y=150,z=40,distance=..48]", "fill 40 151 36 80 160 44 air", "fill 40 149 36 80 150 44 stone"];
+const HELMET = `{PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
+const selfOf = (t: Tick) => t.state.data.self;
+const hostiles = (t: Tick) => t.state.data.nearby.mobs.filter((m) => m.hostile);
+type Fired = { rule: string; kind: "hard" | "soft"; skill: string | null; base: number; gain: number; urgency: number };
+/** What the brave bot did, kept for the timid bot's scene to compare with. */
+const ambushOf = new Map<string, { firstMove: string; atDistance: number; fleeGain: number; attackGain: number; fled: number; fought: number }>();
+
+/** The same ambush for a brave and a timid bot: armed, with a zombie closing in from 6 blocks. */
+function temperamentScene(bot: string, about: string): Scene {
+  return {
+    name: bot.toLowerCase(),
+    about,
+    seconds: 45,
+    bot,
+    before: [...CALM, "difficulty easy", ...PLAZA],
+    during: [
+      [2, `clear ${BOT}`],
+      [3, `give ${BOT} stone_sword 1`],
+      [5, TO_PLAZA],
+      [14, `summon zombie 66.5 151 40.5 ${HELMET}`],
+      [40, "kill @e[type=zombie]"],
+      [42, HOME],
+    ],
+    after: CLEAR_PLAZA,
+    checks: (run) => {
+      const fired = run.ticks.flatMap((t) => ((run.trace(t, "reflex").rules as Fired[] | undefined) ?? []).map((f) => ({ ...f, t })));
+      const gainOf = (skill: string) => mean(fired.filter((f) => f.kind === "soft" && f.skill === skill).map((f) => f.gain));
+      const moves = run.ticks.flatMap((t) => (t.skillEvents ?? []).filter((e) => e.type === "started" && (e.skill === "flee" || e.skill === "attack")).map((e) => ({ skill: e.skill, dist: Math.min(99, ...hostiles(t).map((m) => m.dist)) })));
+      const mine = { firstMove: moves[0]?.skill ?? "none", atDistance: moves[0]?.dist ?? -1, fleeGain: gainOf("flee"), attackGain: gainOf("attack"), fled: moves.filter((m) => m.skill === "flee").length, fought: moves.filter((m) => m.skill === "attack").length };
+      ambushOf.set(bot, mine);
+      const brave = ambushOf.get("Brave");
+      const compare: [string, boolean, string?][] =
+        bot === "Timid" && brave
+          ? [
+              ["the timid bot's flee reflex is stronger than the brave bot's", mine.fleeGain > brave.fleeGain, `timid ${mine.fleeGain.toFixed(2)} vs brave ${brave.fleeGain.toFixed(2)}`],
+              ["REPORT brave", true, `first ${brave.firstMove} at ${brave.atDistance} blocks; fled ×${brave.fled}, fought ×${brave.fought}; flee gain ${brave.fleeGain.toFixed(2)}, attack gain ${brave.attackGain.toFixed(2)}`],
+            ]
+          : [];
+      return [
+        ["the zombie was seen", run.ticks.some((t) => hostiles(t).length > 0)],
+        ["a defence reflex fired", fired.some((f) => f.kind === "soft" && (f.skill === "flee" || f.skill === "attack")), `${fired.length} firings`],
+        ["it reacted", moves.length > 0],
+        [`REPORT ${bot.toLowerCase()}`, true, `first ${mine.firstMove} at ${mine.atDistance} blocks; fled ×${mine.fled}, fought ×${mine.fought}; flee gain ${mine.fleeGain.toFixed(2)}, attack gain ${mine.attackGain.toFixed(2)}`],
+        ...compare,
+        ["it survived", run.ticks.every((t) => selfOf(t).deaths === 0)],
+      ];
+    },
+  };
+}
+
 const max = (values: number[]) => Math.max(0, ...values);
 const min = (values: number[]) => Math.min(1, ...values);
 const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
@@ -215,29 +294,247 @@ const scenes: Scene[] = [
       ];
     },
   },
+  {
+    name: "lava",
+    about: "Dropped into a lava pit with water three blocks away: a hard reflex should get it out, with no help from Jev or the planner.",
+    seconds: 32,
+    before: [...CALM, "difficulty easy", ...PLAZA, "setblock 60 150 40 lava", "setblock 63 150 40 water"],
+    during: [
+      [8, TO_PLAZA],
+      [28, HOME],
+    ],
+    after: CLEAR_PLAZA,
+    checks: (run) => {
+      const inLava = run.ticks.filter((t) => selfOf(t).inLava);
+      const first = inLava[0];
+      const started = run.ticks.find((t) => (t.skillEvents ?? []).some((e) => e.skill === "escape_hazard" && e.type === "started"));
+      const escapes = run.ticks.filter((t) => t.action.skill === "escape_hazard");
+      const lastIn = inLava.at(-1);
+      const burning = run.ticks.filter((t) => selfOf(t).onFire);
+      const instinctAsked = run.ticks.some((t) => JSON.stringify(run.trace(t, "instinct").questions ?? "").includes("escape_hazard"));
+      return [
+        ["the bot was in lava", first !== undefined, `${inLava.length} ticks`],
+        ["burning is sensed", burning.length > 0, `${burning.length} ticks on fire`],
+        ["escape_hazard starts within a second", first !== undefined && started !== undefined && started.timestamp - first.timestamp <= 1000, first && started ? `${started.timestamp - first.timestamp} ms` : "never started"],
+        ["every escape was a hard reflex winning at urgency 1", escapes.length > 0 && escapes.every((t) => t.winner?.region === "reflex" && t.winner.urgency === 1), `${escapes.length} ticks`],
+        ["Jev is never offered escape_hazard", !instinctAsked],
+        ["it is out of the lava within 3 seconds", first !== undefined && lastIn !== undefined && lastIn.timestamp - first.timestamp <= 3000, first && lastIn ? `${lastIn.timestamp - first.timestamp} ms in lava` : ""],
+        ["the fire is out by the end", selfOf(run.ticks.at(-1)!).onFire === false],
+        ["it survived", run.ticks.every((t) => selfOf(t).deaths === 0), `lowest health ${Math.min(...run.ticks.map((t) => selfOf(t).health))}`],
+      ];
+    },
+  },
+  {
+    name: "drowning",
+    about: "Shut in a glass tank of water with air at the top: when breath runs low a hard reflex should swim it up.",
+    seconds: 50,
+    before: [...CALM, "difficulty easy", ...PLAZA, "fill 68 151 38 72 159 42 glass hollow", "fill 69 152 39 71 156 41 water"],
+    during: [
+      [8, `tp ${BOT} 70.5 152 40.5`],
+      [46, HOME],
+    ],
+    after: CLEAR_PLAZA,
+    checks: (run) => {
+      const air = run.ticks.map((t) => selfOf(t).air);
+      const lowAt = run.ticks.findIndex((t) => selfOf(t).air <= 6 && selfOf(t).inWater);
+      const surfaced = run.ticks.filter((t) => t.action.skill === "surface");
+      const after = lowAt < 0 ? [] : air.slice(lowAt);
+      return [
+        ["it was under water", run.ticks.some((t) => selfOf(t).inWater)],
+        ["breath ran low", lowAt >= 0, `lowest air ${Math.min(...air)}`],
+        ["surface is started by a hard reflex at urgency 1", surfaced.length > 0 && surfaced.every((t) => t.winner?.region === "reflex" && t.winner.urgency === 1), `${surfaced.length} ticks`],
+        ["it got its breath back", Math.max(0, ...after) >= 10, `air back up to ${Math.max(0, ...after)}`],
+        ["the air signal rose and fell", max(run.signal("air")) > 0.6 && (run.signal("air").at(-1) ?? 1) < 0.6, `max ${max(run.signal("air")).toFixed(2)}`],
+        ["it survived", run.ticks.every((t) => selfOf(t).deaths === 0), `lowest health ${Math.min(...run.ticks.map((t) => selfOf(t).health))}`],
+      ];
+    },
+  },
+  {
+    name: "far",
+    about: "A zombie 12 blocks away across a gap it cannot cross: the bot should look at it and carry on, not flee.",
+    seconds: 45,
+    // A fixed plan keeps the scene about the lower layers (Claude, left to itself, loads "if zombie then attack").
+    plan: { goal: "Keep watch from where you stand on the plaza." },
+    before: [...CALM, "difficulty easy", ...PLAZA],
+    during: [
+      [6, TO_PLAZA],
+      // Wherever the bot has wandered to on the plaza: cut a gap 4 to 8 blocks east of it, and put the zombie beyond.
+      [13, `execute at ${BOT} run fill ~4 149 36 ~8 150 44 air`],
+      [14, `execute at ${BOT} run summon zombie ~12 151 ~ ${HELMET}`],
+      [40, "kill @e[type=zombie]"],
+      [42, HOME],
+    ],
+    after: CLEAR_PLAZA,
+    checks: (run) => {
+      const seen = run.ticks.filter((t) => hostiles(t).length > 0);
+      const nearest = Math.min(99, ...seen.flatMap((t) => hostiles(t).map((m) => m.dist)));
+      const fired = run.ticks.flatMap((t) => (run.trace(t, "reflex").rules as Fired[] | undefined) ?? []);
+      const oriented = run.ticks.filter((t) => run.trace(t, "brainstem").orienting !== undefined);
+      const looked = run.ticks.filter((t) => t.winner?.region === "brainstem" && t.action.skill === "look_at");
+      const ran = run.events().filter((e) => e.type === "started" && (e.skill === "flee" || e.skill === "attack"));
+      return [
+        ["the zombie was seen, and stayed far", seen.length > 0 && nearest >= 9, `nearest ${nearest} blocks over ${seen.length} ticks`],
+        ["no defence reflex fired", fired.filter((f) => f.rule.startsWith("threat_")).length === 0],
+        ["it was drawn to look", oriented.length > 0, `${oriented.length} orienting, ${looked.length} looks taken`],
+        ["it did not flee or attack", ran.length === 0, ran.map((e) => e.skill).join(", ")],
+        ["alarm stayed low", max(run.signal("alarm")) < 0.5, `max ${max(run.signal("alarm")).toFixed(2)}`],
+      ];
+    },
+  },
+  {
+    name: "loaded",
+    about: "The goal loads 'if creeper then flee': the response should fire the moment a creeper appears, with no new plan needed.",
+    seconds: 40,
+    plan: { goal: "Explore the plaza.", ifThen: [{ when: "creeper", skill: "flee" }] },
+    before: [...CALM, "difficulty easy", ...PLAZA],
+    during: [
+      [6, TO_PLAZA],
+      [22, `summon creeper 70.5 151 40.5 {NoAI:1b,PersistenceRequired:1b}`],
+      [35, "kill @e[type=creeper]"],
+      [37, HOME],
+    ],
+    after: CLEAR_PLAZA,
+    checks: (run) => {
+      const seenAt = run.ticks.find((t) => hostiles(t).some((m) => m.type === "creeper"));
+      const firedAt = run.ticks.find((t) => run.trace(t, "brainstem").loadedResponse !== undefined);
+      const fleeAt = run.ticks.find((t) => (t.skillEvents ?? []).some((e) => e.skill === "flee" && e.type === "started"));
+      const plans = run.ticks.filter((t) => t.regions.some((r) => r.region === "prefrontal" && r.trace?.plan)).map((t) => t.timestamp);
+      const lastPlan = firedAt ? Math.max(0, ...plans.filter((at) => at <= firedAt.timestamp)) : 0;
+      const nextPlan = firedAt ? Math.min(Infinity, ...plans.filter((at) => at > firedAt.timestamp)) : 0;
+      return [
+        ["the goal carries the loaded response", run.ticks.some((t) => t.goal?.ifThen?.some((r) => r.when === "creeper" && r.skill === "flee"))],
+        ["the creeper was seen", seenAt !== undefined, seenAt ? `${hostiles(seenAt)[0]?.dist} blocks away` : ""],
+        ["the response fired on the tick the creeper appeared", seenAt !== undefined && firedAt !== undefined && firedAt.tick === seenAt.tick, firedAt && seenAt ? `${firedAt.timestamp - seenAt.timestamp} ms after first sight` : "never"],
+        ["the brainstem won with flee at 0.95", firedAt?.winner?.region === "brainstem" && firedAt.winner.action.skill === "flee" && firedAt.winner.urgency === 0.95, firedAt?.winner ? `${firedAt.winner.region} ${firedAt.winner.action.skill} ${firedAt.winner.urgency}` : ""],
+        ["flee started before the planner's next run", fleeAt !== undefined && firedAt !== undefined && fleeAt.timestamp < nextPlan, firedAt ? `${((firedAt.timestamp - lastPlan) / 1000).toFixed(1)} s after the last plan, ${nextPlan === Infinity ? "no later plan" : `${((nextPlan - firedAt.timestamp) / 1000).toFixed(1)} s before the next`}` : ""],
+      ];
+    },
+  },
+  {
+    name: "hold",
+    about: "The goal holds back flee: a zombie closing in should not make the bot retreat, but at low health last_stand still pulls it out.",
+    seconds: 55,
+    plan: { goal: "Stand your ground on the plaza and fight any zombie. Do not run.", holdBack: ["flee"] },
+    before: [...CALM, "difficulty normal", ...PLAZA],
+    during: [
+      [2, `clear ${BOT}`],
+      [3, `give ${BOT} stone_sword 1`],
+      [6, TO_PLAZA],
+      [14, `summon zombie 66.5 151 40.5 ${HELMET}`],
+      [34, `execute at ${BOT} run summon zombie ~2 ~ ~ ${HELMET}`],
+      [35, `damage ${BOT} 14`],
+      [50, "kill @e[type=zombie]"],
+      [52, HOME],
+    ],
+    after: [...CLEAR_PLAZA, "difficulty peaceful"],
+    checks: (run) => {
+      const fired = run.ticks.flatMap((t) => ((run.trace(t, "reflex").rules as Fired[] | undefined) ?? []).map((f) => ({ ...f, t })));
+      const softFlee = fired.filter((f) => f.kind === "soft" && f.skill === "flee");
+      const lastStand = fired.filter((f) => f.rule === "last_stand");
+      const firstStand = lastStand[0]?.t;
+      const fleeStarts = run.ticks.filter((t) => (t.skillEvents ?? []).some((e) => e.skill === "flee" && e.type === "started"));
+      const early = fleeStarts.filter((t) => !firstStand || t.timestamp < firstStand.timestamp - 1000);
+      const kept = run.ticks.some((t) => run.trace(t, "noradrenaline").keptGoal !== undefined);
+      const died = run.ticks.some((t) => selfOf(t).deaths > 0);
+      const logged = /DIED WITH DEFENCE OVERRULED/.test(run.output);
+      return [
+        ["the goal holds back flee", run.ticks.some((t) => t.goal?.holdBack?.includes("flee"))],
+        ["the goal survives the fright", kept || run.ticks.at(-1)?.goal?.holdBack?.includes("flee") === true, kept ? "kept through an interrupt" : "no interrupt fired"],
+        ["the flee reflex fired, held back", softFlee.length > 0 && softFlee.every((f) => f.gain <= 0.46), softFlee.length ? `${softFlee.length} firings, gain ${Math.min(...softFlee.map((f) => f.gain)).toFixed(2)} to ${Math.max(...softFlee.map((f) => f.gain)).toFixed(2)}, urgency up to ${Math.max(...softFlee.map((f) => f.urgency)).toFixed(2)}` : "never fired"],
+        ["it stood its ground: no flee before last_stand", early.length === 0, `${early.length} early flees`],
+        ["last_stand fired at low health, at urgency 1", lastStand.length > 0 && lastStand.every((f) => f.urgency === 1 && selfOf(f.t).health <= 6), `${lastStand.length} firings`],
+        ["and it won: the bot broke away", lastStand.some((f) => f.t.winner?.region === "reflex" && f.t.action.skill === "flee")],
+        // Holding back defence can cost the bot its life. That is allowed, but it must be logged loudly.
+        ["it survived, or its death was logged as defence overruled", died === logged, died ? "DIED: logged with the gain and what won" : `lowest health ${Math.min(...run.ticks.map((t) => selfOf(t).health))}`],
+      ];
+    },
+  },
+  {
+    name: "bang",
+    about: "TNT goes off 10 blocks away on a quiet day: the bot should startle, brace, and its alarm should rise.",
+    seconds: 30,
+    before: [...CALM, "difficulty easy", ...PLAZA],
+    during: [
+      [6, TO_PLAZA],
+      [14, `execute at ${BOT} run summon tnt ~10 ~ ~ {fuse:40}`],
+      [26, HOME],
+    ],
+    after: CLEAR_PLAZA,
+    checks: (run) => {
+      const heard = run.ticks.filter((t) => ((t.state.data.nearby as unknown as { loud: { type: string; dist: number }[] }).loud ?? []).length > 0);
+      const startles = run.ticks.flatMap((t) => (run.trace(t, "brainstem").startle ? [{ t, by: (run.trace(t, "brainstem").startle as { by: string }).by }] : []));
+      const first = startles[0];
+      const raised = first ? (run.trace(first.t, "noradrenaline").raisedBy as Record<string, number> | undefined) : undefined;
+      return [
+        ["the explosion was heard", heard.length > 0, `${heard.length} ticks`],
+        ["it startled, once", startles.length === 1 && first?.by === "loud_nearby", startles.map((s) => s.by).join(", ") || "no startle"],
+        ["bracing won that tick", first?.t.winner?.region === "brainstem" && first.t.action.skill === "brace"],
+        ["the startle raised alarm on the same tick", (raised?.startle ?? 0) > 0, JSON.stringify(raised ?? {})],
+      ];
+    },
+  },
+  temperamentScene("Brave", "Bravery 0.8, armed, with a zombie closing in from 6 blocks."),
+  temperamentScene("Timid", "Bravery 0.2, the same ambush: it should flee more readily than the brave bot."),
+  {
+    name: "sleepgate",
+    about: "A full night in bed (the night is not skipped): Jev and the planner should fall silent, and a hit should wake them at once.",
+    seconds: 560,
+    before: [...CALM, "gamerule players_sleeping_percentage 101", "time set 13000"],
+    during: [[300, `damage ${BOT} 2`]],
+    after: ["gamerule players_sleeping_percentage 100"],
+    checks: (run) => {
+      const paused = run.ticks.filter((t) => (t.signals.upper_paused?.value ?? 0) > 0);
+      const callsWhilePaused = paused.filter((t) => run.trace(t, "instinct").paused !== true).length;
+      const span = (t: Tick) => (run.ticks[run.ticks.indexOf(t) + 1]?.timestamp ?? t.timestamp) - t.timestamp;
+      const pausedSeconds = paused.reduce((sum, t) => sum + span(t), 0) / 1000;
+      const asleepSeconds = run.ticks.filter((t) => selfOf(t).asleep).reduce((sum, t) => sum + span(t), 0) / 1000;
+      const pausedAt = new Set(paused.map((t) => t.tick));
+      const plansWhilePaused = run.ticks.filter((t) => pausedAt.has(t.tick) && t.regions.some((r) => r.region === "prefrontal" && r.trace?.plan)).length;
+      const engineCalls = run.ticks.filter((t) => run.trace(t, "instinct").engine !== undefined).length;
+      const hit = run.ticks.find((t, i) => i > 0 && selfOf(t).health < selfOf(run.ticks[i - 1]!).health && run.at(t) > 250);
+      const backAsleep = hit ? run.ticks.some((t) => t.timestamp > hit.timestamp + 5000 && (t.signals.upper_paused?.value ?? 0) > 0) : false;
+      const woke = run.ticks.flatMap((t) => (run.trace(t, "brainstem").woken ? [`${String(run.trace(t, "brainstem").woken)} at ${run.at(t).toFixed(0)} s`] : []));
+      const stops = run.events().filter((e) => e.skill === "sleep" && e.type !== "started" && e.type !== "done").map((e) => `${e.type}${e.reason ? ` (${e.reason})` : ""}`);
+      return [
+        ["the bot slept most of the night", asleepSeconds > 300, `${asleepSeconds.toFixed(0)} s asleep, upper layers paused ${pausedSeconds.toFixed(0)} s`],
+        ["no Jev call is made while paused", callsWhilePaused === 0, `${callsWhilePaused} calls in ${paused.length} paused ticks`],
+        ["no plan arrives while paused", plansWhilePaused <= 1, `${plansWhilePaused}`],
+        ["REPORT calls", true, `Jev: ${engineCalls} made, ${paused.length} saved; planner: about ${Math.floor(pausedSeconds / 15)} runs saved`],
+        ["the hit wakes the upper layers on the same tick", hit !== undefined && (hit.signals.upper_paused?.value ?? 1) === 0 && run.trace(hit, "instinct").paused !== true, hit ? `at ${run.at(hit).toFixed(0)} s: ${String(run.trace(hit, "brainstem").woken ?? "not asleep")}` : "no hit seen"],
+        ["it goes back to sleep afterwards", backAsleep],
+        ["REPORT wakings", true, [...new Set(woke)].slice(0, 6).join("; ") || "none"],
+        ["REPORT sleep stopped by", true, stops.join("; ") || "nothing"],
+      ];
+    },
+  },
 ];
 
 /** Runs the bot for a scene and returns its log. */
 async function play(scene: Scene): Promise<Run> {
-  if (!scene.keepMemory) rmSync(`data/${BOT}`, { recursive: true, force: true });
-  for (const command of scene.before ?? []) rcon(command);
+  const bot = scene.bot ?? BOT;
+  /** Commands are written for Tester; a scene with its own bot has them aimed at it. */
+  const send = (command: string) => rcon(command.replaceAll(BOT, bot));
+  if (!scene.keepMemory) rmSync(`data/${bot}`, { recursive: true, force: true });
+  for (const command of scene.before ?? []) send(command);
   rcon("kill @e[type=!player,type=!item,distance=..64,x=-8,y=68,z=16]");
-  const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", "--engine", "jev", "--planner", "claude", "--name", BOT], { stdio: ["ignore", "pipe", "pipe"] });
+  const planner = scene.plan ? ["--planner", "echo", "--plan", JSON.stringify(scene.plan)] : ["--planner", "claude"];
+  const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", "--engine", "jev", ...planner, "--name", bot], { stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", (d: Buffer) => (output += d));
   child.stderr.on("data", (d: Buffer) => (output += d));
   const joined = Date.now();
   while (!output.includes("Logging to") && Date.now() - joined < 30_000) await sleep(200);
-  rcon(`effect clear ${BOT}`);
-  rcon(`effect give ${BOT} instant_health 1 10 true`);
+  send(`effect clear ${BOT}`);
+  send(`effect give ${BOT} instant_health 1 10 true`);
   const started = Date.now();
   const pending = [...(scene.during ?? [])].sort((a, b) => a[0] - b[0]);
   while (Date.now() - started < scene.seconds * 1000) {
-    while (pending[0] && (Date.now() - started) / 1000 >= pending[0][0]) rcon(pending.shift()![1]);
+    while (pending[0] && (Date.now() - started) / 1000 >= pending[0][0]) send(pending.shift()![1]);
     await sleep(250);
   }
   child.kill("SIGINT");
   await new Promise((resolve) => child.once("exit", resolve));
+  for (const command of scene.after ?? []) send(command);
   const file = output.match(/Logging to (\S+)/)?.[1];
   if (!file) throw new Error(`The bot did not start:\n${output.slice(-600)}`);
   const ticks = readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Tick);
@@ -279,6 +576,6 @@ for (const scene of chosen) {
     console.log(`  ${ok ? "PASS" : "FAIL"}  ${what}${detail ? `  (${detail})` : ""}`);
   }
 }
-for (const command of ["gamerule spawn_mobs true", "difficulty easy", "time set 1000"]) rcon(command);
+for (const command of ["gamerule spawn_mobs true", "difficulty easy", "time set 1000", "forceload remove 39 35 81 45"]) rcon(command);
 console.log(failed ? `\n${failed} check(s) failed.` : "\nAll checks passed.");
 process.exitCode = failed ? 1 : 0;

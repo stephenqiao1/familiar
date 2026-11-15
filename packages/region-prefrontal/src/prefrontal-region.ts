@@ -21,6 +21,9 @@ export interface PrefrontalOptions {
   layer?: number;
 }
 
+/** A goal carries at most this many loaded responses. */
+const MAX_IF_THEN = 3;
+
 /**
  * The slow, deliberate region: in the background, describes the situation to a planner and
  * writes the plan into the workspace as the goal. It only sets goals; it never proposes actions.
@@ -29,6 +32,9 @@ export interface PrefrontalOptions {
  * The planner also says how many steps of the goal it was shown are finished. The count carries
  * over while the steps stay the same and starts again at 0 when they change; whenever it goes
  * up, the goal notes the time a step was last finished.
+ *
+ * A plan can also tune the fastest layer: `ifThen` loads responses to fire on sight, and
+ * `holdBack` names soft reflexes to damp. Both last only as long as the goal that set them.
  */
 export function createPrefrontalRegion(options: PrefrontalOptions): Region {
   const { planner, describe, everyMs = 15_000, timeoutMs = 60_000, name = "prefrontal", layer = 2 } = options;
@@ -55,6 +61,8 @@ export function createPrefrontalRegion(options: PrefrontalOptions): Region {
         reason: plan.reason,
         wants: plan.wants ?? [],
         watchFor: plan.watchFor ?? [],
+        ifThen: (plan.ifThen ?? []).slice(0, MAX_IF_THEN),
+        holdBack: plan.holdBack ?? [],
         stepsDone: sameSteps ? Math.max(reported, shown.stepsDone) : 0,
         stepDoneAt: advanced ? Date.now() : (shown?.stepDoneAt ?? null),
       });

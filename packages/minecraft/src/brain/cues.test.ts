@@ -5,7 +5,7 @@ import { approachableThings, noticedIn, skillsToward, thingsInView } from "./cue
 
 const nearby = {
   hazards: [{ id: "pos:0,62,5", type: "lava", dist: 5 }],
-  mobs: [{ id: "entity:3", type: "villager", dist: 2, hostile: false }],
+  mobs: [{ id: "entity:3", type: "villager", dist: 2, hostile: false, reachable: true }],
   blocks: [{ id: "pos:3,63,0", type: "chest", dist: 3 }],
   players: [{ id: "entity:9", type: "player", dist: 9 }],
 };
@@ -29,7 +29,7 @@ describe("thingsInView", () => {
 
 describe("approachableThings", () => {
   it("leaves out hazards and hostile mobs", () => {
-    const data = { self, nearby: { ...nearby, mobs: [...nearby.mobs, { id: "entity:5", type: "skeleton", dist: 1, hostile: true }] } };
+    const data = { self, nearby: { ...nearby, mobs: [...nearby.mobs, { id: "entity:5", type: "skeleton", dist: 1, hostile: true, reachable: true }] } };
     const withThreat: State = { schemaVersion: SCHEMA_VERSION, tick: 0, timestamp: 0, data };
     expect(approachableThings(withThreat)).toEqual([
       { id: "entity:3", kind: "villager" },

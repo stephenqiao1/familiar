@@ -1,5 +1,5 @@
-// Summarises a run's tick log for checking the neuromodulators: each dial's range, what moved it,
-// rewards, surprises, memories, interrupts, warnings and region errors.
+// Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
+// surprises, reflexes and the brainstem, memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -100,6 +100,36 @@ type Lookup = { what: string; used: boolean };
 const lookups = ticks.flatMap((t) => (trace(t, "acetylcholine").remembered as Lookup[] | undefined) ?? []);
 console.log(`REMEMBERED VALUES: used ${lookups.filter((l) => l.used).length}, rejected ${lookups.filter((l) => !l.used).length}`);
 console.log(`ACETYLCHOLINE: ${flags("acetylcholine", ["cue", "asleep", "warning", "attention"])}`);
+
+// Spinal cord and brainstem.
+type Fired = { rule: string; kind: "hard" | "soft"; skill: string | null; base: number; gain: number; urgency: number };
+const fired = ticks.flatMap((t) => (trace(t, "reflex").rules as Fired[] | undefined) ?? []);
+const soft = fired.filter((f) => f.kind === "soft");
+const meanOf = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+console.log(`\nREFLEXES FIRED: hard ${list(count(fired.filter((f) => f.kind === "hard"), (f) => f.rule))}; soft ${list(count(soft, (f) => f.rule))}`);
+console.log(
+  `SOFT REFLEX GAIN: ${soft.length ? `mean ${meanOf(soft.map((f) => f.gain)).toFixed(2)}, range ${Math.min(...soft.map((f) => f.gain)).toFixed(2)} to ${Math.max(...soft.map((f) => f.gain)).toFixed(2)}, mean urgency ${meanOf(soft.map((f) => f.urgency)).toFixed(2)}` : "no soft reflex fired"}`,
+);
+const stem = (key: string) => ticks.filter((t) => trace(t, "brainstem")[key] !== undefined);
+console.log(`STARTLES: ${list(count(stem("startle"), (t) => (trace(t, "brainstem").startle as { by: string }).by))}`);
+console.log(`LOADED RESPONSES FIRED: ${list(count(stem("loadedResponse"), (t) => { const r = trace(t, "brainstem").loadedResponse as { when: string; skill: string }; return `${r.when} → ${r.skill}`; }))}; dropped: ${stem("droppedResponses").length}; hold-backs ignored: ${stem("ignoredHoldBack").length}`);
+console.log(`ORIENTING: ${stem("orienting").length} times, ${ticks.filter((t) => t.winner?.region === "brainstem" && t.winner.action.skill === "look_at").length} looks taken`);
+// Time is counted from each tick to the next.
+const span = (t: Tick, i: number) => (ticks[i + 1]?.timestamp ?? t.timestamp) - t.timestamp;
+const asleepMs = ticks.reduce((sum, t, i) => sum + ((t.signals.arousal?.value ?? 1) < 0.1 ? span(t, i) : 0), 0);
+const pausedTicks = ticks.filter((t) => (t.signals.upper_paused?.value ?? 0) > 0);
+const pausedMs = ticks.reduce((sum, t, i) => sum + ((t.signals.upper_paused?.value ?? 0) > 0 ? span(t, i) : 0), 0);
+const engineCalls = ticks.filter((t) => trace(t, "instinct").engine !== undefined || t.regions.some((r) => r.region === "instinct" && r.error)).length;
+const engineSaved = ticks.filter((t) => trace(t, "instinct").paused === true).length;
+const callsWhilePaused = pausedTicks.filter((t) => trace(t, "instinct").paused !== true).length;
+const PLAN_EVERY_MS = 15_000;
+console.log(`ASLEEP: ${(asleepMs / 1000).toFixed(0)} s; upper layers paused ${(pausedMs / 1000).toFixed(0)} s (${pausedTicks.length} ticks)`);
+console.log(`ENGINE CALLS: ${engineCalls} made, ${engineSaved} saved by the pause (${callsWhilePaused} made while paused); planner runs saved: about ${Math.floor(pausedMs / PLAN_EVERY_MS)}`);
+const woken = count(stem("woken"), (t) => String(trace(t, "brainstem").woken));
+console.log(`WOKEN BY: ${list(woken)}`);
+const overruled = ticks.filter((t) => (t as Tick & { defenceOverruledBeforeDeath?: unknown }).defenceOverruledBeforeDeath);
+for (const t of overruled) console.log(`!! DIED WITH DEFENCE OVERRULED at tick ${t.tick}: ${JSON.stringify((t as Tick & { defenceOverruledBeforeDeath?: unknown }).defenceOverruledBeforeDeath)}`);
+console.log(`BODY (max): air ${Math.max(0, ...ticks.map((t) => t.signals.air?.value ?? 0)).toFixed(2)}, pain ${Math.max(0, ...ticks.map((t) => t.signals.pain?.value ?? 0)).toFixed(2)}, hunger ${Math.max(0, ...ticks.map((t) => t.signals.hunger?.value ?? 0)).toFixed(2)}`);
 
 // Memory.
 type Recorded = { trigger: string; summary: string; strength: number; merged: boolean };

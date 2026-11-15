@@ -3,6 +3,227 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-15: the spinal cord and brainstem layer
+
+*Found by running the real bot on the test server with `pnpm neuro-check` (scenes `lava`,
+`drowning`, `far`, `loaded`, `hold`, `bang`, `brave`, `timid`, `sleepgate`) and reading the logs
+with `pnpm brain-report`. Nothing here showed up in the automated tests.*
+
+**Found and fixed.**
+
+- **Mineflayer's air level is wrong on 1.21.11.** `bot.oxygenLevel` fell to 0 on dry land. On
+  newer versions Mineflayer sets it from *any* entity's air, so a mob in water nearby makes the bot
+  look breathless. Air is now read from the bot's own entity (`packages/minecraft/src/body.ts`).
+- **The bot stayed "on fire" after dying.** The server only sends flags that changed, and a new
+  body's flags are the defaults, so the old burning flag was never cleared. `escape_hazard` then
+  ran for good. The flags are now reset on death and respawn.
+- **Explosions are not heard through Mineflayer's sound event.** A real TNT blast produced no
+  `soundEffectHeard` at all, and the sound names that do arrive are off on this version (a fire
+  being put out arrived named as an explosion). Explosions are now read from the server's own
+  `explosion` packet. This is not a public Mineflayer event, which the spec asked to avoid; it is
+  five lines and Mineflayer uses the same packet itself.
+- **`escape_hazard` hopped over the water instead of into it.** It held jump the whole way, so it
+  bounced above a one-block pool while still burning, and died. It now jumps only in lava or
+  against a ledge.
+- **A fright interrupted the bot's own escape.** Lava damage made alarm jump; the interrupt stopped
+  `escape_hazard`, which restarted a tick later, costing about 200 ms in lava. An interrupt no
+  longer stops a skill a hard reflex is running.
+- **An alarm jump wiped a "hold back" goal the moment the threat appeared.** Interrupts clear the
+  goal. A goal that prepared for trouble (it has `ifThen` or `holdBack`) is now kept.
+- **A look at urgency 0.35 never won.** Idling scores about 0.9 once its learned value and stay
+  bonus are added. A look is now proposed at full urgency, but only when the bot is idle (or doing
+  nothing) and no reflex, startle or loaded response spoke on the same tick. This departs from the
+  spec's number to keep the spec's intent ("it only beats idling").
+- **Jev fled from a far zombie by itself.** The reflexes stayed quiet at 12 blocks, as designed,
+  but Jev picked `flee` (its instructions said to attack or flee within 16 blocks). The
+  instructions now say to leave alone anything more than 8 blocks away or unable to reach the bot.
+  In the next run Jev kept idling (flee at 0.11 to 0.17). This is persuasion, not a guarantee.
+- **Sleep was treated as a skill taking too long.** Over a full night the "give up" clock would
+  stop it. Being asleep and undisturbed now restarts that clock each tick.
+
+**Seen, left as it is.**
+
+- **Lava is only survivable with health and water to spare.** Lava does 4 damage every half
+  second, and the bot keeps burning afterwards. From full health with water 3 blocks away the bot
+  got out in 0.6 s and lived (lowest health 13). From 11 health, before the fixes above, it died.
+  With no water within 6 blocks it stands still and burns, which can kill it.
+- **Claude loaded a response nobody asked for, and it fired at a zombie that could not reach the
+  bot.** In the `far` scene Claude's own plan carried "if zombie then attack". The zombie appeared
+  12 blocks away across a gap and the bot started `attack`. Loaded responses fire on sight; they do
+  not check distance or whether the thing can reach the bot. The `far` scene now uses a fixed plan.
+- **Brave and timid, one run each.** Same ambush, armed, zombie 6 blocks away. Brave (0.8): flee
+  gain 0.85, attack gain 1.48; it attacked once and never fled. Timid (0.2): flee gain 1.40, attack
+  gain 0.98; it fled 5 times and attacked 5 times. Where each bot stood when the zombie appeared
+  was not controlled (they wander the plaza), so the distances are not comparable.
+
+- **Holding back flee killed the bot in one run of two.** In the `hold` scene `last_stand` pulled
+  the bot out at 3 health both times. In the second run the zombie came back; the held-back flee
+  reflex fired at 0.26 and lost to Jev, which tried `attack` (refused at low health), and the bot
+  died. The run printed `!! DIED WITH DEFENCE OVERRULED` with the gain (0.36). `last_stand` only
+  covers a hostile within 4 blocks, and nothing lifts a hold-back once the bot is badly hurt.
+- **The sleep gate over a full night.** 515 s asleep; instinct and the planner were paused for
+  502 s. Jev: 137 calls made, 1009 saved, none while paused. About 33 planner runs saved. A hit at
+  300 s woke both on the same tick, and the bot went back to sleep.
+- **At dawn `sleep` is started and refused about 65 times.** Mineflayer says it is still night
+  until the day counter turns over, but the game stops allowing sleep a little earlier. Not new,
+  and unseen before because the night was always skipped when the only player slept.
+
+**Status.** Fixed, except the items above.
+
+## Brainstem: "can it reach me" is a guess
+
+*Found 2026-11-15 while building defence by distance (`packages/minecraft/src/encode/scan-mobs.ts`).*
+
+**What we saw.** A hostile counts as reachable when it is within 3 blocks of the bot's height and
+nothing solid is between its eyes and the bot's. A zombie across a pit at the same height counts
+as reachable. One behind a fence or glass does not, though it may walk round.
+
+**Why.** Real reachability needs a path search per mob per tick, which is too slow.
+
+**What would fix it.** Run the pathfinder for the nearest one or two hostiles only, every second or
+so, and cache the answer.
+
+**Status.** Open.
+
+## Brainstem: a far threat gets no reflex, even one that shoots
+
+*Found 2026-11-15 (`packages/minecraft/src/brain/reflexes.ts`).*
+
+**What we saw.** Beyond 8 blocks no defence reflex fires. A skeleton shoots from 16. The bot only
+looks at it until it is hit (which startles it) or the skeleton comes within 8.
+
+**Why.** The zones are the same for every mob. Ranged mobs are only special in contact (always
+flee, never attack).
+
+**What would fix it.** Give ranged mobs a wider "approaching" zone, as far as they can shoot.
+
+**Status.** Open.
+
+## Brainstem: an unreachable mob close by still keeps alarm up
+
+*Found 2026-11-15 (`packages/minecraft/src/brain/alarm.ts`).*
+
+**What we saw.** The reflexes treat a hostile that cannot reach the bot as far. Alarm does not: it
+counts any hostile within 8 blocks as a threat, so alarm will not fade while a zombie stands
+behind a wall. Reflex gains stay high and ticks stay fast.
+
+**Why.** The spec said to keep alarm's existing rules. Alarm and the reflexes now disagree on what
+a threat is.
+
+**What would fix it.** Have `threatPresent` and `hostile_appeared` use the same zones.
+
+**Status.** Open.
+
+## Brainstem: the first tick of a threat is damped
+
+*Found 2026-11-15 (`apps/run-bot/src/brainstem-behaviour.test.ts`).*
+
+**What we saw.** When a hostile appears, the reflex fires with last tick's alarm (0), so its gain
+is 0.6: fleeing is proposed at 0.42, which Jev can outvote. One tick later (150 to 500 ms) alarm
+has risen and the gain is above 1.
+
+**Why.** The reflex region is listed before noradrenaline, so it reads alarm one tick late. The
+spec allowed this. A hostile first seen within 3 blocks is covered by the startle (urgency 1).
+
+**What would fix it.** List noradrenaline before reflex, or compute this tick's alarm bump inside
+the gain.
+
+**Status.** Open.
+
+## Brainstem: a close ambush now takes the planner offline every time
+
+*Found 2026-11-15 (`packages/minecraft/src/brain/alarm.ts`).*
+
+**What we saw.** A hostile appearing within 3 blocks raises alarm by 0.6 (hostile appeared) plus
+0.3 (startle), to 0.9. Above 0.8 the planner goes offline until alarm is back under 0.5.
+
+**Why.** Triggers add up. Before the startle existed the same ambush reached 0.6 unless the bot
+was also hit.
+
+**What would fix it.** Take the larger of the two instead of the sum, or lower the startle's share.
+
+**Status.** Open. It seems right for an ambush; revisit if the planner is offline too often.
+
+## Brainstem: holding back flee leaves an unarmed bot with nothing until last_stand
+
+*Found 2026-11-15 in the `hold` scene.*
+
+**What we saw.** With `holdBack: ["flee"]` the flee reflex fired 41 times at gain 0.30 to 0.42
+(urgency at most 0.38) and never won. The bot stood its ground, fell to 3 health, and `last_stand`
+then pulled it out at urgency 1. It lived.
+
+**Why.** That is the design: defence is tunable, and the cost is real. Naming a skill in
+`holdBack` damps every soft reflex that proposes it, in every zone. If the bot dies this way the
+run prints `!! DIED WITH DEFENCE OVERRULED` (only if the reflex was overruled in the 10 seconds
+before the death, with a hostile within 8 blocks).
+
+**What would fix it.** Nothing needs fixing. If it proves too costly: raise `last_stand`'s health
+threshold, or let the planner hold back one zone at a time.
+
+**Status.** Open, by design.
+
+## Brainstem: most strengths are on or off
+
+*Found 2026-11-15 (`packages/region-brainstem/src/settings.ts`).*
+
+**What we saw.** `gains` and `holdBack` scale smoothly from 0 to 1. `startle`, `orienting`,
+`loadedResponses`, `arousalGate` and `bodySignals` are on above 0 and off at 0.
+
+**Why.** There is no natural "half a startle". The noradrenaline and focus effects work the same way.
+
+**What would fix it.** Give each a meaning for in-between values (e.g. startle strength scales the
+alarm it adds).
+
+**Status.** Open.
+
+## Brainstem: startle and orienting miss some things
+
+*Found 2026-11-15 (`packages/minecraft/src/brain/brainstem.ts`).*
+
+**What we saw.**
+- Damage with no attacker (a fall, fire, hunger) does not startle. Otherwise a starving bot would
+  startle every 5 seconds.
+- An explosion startles, but the state does not say which way it was, so the bot braces without
+  turning. Thunder and other loud sounds are not sensed at all.
+- A look happens once, when a hostile or player first comes into view within 16 blocks. Friendly
+  mobs and blocks never draw a look.
+
+**What would fix it.** Add the explosion's position to `nearby.loud`; add thunder once sound names
+can be trusted on this version.
+
+**Status.** Open.
+
+## Brainstem: a cue can wake a sleeping bot
+
+*Found 2026-11-15 (`packages/region-brainstem/src/brainstem-region.ts`).*
+
+**What we saw.** While asleep and undisturbed, Jev is paused, so the brainstem proposes staying
+with `sleep` at urgency 0.5. Dopamine's cues (at most 0.3) lose to that. A focus cue pulse (0.6)
+would win and get the bot out of bed. Not seen live.
+
+**Why.** Something has to speak for staying asleep once Jev is silent, and 0.5 is a guess.
+
+**What would fix it.** Skip cue pulses while `upper_paused` is up.
+
+**Status.** Open.
+
+## Primitives: two are not quite "tiny", and most are untested live
+
+*Found 2026-11-15 (`packages/minecraft/src/primitives/`).*
+
+**What we saw.**
+- `break_block` runs until the block breaks, which can take many seconds. Digging cannot be
+  paused and resumed, so it cannot be cut into one-second pieces.
+- `use_item` starts using the item and returns after a quarter of a second; the item stays in use
+  (eating carries on) until something else stops it.
+- Only `look_at` and `brace` have run on the server. The others have no tests: they are thin
+  wrappers over Mineflayer calls that need a real world.
+- Body signals (`air`, `pain`, `hunger`) are shared but nothing reads them yet.
+
+**What would fix it.** A `skill-check` pass for each primitive on the test server.
+
+**Status.** Open.
+
 ## Live testing, 2026-11-14: what was found and fixed
 
 *Found by running the real bot (Jev + Claude) on the test server with `pnpm neuro-check`, and
@@ -244,7 +465,8 @@ sensed. There are TODO comments for all three in `alarm.ts`.
 
 **What would fix it.** Add those senses to the state, then one small trigger each.
 
-**Status.** Open.
+**Status.** Partly done 2026-11-15: explosions are sensed and reach alarm through the startle. A
+hostile targeting the bot and another player being attacked are still missing.
 
 ## Alarm: the forced retreat goal can be overwritten
 

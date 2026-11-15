@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { fakeState, type StatePatch } from "../encode/state.test-helper.js";
 import { closeCall, died, firstSight, goalDone, notableReward, placeOf, skillFailed, tookDamage } from "./memories.js";
 
-const zombie = { id: "entity:1", type: "zombie", dist: 3, hostile: true };
+const zombie = { id: "entity:1", type: "zombie", dist: 3, hostile: true, reachable: true };
 
 function check(trigger: MemoryTrigger, before: StatePatch, after: StatePatch, events: SkillEvent[] = [], store = createWorkspace()) {
   return trigger.check({ before: fakeState(before), after: fakeState(after), events, ws: store.viewFor("hippocampus") });
@@ -58,7 +58,7 @@ describe("player memories", () => {
   });
 
   it("remembers the first sight of a thing or place, once, but not items", () => {
-    const cow = { id: "entity:2", type: "cow", dist: 5, hostile: false };
+    const cow = { id: "entity:2", type: "cow", dist: 5, hostile: false, reachable: true };
     expect(check(firstSight, {}, { nearby: { mobs: [cow] } })).toEqual({
       kind: "discovery",
       summary: "First saw a cow in plains",

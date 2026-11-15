@@ -1,4 +1,4 @@
-import type { Goal, ItemWant } from "./brain.js";
+import type { Goal, IfThen, ItemWant } from "./brain.js";
 
 /** What a planner is asked: the situation in words, and the goal it set last time. */
 export interface PlanRequest {
@@ -15,6 +15,10 @@ export interface Plan {
   wants?: ItemWant[];
   /** Kinds of things to watch for while pursuing this goal. Default: none. */
   watchFor?: string[];
+  /** Responses to load in advance: when the thing appears, do the skill at once. At most 3. Default: none. */
+  ifThen?: IfThen[];
+  /** Soft reflexes to hold back while pursuing this goal. Default: none. */
+  holdBack?: string[];
   /** How many steps of the goal it was shown (`currentGoal`) are finished now. Default: 0. */
   stepsDone?: number;
 }

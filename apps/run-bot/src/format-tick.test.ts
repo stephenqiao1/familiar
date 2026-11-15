@@ -35,7 +35,7 @@ describe("formatTick", () => {
     const entry: TickLog = {
       ...base,
       signals: { in_danger: { value: 0.812, source: "instinct", at: 0 } },
-      goal: { text: "build a shelter", steps: [], reason: "", wants: [], watchFor: [], stepsDone: 0, stepDoneAt: null, setBy: "prefrontal", setAt: 0 },
+      goal: { text: "build a shelter", steps: [], reason: "", wants: [], watchFor: [], ifThen: [], holdBack: [], stepsDone: 0, stepDoneAt: null, setBy: "prefrontal", setAt: 0 },
       regions: [
         { region: "instinct", layer: 1, ms: 1500, proposals: [], error: "timed out after 1500 ms" },
         { region: "prefrontal", layer: 2, background: true, ms: 4000, proposals: [] },

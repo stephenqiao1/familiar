@@ -31,7 +31,7 @@ export function describeSituation<Ctx>(ws: Workspace, skills: Skill<Ctx>[], stor
       `Carrying: ${counts(self.inventory)}.`,
       `It is ${time.isNight ? "night" : "day"}, light level ${time.lightLevel}.`,
       `Hazards nearby: ${list(nearby.hazards)}.`,
-      `Mobs nearby: ${list(nearby.mobs.map((m) => ({ ...m, type: m.hostile ? `hostile ${m.type}` : m.type })))}.`,
+      `Mobs nearby: ${list(nearby.mobs.map((m) => ({ ...m, type: m.hostile ? `hostile ${m.type}${m.reachable ? "" : " (cannot reach you)"}` : m.type })))}.`,
       `Doing now: ${current ? `${current.skill}${current.target ? ` (${current.target})` : ""} for ${current.secondsRunning}s` : "nothing"}.`,
     );
   }

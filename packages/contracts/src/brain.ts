@@ -21,6 +21,14 @@ export interface ItemWant {
   count: number;
 }
 
+/** A response loaded in advance: when a thing of kind `when` appears, do `skill` without waiting to be told. */
+export interface IfThen {
+  /** A kind of thing, in the same words as `watchFor` (e.g. "creeper", "chest"). */
+  when: string;
+  /** The name of an existing skill. */
+  skill: string;
+}
+
 /** A goal written by a planning region. Other regions read it to guide their choices. */
 export interface Goal {
   text: string;
@@ -30,6 +38,10 @@ export interface Goal {
   wants: ItemWant[];
   /** Kinds of things to watch for (e.g. "chest", "villager"): spotting one is a cue to act. */
   watchFor: string[];
+  /** Responses loaded in advance (at most 3), fired by the fastest layer the moment their thing appears. */
+  ifThen: IfThen[];
+  /** Soft reflexes to hold back while this goal is active, by reflex name or by the skill they propose. */
+  holdBack: string[];
   /** How many of `steps` the planner has judged finished. */
   stepsDone: number;
   /** When a step (of this goal or an earlier one) was last judged finished, or null if never. */
@@ -60,7 +72,7 @@ export interface Workspace {
   /** Skill lifecycle events, oldest first, at most the last 20. */
   readonly recentEvents: readonly SkillEvent[];
   /** Replaces the goal. `setBy` and `setAt` are filled in for you; the rest default to none. */
-  setGoal(goal: Pick<Goal, "text" | "steps" | "reason"> & Partial<Pick<Goal, "wants" | "watchFor" | "stepsDone" | "stepDoneAt">>): void;
+  setGoal(goal: Pick<Goal, "text" | "steps" | "reason"> & Partial<Pick<Goal, "wants" | "watchFor" | "ifThen" | "holdBack" | "stepsDone" | "stepDoneAt">>): void;
   /** Drops the goal (e.g. when an alarm cancels the plan). */
   clearGoal(): void;
   setSignal(name: string, value: number): void;

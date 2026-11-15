@@ -15,6 +15,7 @@
     "@familiar/contracts": "workspace:*",
     "@familiar/memory": "workspace:*",
     "@familiar/neuromodulators": "workspace:*",
+    "@familiar/region-brainstem": "workspace:*",
     "@familiar/region-instinct": "workspace:*",
     "@familiar/region-reflex": "workspace:*",
     "mineflayer": "^4.39.0",

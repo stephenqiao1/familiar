@@ -2,6 +2,7 @@ import type { Proposal, Question, Skill, Workspace, Answer } from "@familiar/con
 import { NORADRENALINE, PLANNER_OFFLINE_SIGNAL, PLANNER_WEIGHT_SIGNAL } from "@familiar/neuromodulators";
 import { actionProposal, buildActionQuestion, buildTargetQuestion } from "@familiar/region-instinct";
 import { PLAYER_CONTEXT, playerQuestions } from "../player-questions.js";
+import { menuSkills } from "../skills/index.js";
 import { thingsInView } from "./cues.js";
 import { minecraftDataOf } from "./read-state.js";
 
@@ -19,15 +20,17 @@ const WIDE = { maxOptions: 5, minProbability: 0.05 };
 /**
  * The player's questions each tick: the usual set, with the current goal (if any) added to the
  * next_action context, as far as the planner's weight allows. The next_action answers become the
- * proposals; `widen` says when to offer more of them (e.g. when search is high).
+ * proposals; `widen` says when to offer more of them (e.g. when search is high). Reflex-only
+ * skills are never on the menu, and primitives only with `showPrimitives`.
  */
-export function playerInstinct<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, widen: (ws: Workspace) => boolean = () => false): PlayerInstinct {
+export function playerInstinct<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, widen: (ws: Workspace) => boolean = () => false, showPrimitives = false): PlayerInstinct {
+  const menu = menuSkills(skills, showPrimitives);
   const acceptsTarget = (skill: string, target: string) => skills.find((s) => s.name === skill)?.canRun(ctx, target) ?? false;
   return {
     questions(ws) {
       if (!minecraftDataOf(ws.state)) return [];
       return playerQuestions({
-        nextAction: buildActionQuestion(skills, ctx, withGoal(PLAYER_CONTEXT, ws), ws.current?.skill),
+        nextAction: buildActionQuestion(menu, ctx, withGoal(PLAYER_CONTEXT, ws), ws.current?.skill),
         target: buildTargetQuestion(thingsInView(ws.state).map((t) => t.id)),
       });
     },

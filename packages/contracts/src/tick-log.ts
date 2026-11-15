@@ -34,4 +34,6 @@ export interface TickLog {
   skillEvents?: SkillEvent[];
   /** Hostile mobs seen for the first time in this tick's state. */
   firstSeen?: FirstSeen[];
+  /** Set on the tick the agent died soon after a tunable defence reflex was held back or outvoted. */
+  defenceOverruledBeforeDeath?: unknown;
 }

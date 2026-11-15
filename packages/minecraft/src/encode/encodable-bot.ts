@@ -5,7 +5,8 @@ export interface EncodableBot {
   health: number;
   food: number;
   heldItem: { name: string } | null;
-  entity: { id: number; position: Vec3 };
+  /** `metadata`: the bot's own flags as the server sent them (burning, air left); see body.ts. */
+  entity: { id: number; position: Vec3; onGround?: boolean; metadata?: unknown[] };
   time: { isDay: boolean };
   game: { dimension: string };
   isSleeping: boolean;
@@ -18,7 +19,11 @@ export interface EncodableBot {
     biomes?: Record<number, { name: string } | undefined>;
   };
   blockAt(pos: Vec3): EncodableBlock | null;
-  world: { getBlockStateId(pos: Vec3): number | undefined };
+  world: {
+    getBlockStateId(pos: Vec3): number | undefined;
+    /** The first block on a line that matches, or null. Fakes may leave it out (everything is then in sight). */
+    raycast?(from: Vec3, direction: Vec3, range: number, matcher?: (block: { boundingBox: string }) => boolean): unknown;
+  };
 }
 
 export interface EncodableItem {
@@ -43,4 +48,5 @@ export interface EncodableEntity {
   name?: string | undefined;
   type: string;
   position: Vec3;
+  height?: number;
 }

@@ -1,10 +1,11 @@
 export { playerAlarms, threatPresent } from "./alarm.js";
+export { drowsy, HOLDABLE, leaningOf, playerBrainstem, playerStartles, REFLEX_NOTE } from "./brainstem.js";
 export { asleep, moved, playerFocus, watchedThings } from "./focus.js";
 export { approachableThings, skillsToward, thingsInView } from "./cues.js";
 export { placeOf, playerMemories } from "./memories.js";
 export { playerInstinct } from "./instinct.js";
 export { isShock, playerOutlook } from "./outlook.js";
-export { playerReflexes } from "./reflexes.js";
+export { DEFENCE_REFLEXES, playerReflexes, zoneOf, type Zone } from "./reflexes.js";
 export { curiosity, playerRewards } from "./rewards.js";
 export { describeSituation, type Storage } from "./situation.js";
 export { situationOf } from "./situation-labels.js";

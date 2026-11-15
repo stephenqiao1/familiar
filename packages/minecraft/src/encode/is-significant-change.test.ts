@@ -15,8 +15,8 @@ function state(p: Patch = {}): State {
   });
 }
 
-const zombie = (id: number, dist: number) => ({ id: `entity:${id}`, type: "zombie", dist, hostile: true });
-const cow = { id: "entity:9", type: "cow", dist: 3, hostile: false };
+const zombie = (id: number, dist: number) => ({ id: `entity:${id}`, type: "zombie", dist, hostile: true, reachable: true });
+const cow = { id: "entity:9", type: "cow", dist: 3, hostile: false, reachable: true };
 
 describe("isSignificantChange", () => {
   it("is false when nothing important changed", () => {
@@ -46,5 +46,26 @@ describe("isSignificantChange", () => {
   it("is true when the inventory just became full", () => {
     expect(isSignificantChange(state({ inventoryFullPct: 97 }), state({ inventoryFullPct: 100 }))).toBe(true);
     expect(isSignificantChange(state({ inventoryFullPct: 100 }), state({ inventoryFullPct: 100 }))).toBe(false);
+  });
+});
+
+describe("isSignificantChange: the body", () => {
+  const state = (self: Partial<MinecraftStateData["self"]> = {}, loud: MinecraftStateData["nearby"]["loud"] = []) => fakeState({ self, nearby: { loud } });
+
+  it("is true when the bot is hurt again, catches fire, falls into lava or runs low on air", () => {
+    expect(isSignificantChange(state(), state({ lastHurt: { msAgo: 10, by: null } }))).toBe(true);
+    expect(isSignificantChange(state({ lastHurt: { msAgo: 900, by: null } }), state({ lastHurt: { msAgo: 20, by: null } }))).toBe(true);
+    expect(isSignificantChange(state(), state({ onFire: true }))).toBe(true);
+    expect(isSignificantChange(state(), state({ inLava: true }))).toBe(true);
+    expect(isSignificantChange(state({ air: 7 }), state({ air: 6 }))).toBe(true);
+  });
+
+  it("is true when something loud happens", () => {
+    expect(isSignificantChange(state(), state({}, [{ type: "explosion", dist: 9 }]))).toBe(true);
+  });
+
+  it("is false while those simply continue", () => {
+    expect(isSignificantChange(state({ lastHurt: { msAgo: 100, by: null } }), state({ lastHurt: { msAgo: 600, by: null } }))).toBe(false);
+    expect(isSignificantChange(state({ onFire: true, air: 5 }), state({ onFire: true, air: 4 }))).toBe(false);
   });
 });

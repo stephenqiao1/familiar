@@ -13,6 +13,10 @@ export interface Skill<Ctx> {
   risky?: boolean;
   /** Needs care while it runs (fighting, handling storage). Focus rises for these. */
   demanding?: boolean;
+  /** One of the body's built-in actions: tiny, quick, and what learned skills are built from. Off the decision menu by default. */
+  primitive?: boolean;
+  /** Only reflexes may use it; never on the decision menu. */
+  reflexOnly?: boolean;
   canRun(ctx: Ctx, target?: string): boolean;
   /** Must stop promptly when `signal` aborts. */
   run(ctx: Ctx, target: string | undefined, signal: AbortSignal): Promise<SkillResult>;

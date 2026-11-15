@@ -11,7 +11,7 @@ function workspace(patch: StatePatch = {}, events: SkillEvent["type"][] = []) {
   return store;
 }
 const read = (input: typeof safety, patch?: StatePatch) => input.read(workspace(patch).viewFor("serotonin"));
-const zombie = (dist: number) => ({ id: "entity:1", type: "zombie", dist, hostile: true });
+const zombie = (dist: number) => ({ id: "entity:1", type: "zombie", dist, hostile: true, reachable: true });
 
 describe("player outlook inputs", () => {
   it("safety falls with a close hostile and with low health", () => {

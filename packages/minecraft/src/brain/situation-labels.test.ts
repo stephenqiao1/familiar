@@ -18,7 +18,7 @@ describe("situationOf", () => {
   });
 
   it("labels a bad night underground with company", () => {
-    const zombie = { id: "entity:1", type: "zombie", dist: 5, hostile: true };
+    const zombie = { id: "entity:1", type: "zombie", dist: 5, hostile: true, reachable: true };
     expect(situationOf(state({ isNight: true, mobs: [zombie], self: { food: 6, skyLight: 0 }, players: 2 }))).toBe(
       "night/threatened/hungry/underground/with_others",
     );
@@ -29,8 +29,8 @@ describe("situationOf", () => {
   });
 
   it("ignores far or friendly mobs", () => {
-    const far = { id: "entity:1", type: "zombie", dist: 20, hostile: true };
-    const cow = { id: "entity:2", type: "cow", dist: 2, hostile: false };
+    const far = { id: "entity:1", type: "zombie", dist: 20, hostile: true, reachable: true };
+    const cow = { id: "entity:2", type: "cow", dist: 2, hostile: false, reachable: true };
     expect(situationOf(state({ mobs: [far, cow] }))).toBe("day/safe/fed/surface/alone");
   });
 

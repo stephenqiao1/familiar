@@ -9,6 +9,8 @@ export interface InstinctOptions {
   questions(ws: Workspace): Question[];
   /** Turns the answers into proposals. Default: `actionProposal` with no target check. */
   toProposals?(answers: Answer[], ws: Workspace): Proposal[];
+  /** True to skip this tick without asking the engine (e.g. while asleep). Default: never. */
+  paused?(ws: Workspace): boolean;
   /** Default: "instinct". */
   name?: string;
   /** Default: 1. */
@@ -31,6 +33,7 @@ export function createInstinctRegion(options: InstinctOptions): Region {
     everyMs: 0,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     async run(ws) {
+      if (options.paused?.(ws)) return { proposals: [], trace: { paused: true } };
       const asked = questions(ws);
       const started = performance.now();
       const answers = await engine.decide(ws.state, asked);

@@ -1,4 +1,4 @@
-import type { DecisionEngine, Planner } from "@familiar/contracts";
+import type { DecisionEngine, Plan, Planner } from "@familiar/contracts";
 import { ClaudePlanner } from "@familiar/engine-claude";
 import { EchoEngine, EchoPlanner } from "@familiar/engine-echo";
 import { JevEngine } from "@familiar/engine-jev";
@@ -9,7 +9,7 @@ export function createEngine(name: EngineName): DecisionEngine {
   return name === "jev" ? new JevEngine() : new EchoEngine();
 }
 
-/** The planner the prefrontal region uses. */
-export function createPlanner(name: PlannerName): Planner {
-  return name === "claude" ? new ClaudePlanner() : new EchoPlanner();
+/** The planner the prefrontal region uses. `plan` is the echo planner's fixed plan, if one was given. */
+export function createPlanner(name: PlannerName, plan?: Plan): Planner {
+  return name === "claude" ? new ClaudePlanner() : new EchoPlanner(plan);
 }

@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import type { ItemWant } from "@familiar/contracts";
+import type { ItemWant, Plan } from "@familiar/contracts";
 
 export interface ServerArgs {
   host: string;
@@ -18,6 +18,10 @@ export interface BrainArgs {
   planner: PlannerName;
   /** Only these regions (for lesion experiments). Unset: all of them. */
   regions?: string[];
+  /** Put the primitives (look_at, step_toward, ...) on the decision menu. Default: off. */
+  primitives?: boolean;
+  /** The fixed plan the echo planner returns (for tests and live checks). Default: "Stay safe." */
+  plan?: Plan;
 }
 
 export type Command =
@@ -29,6 +33,8 @@ export type Command =
  * (no command) [--engine echo|jev]                   run the decision loop (default engine: echo)
  *   [--planner echo|claude]                          what the prefrontal cortex plans with (default: echo)
  *   [--regions reflex,instinct,...]                  run only these regions (default: all)
+ *   [--plan '{"goal":"...","ifThen":[...]}']         the echo planner's fixed plan, as JSON
+ *   [--primitives]                                   let the engine choose primitives too (default: reflexes only)
  * skills                                             list skills
  * skill <name> [--target t] [--interrupt-after s]    run one skill
  *   [--linger s]                                     stay connected s seconds after it ends
@@ -50,6 +56,8 @@ export function parseCommand(argv: string[]): Command {
       engine: { type: "string", default: "echo" },
       planner: { type: "string", default: "echo" },
       regions: { type: "string" },
+      primitives: { type: "boolean", default: false },
+      plan: { type: "string" },
     },
   });
   const [command, skill, ...extra] = positionals;
@@ -65,6 +73,8 @@ export function parseCommand(argv: string[]): Command {
       throw new Error(`Unknown --planner "${values.planner}". Use: ${PLANNERS.join(" | ")}`);
     }
     const brain: BrainArgs = { engine: values.engine as EngineName, planner: values.planner as PlannerName };
+    if (values.primitives) brain.primitives = true;
+    if (values.plan !== undefined) brain.plan = parsePlan(values.plan);
     if (values.regions !== undefined) brain.regions = values.regions.split(",").map((r) => r.trim()).filter(Boolean);
     return { kind: "loop", server, brain };
   }
@@ -78,6 +88,18 @@ export function parseCommand(argv: string[]): Command {
     return result;
   }
   throw new Error(`Unknown command "${positionals.join(" ")}". Use: skills | skill <name> [--target t] [--interrupt-after s]`);
+}
+
+/** A plan given as JSON: it needs a goal; steps and reason default to none. */
+function parsePlan(raw: string): Plan {
+  let plan: Partial<Plan>;
+  try {
+    plan = JSON.parse(raw) as Partial<Plan>;
+  } catch {
+    throw new Error(`Invalid --plan: not JSON`);
+  }
+  if (typeof plan?.goal !== "string" || !plan.goal) throw new Error(`Invalid --plan: it needs a "goal"`);
+  return { steps: [], reason: "given on the command line", ...plan, goal: plan.goal };
 }
 
 function seconds(raw: string, flag: string): number {

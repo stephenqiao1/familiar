@@ -26,7 +26,7 @@ const state = ({ mobs = [], self, ...rest }: Patch = {}) => fakeState({ ...rest,
 const check = (rule: RewardRule, before: Patch, after: Patch, events: SkillEvent[] = []) =>
   rule.check({ before: state(before), after: state(after), events });
 const event = (skill: string, type: SkillEvent["type"]): SkillEvent => ({ skill, type, timestamp: 0 });
-const zombie = (dist: number) => ({ id: "entity:7", type: "zombie", dist, hostile: true });
+const zombie = (dist: number) => ({ id: "entity:7", type: "zombie", dist, hostile: true, reachable: true });
 
 describe("player rewards", () => {
   it("rewards eating more when starving than when nearly full", () => {

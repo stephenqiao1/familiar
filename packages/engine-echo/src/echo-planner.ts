@@ -6,6 +6,7 @@ export class EchoPlanner implements Planner {
   constructor(private readonly fixed: Plan = { goal: "Stay safe.", steps: [], reason: "default plan" }) {}
 
   async plan(): Promise<Plan> {
-    return { ...this.fixed, steps: [...this.fixed.steps] };
+    const { ifThen, holdBack } = this.fixed;
+    return { ...this.fixed, steps: [...this.fixed.steps], ...(ifThen ? { ifThen: ifThen.map((r) => ({ ...r })) } : {}), ...(holdBack ? { holdBack: [...holdBack] } : {}) };
   }
 }
