@@ -1,6 +1,11 @@
 import type { Bot } from "mineflayer";
 import type { goals } from "mineflayer-pathfinder";
 
+// Pathfinding is the walking rhythm: it drives the legs (and the head, to steer) directly, and
+// is the one thing besides the primitives that may. Everything else acts through primitives/.
+// It steers with the head, but a held gaze (primitives/gaze.ts) can take the head and walk the
+// same way with other keys, so walking skills leave the head free.
+
 /**
  * Walks to `goal`. If the signal fires, stops at once (cancels the path, releases the movement
  * keys, stops any digging) and rejects with `signal.reason` without waiting for the pathfinder.

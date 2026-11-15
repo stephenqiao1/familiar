@@ -28,6 +28,8 @@ export interface TickLog {
   regions: RegionLog[];
   winner: Candidate | null;
   action: Action;
+  /** A proposal acted on alongside the main action, using other body parts. */
+  alongside?: Candidate;
   goal: Goal | null;
   signals: Record<string, Signal>;
   /** Skill lifecycle events since the previous tick. */

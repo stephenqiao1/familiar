@@ -97,15 +97,20 @@ export function drowsy(ws: Workspace): boolean {
 /** The names a goal may hold back: every soft reflex, and the skills they propose. */
 export const HOLDABLE = [...playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name), ...Object.keys(LEANINGS)];
 
+/** Whether a skill leaves the head free (a skill that declares no parts uses the whole body). */
+export function headFree(skill: { parts?: string[] } | undefined): boolean {
+  return skill?.parts !== undefined && !skill.parts.includes("head");
+}
+
 /** One line for the planner: which reflexes it may hold back, and that some cannot be. */
 export const REFLEX_NOTE =
   `Reflexes you may hold back (holdBack): ${HOLDABLE.join(", ")}. ` +
   `Life-saving reflexes (${playerReflexes.filter((r) => r.kind === "hard").map((r) => r.name).join(", ")}) cannot be held back.`;
 
 /** What the brainstem region needs from the player (everything but the bot's own settings and alarm). */
-export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx): Pick<
+export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, sameTime = false): Pick<
   BrainstemOptions,
-  "startle" | "novel" | "mayOrient" | "thingsOf" | "responseProblem" | "acceptsTarget" | "holdable" | "asleep" | "drowsy" | "body" | "skills" | "orientUrgency"
+  "startle" | "novel" | "mayOrient" | "thingsOf" | "responseProblem" | "acceptsTarget" | "holdable" | "asleep" | "drowsy" | "body" | "skills" | "orientUrgency" | "looksAlongside"
 > {
   const find = (name: string) => skills.find((s) => s.name === name);
   return {
@@ -116,6 +121,8 @@ export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx): Pick<
     },
     // A look never interrupts real work: only idling, or nothing at all.
     mayOrient: (ws) => ws.current === null || ws.current.skill === IDLE,
+    // With `sameTime` it may instead run alongside a skill that leaves the head free.
+    looksAlongside: (ws) => sameTime && ws.current !== null && headFree(find(ws.current.skill)),
     thingsOf: thingsInView,
     responseProblem(name) {
       const skill = find(name);

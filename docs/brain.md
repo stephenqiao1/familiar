@@ -20,7 +20,7 @@ Arbiter: urgency + 0.2 × learned value wins (value from the scorebook, weighed 
          plus a stay bonus for the running skill and a brake on risky skills (both from patience);
          a full-urgency proposal (a hard reflex, a startle) always wins; ties go to the faster layer
    ▼
-Skill executor → Minecraft (skills, the two reflex-only skills, and the primitives)
+Skill executor → skills → primitives (the single doorway) → Minecraft
 ```
 
 Alongside these run layer-0 regions that propose little or nothing but shape the rest:
@@ -41,7 +41,8 @@ same tick; a signal from a region listed later is read one tick late.
 | Goal | What the prefrontal cortex wants the bot working toward: text, steps (and how many are done), what to carry (`wants`), things to watch for (`watchFor`), responses loaded in advance (`ifThen`) and reflexes to hold back (`holdBack`). Instinct reads it each tick. |
 | Hard reflex | A life-saving rule. Always urgency 1; nothing learned, felt or planned can stop it. |
 | Soft reflex | A tunable rule. Its base urgency is multiplied by a gain and capped at 0.95, so it competes in the arbiter. |
-| Primitive | One of the body's built-in actions (`look_at`, `step_toward`, `jump`, ...): tiny, stoppable, about a second. Skills marked `primitive: true`. |
+| Primitive | One of the body's built-in movements (`look_at`, `step`, `break_block`, ...): small, stoppable, and reporting what it changed. Skills marked `primitive: true`. The only code that moves the bot's body. |
+| Changes | What a skill run changed (`moved`, `gained`, `targetBlock`, ...), carried on the skill event that ends it. |
 | Arbiter | Picks the winning proposal. |
 
 All of these types live in one file: `packages/contracts/src/brain.ts`.
@@ -105,10 +106,54 @@ life-saving ones cannot be overruled. Each bot's settings are the `brainstem` bl
 - **Body signals.** Shares `air` (how short of breath), `pain` (recent damage, fading over about
   10 seconds) and `hunger`, for a later drives region.
 
-**Primitives** (`packages/minecraft/src/primitives/`): `look_at`, `step_toward`, `jump`,
-`break_block`, `place_block`, `use_item`, `hit`, `pick_up`, `brace`. Reflexes can always use them.
-They are off Jev's menu unless the bot runs with `--primitives`. `escape_hazard` and `surface` are
-reflex-only and never on the menu.
+## The spinal motor layer: primitives
+
+The primitives (`packages/minecraft/src/primitives/`) are the small set of movements everything
+else is built from, and the **single doorway** to the bot's body.
+
+| Part | Primitives |
+|---|---|
+| Head | `look_at`, `turn` |
+| Legs | `step`, `step_toward`, `jump`, `sneak`, `brace`, `pick_up` |
+| Hands | `equip`, `drop_item`, `use_item`, `use_on`, `hit`, `break_block`, `place_block`, `open`, `move_item`, `close`, `craft` |
+
+- **One doorway.** Each primitive file exports the skill and a plain function that does the
+  movement (`doHit`, `doEquip`, `doLookAt`, ...). Every skill and helper acts only through those
+  functions. Pathfinding is the exception: it is the walking rhythm and moves the body directly
+  (`abort.ts`, `walk-to.ts`, `movements.ts`). `pnpm test` and `pnpm skill-check` fail if any other
+  file calls the bot's action methods.
+- **Safe to try at random.** A primitive that cannot run refuses, or fails with a reason. It
+  respects `safety.ts` and `protected.ts` (no stepping into lava or off a drop, no breaking the
+  base). It lets go of keys and items when it ends or is stopped. `break_block` is the one long
+  primitive (`long: true`); stopped, it reports how far it got.
+- **Targets that need no names.** Besides `nearest:<name>`, `pos:x,y,z`, `entity:<id>` and
+  `player:<name>`: `ahead` (what the bot is looking at, within reach), `dir:forward|back|left|right|up|down`
+  (the neighbouring block, relative to where it faces), `held` (the item in hand) and
+  `item:<name>` (for `equip`, `craft`, `drop_item`; `item:<name>:in` or `:out` for `move_item`).
+- **Report back.** Every primitive run is wrapped in one before-and-after snapshot
+  (`primitive.ts`, `snapshot.ts`). The skill event that ends the run carries `changes`, listing
+  only what changed: `moved`, `turned`, `gained`, `lost`, `held`, `targetBlockWas` and
+  `targetBlock`, `health`, `food`, `targetHurt`, `targetGone`, `opened`, `closed`, `drops`,
+  `sneaking`. Each primitive declares in one line what it expects when it works
+  (`expects: ["targetBlock=air"]`), and `changes.asExpected` says whether that happened. Nothing
+  reacts to it yet; the hook for a later prediction checker is marked in `primitive.ts`.
+- **A container stays open only for container work.** `open` leaves the container open for
+  `move_item` and `close`. Any other primitive closes it first.
+- **Different body parts at the same time** (`--same-time`, off by default). A skill names the
+  parts it uses (`parts`); one that names none uses all three. With the flag on, one head-only
+  primitive (a look) may run alongside a running skill that leaves the head free: walking
+  (`go_to`, `return_to_base`, `flee`) and eating. The main action always wins. While walking, the
+  look is held for a second: the head turns to the target and the legs keep their direction by
+  pressing other keys (`gaze.ts`), so the bot looks one way and walks another. The brainstem's
+  orienting look uses this.
+- **Learned skills** are chains of primitives kept as data, never code. The runner
+  (`packages/core/src/chain.ts`) runs the steps in order, stops at the first failure, and returns
+  each step's result and changes. Any chain in `data/<bot>/learned-skills.json`
+  (`[{ "name", "description", "steps": [{ "primitive", "target" }] }]`) is loaded at start as a
+  skill. None ship with the bot.
+
+Reflexes can always use primitives. They are off Jev's menu unless the bot runs with
+`--primitives`. `escape_hazard` and `surface` are reflex-only and never on the menu.
 
 If the bot dies soon after a soft defence reflex was held back or outvoted with a hostile within
 8 blocks, the run prints `!! DIED WITH DEFENCE OVERRULED` with the gain and what won, and the
@@ -163,7 +208,11 @@ in `data/<name>/`.
 | Add a hard reflex | `packages/minecraft/src/brain/reflexes.ts` (write a rule with `"hard"`, add it to `playerReflexes`). Keep these to what saves the bot's life: nothing can overrule them. |
 | Add a soft reflex | Same file, with `"soft"` and a base urgency. If it defends the bot, add its name to `DEFENCE_REFLEXES`; if its skill moves toward or away from a threat, add the skill to `LEANINGS` in `brainstem.ts`. |
 | Add a startle detector | `packages/minecraft/src/brain/brainstem.ts` (write a detector, add it to `playerStartles`) |
-| Add a primitive | `packages/minecraft/src/primitives/` (one file, `primitive: true`, add it to `primitives` in `index.ts`) |
+| Add a primitive | `packages/minecraft/src/primitives/`: one file that exports a `do...` function and a skill made with `primitive({ parts, expects, ... })`; add it to `primitives` in `index.ts` and a scene to `apps/run-bot/scripts/primitive-check/scenes.ts` |
+| Make a skill act on the body | Call a primitive's `do...` function. Never call the bot's action methods outside `primitives/` (the doorway rule fails the build's tests). |
+| Add a target format | `packages/minecraft/src/target.ts` (parse) and `resolve-target.ts` (resolve) |
+| Change what `changes` reports | `packages/minecraft/src/primitives/snapshot.ts` |
+| Add a learned skill by hand | `data/<bot>/learned-skills.json` |
 | Change a bot's bravery | `bots.json`: `brainstem.bravery` (0 timid, 1 brave) |
 | Turn part of the brainstem off | `bots.json`: set its strength in `brainstem` to 0 |
 | Add a reward | `packages/minecraft/src/brain/rewards.ts` (write a rule, add it to `playerRewards`) |
@@ -207,6 +256,8 @@ in `data/<name>/`.
 pnpm start -- --engine jev --planner claude          # full brain
 pnpm start -- --regions reflex,instinct              # without the prefrontal cortex
 pnpm start -- --engine jev --primitives              # let Jev choose primitives too
+pnpm start -- --engine jev --same-time               # let a look run alongside a skill that leaves the head free
+pnpm start -- skill break_block --target dir:forward # run one skill or primitive and print what it changed
 pnpm start -- --plan '{"goal":"Explore","ifThen":[{"when":"creeper","skill":"flee"}]}'   # a fixed plan for the echo planner
 ```
 

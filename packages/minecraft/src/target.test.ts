@@ -40,4 +40,20 @@ describe("parseTarget", () => {
   ])("rejects %j", (input) => {
     expect(parseTarget(input)).toBeNull();
   });
+
+  it("parses the targets that need no names: ahead, held and dir:<direction>", () => {
+    expect(parseTarget("ahead")).toEqual({ kind: "ahead" });
+    expect(parseTarget("held")).toEqual({ kind: "held" });
+    for (const dir of ["forward", "back", "left", "right", "up", "down"]) expect(parseTarget(`dir:${dir}`)).toEqual({ kind: "dir", dir });
+  });
+
+  it("parses item:<name>, optionally into or out of a container", () => {
+    expect(parseTarget("item:oak_planks")).toEqual({ kind: "item", name: "oak_planks" });
+    expect(parseTarget("item:bread:in")).toEqual({ kind: "item", name: "bread", way: "in" });
+    expect(parseTarget("item:bread:out")).toEqual({ kind: "item", name: "bread", way: "out" });
+  });
+
+  it.each(["dir:", "dir:north", "dir:forwards", "ahead:1", "item:", "item:Oak Planks", "item:bread:sideways", "item:bread:in:2", "holding"])("rejects %j", (bad) => {
+    expect(parseTarget(bad)).toBeNull();
+  });
 });

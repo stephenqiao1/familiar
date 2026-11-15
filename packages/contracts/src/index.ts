@@ -5,7 +5,7 @@ export type { DecisionEngine } from "./engine.js";
 export type { FirstSeen } from "./first-seen.js";
 export type { Plan, Planner, PlanRequest } from "./planner.js";
 export type { Choice, Noul, Question, Score } from "./question.js";
-export type { RunningSkill, Skill, SkillResult } from "./skill.js";
+export type { BodyPart, Changes, RunningSkill, Skill, SkillResult } from "./skill.js";
 export type { SkillEvent } from "./skill-event.js";
 export type { State } from "./state.js";
 export type { RegionLog, TickLog } from "./tick-log.js";

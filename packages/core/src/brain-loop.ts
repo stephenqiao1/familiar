@@ -8,6 +8,7 @@ import type {
   RunningSkill,
   State,
   TickLog,
+  Workspace,
 } from "@familiar/contracts";
 import { clamp01, createWorkspace, type WorkspaceStore } from "./workspace.js";
 
@@ -21,6 +22,12 @@ export interface BrainLoopOptions {
   current?: () => RunningSkill | null;
   /** May return a promise; the tick waits for it before logging. */
   onAction: (action: Action) => void | Promise<void>;
+  /**
+   * Different body parts at the same time. `isSide` marks a candidate that should run alongside
+   * the main action instead of competing with it (e.g. a look while the hands are busy); the most
+   * urgent one is passed to `onAction` after the main action. Default: nothing runs alongside.
+   */
+  alongside?: { isSide(candidate: Candidate, ws: Workspace): boolean; onAction(action: Action): void | Promise<void> };
   logger: { log(entry: TickLog): void };
   /** Shared memory. Default: a new one (reachable as `loop.workspace`). */
   workspace?: WorkspaceStore;
@@ -166,9 +173,13 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
     let early: Candidate | null = null;
     let acting: Promise<void> | undefined;
     let decideMs = 0;
+    const view: Workspace = workspace.viewFor("arbiter");
+    /** Candidates that run alongside the main action never compete for it. */
+    const isSide = (c: Candidate) => options.alongside?.isSide(c, view) ?? false;
+    const competing = () => (options.alongside ? candidates.filter((c) => !isSide(c)) : candidates);
     const settleEarly = () => {
       if (early || !arbiter.settledEarly) return;
-      early = arbiter.settledEarly(candidates, [...pending].map((r) => r.layer), workspace.viewFor("arbiter"));
+      early = arbiter.settledEarly(competing(), [...pending].map((r) => r.layer), view);
       if (!early) return;
       decideMs = performance.now() - started;
       const action = early.action;
@@ -186,7 +197,8 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       }),
     );
 
-    const winner = early ?? arbiter.pick(candidates, workspace.viewFor("arbiter"));
+    const winner = early ?? arbiter.pick(competing(), view);
+    const beside = options.alongside ? mostUrgent(candidates.filter(isSide)) : null;
     const action: Action = winner?.action ?? { keepGoing: true };
     if (acting) {
       await acting;
@@ -194,6 +206,7 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       decideMs = performance.now() - started;
       await onAction(action);
     }
+    if (beside) await options.alongside!.onAction(beside.action);
 
     logs.sort((a, b) => a.layer - b.layer);
     logger.log({
@@ -205,6 +218,7 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       regions: logs,
       winner,
       action,
+      ...(beside ? { alongside: beside } : {}),
       goal: workspace.goal(),
       signals: workspace.signals(),
     });
@@ -257,6 +271,11 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       await Promise.all([...background.values()].map((bg) => bg.running));
     },
   };
+}
+
+/** The most urgent candidate (the first listed on a tie), or null. */
+function mostUrgent(candidates: Candidate[]): Candidate | null {
+  return candidates.reduce<Candidate | null>((best, c) => (!best || c.urgency > best.urgency ? c : best), null);
 }
 
 function candidate(region: Region, proposal: Proposal): Candidate {

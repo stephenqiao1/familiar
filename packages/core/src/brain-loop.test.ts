@@ -113,6 +113,32 @@ describe("createBrainLoop", () => {
     expect(logs[0]!.winner?.urgency).toBe(1);
   });
 
+  describe("different body parts at the same time", () => {
+    const isLook = (c: { action: Action }) => "skill" in c.action && c.action.skill === "look_at";
+
+    it("a candidate marked to run alongside does not compete, and is acted on after the main action", async () => {
+      const side: Action[] = [];
+      // The look is at full urgency: without the option it would win outright.
+      const regions = [proposer("brainstem", 0, "look_at", 1), proposer("instinct", 1, "eat", 0.6)];
+      const { loop, logs, actions } = setup(regions, { alongside: { isSide: isLook, onAction: (a) => void side.push(a) } });
+      loop.start();
+      await vi.advanceTimersByTimeAsync(600);
+      await loop.stop();
+      expect(actions[0]!.action).toEqual({ skill: "eat" });
+      expect(side[0]).toEqual({ skill: "look_at" });
+      expect(logs[0]).toMatchObject({ winner: { region: "instinct" }, alongside: { region: "brainstem", action: { skill: "look_at" } } });
+    });
+
+    it("without the option the same look simply wins", async () => {
+      const { loop, logs, actions } = setup([proposer("brainstem", 0, "look_at", 1), proposer("instinct", 1, "eat", 0.6)]);
+      loop.start();
+      await vi.advanceTimersByTimeAsync(600);
+      await loop.stop();
+      expect(actions[0]!.action).toEqual({ skill: "look_at" });
+      expect(logs[0]).not.toHaveProperty("alongside");
+    });
+  });
+
   it("rejects two regions with the same name", () => {
     expect(() => setup([proposer("a", 0, "x", 1), proposer("a", 1, "y", 1)])).toThrow(/Two regions/);
   });

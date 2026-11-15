@@ -68,6 +68,7 @@ describe("parseCommand", () => {
   });
 
   it("reads --primitives and a fixed --plan for the echo planner", () => {
+    expect(parseCommand(["--same-time"])).toMatchObject({ brain: { sameTime: true } });
     const command = parseCommand(["--primitives", "--plan", '{"goal":"Explore","ifThen":[{"when":"creeper","skill":"flee"}],"holdBack":["flee"]}']);
     expect(command).toMatchObject({
       kind: "loop",

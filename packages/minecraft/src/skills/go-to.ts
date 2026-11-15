@@ -12,9 +12,12 @@ const RANGE = 2;
 export const goTo: Skill<MinecraftCtx> = {
   name: "go_to",
   description: "Walk to within 2 blocks of a target (nearest:<name>, pos:x,y,z, entity:<id>, player:<name>).",
+  // Walking may dig its way through, so it uses the hands too; the head is free to look around.
+  parts: ["legs", "hands"],
 
   canRun(ctx, target) {
-    return resolve(ctx, target) !== null;
+    const resolved = resolve(ctx, target);
+    return resolved !== null && resolved.kind !== "item";
   },
 
   async run(ctx, target, signal) {
@@ -22,7 +25,9 @@ export const goTo: Skill<MinecraftCtx> = {
     if (!resolved) return { status: "failed", reason: `target "${target}" not found` };
 
     ctx.log(`go_to: heading for ${target}`);
-    return walkTo(ctx.bot, goalFor(resolved), signal);
+    const goal = goalFor(resolved);
+    if (!goal) return { status: "failed", reason: `"${target}" is not somewhere to walk to` };
+    return walkTo(ctx.bot, goal, signal);
   },
 };
 
@@ -44,5 +49,8 @@ function goalFor(resolved: ResolvedTarget) {
     case "entity":
       // Follows the entity if it moves; done once within range.
       return new GoalFollow(resolved.entity, RANGE);
+    case "item":
+      // An item is not a place.
+      return null;
   }
 }

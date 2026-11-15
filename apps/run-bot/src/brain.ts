@@ -94,6 +94,8 @@ export interface BrainParts<Ctx> {
   brainstem: BrainstemSettings;
   /** Offer the primitives (look_at, step_toward, ...) on the decision menu. Default: false. */
   showPrimitives?: boolean;
+  /** A look may run alongside a skill that leaves the head free. Default: false. */
+  sameTime?: boolean;
   /** Extra notes for the focus log: remembered values used or rejected, attention warnings. Default: none. */
   focusNotes?: () => Record<string, unknown>;
   /** How many memories to give the planner right now (the attention budget). Default: 5. */
@@ -130,7 +132,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       ...(hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? { gainOf: createReflexGain({ settings: brainstem, alarmOf, leaningOf }) } : {}),
     }), //                                                                                  layer 0, every tick
     createBrainstemRegion({
-      ...playerBrainstem(skills, ctx),
+      ...playerBrainstem(skills, ctx, parts.sameTime),
       settings: brainstem,
       alarmOf,
       reflexFired: (ws) => up(ws, REFLEX_SIGNAL),

@@ -40,6 +40,8 @@ export interface BrainstemOptions {
   novel(moment: BrainstemMoment): Thing | null;
   /** c: whether a look may take over right now (nothing running, or only idling). */
   mayOrient(ws: Workspace): boolean;
+  /** c: whether a look would run alongside the running skill instead of competing with it. Default: never. */
+  looksAlongside?(ws: Workspace): boolean;
   /** d: everything in view, for matching loaded responses. */
   thingsOf(state: State): Thing[];
   /** d: why a loaded response may not use a skill (unknown, a primitive, reflex-only), or null if it may. */
@@ -165,7 +167,9 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
         const thing = moment ? options.novel(moment) : null;
         ws.setSignal(ORIENTING_SIGNAL, thing ? 1 : 0);
         if (thing) {
-          const free = options.mayOrient(ws) && proposals.length === 0 && !(options.reflexFired?.(ws) ?? false);
+          // A look that runs alongside the running skill takes nothing from it, so it needs no clear field.
+          const beside = options.looksAlongside?.(ws) ?? false;
+          const free = beside || (options.mayOrient(ws) && proposals.length === 0 && !(options.reflexFired?.(ws) ?? false));
           trace.orienting = { toward: thing.id, kind: thing.kind, proposed: free };
           if (free) proposals.push({ action: { skill: skills.lookAt, target: thing.id }, urgency: orientUrgency, reason: `something new: ${thing.kind}` });
         }

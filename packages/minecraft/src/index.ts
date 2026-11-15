@@ -12,4 +12,5 @@ export { posId } from "./encode/scan-blocks.js";
 export type { MinecraftStateData } from "./encode/state-data.js";
 export { setupBase } from "./setup-base.js";
 export type { MinecraftCtx } from "./skill-context.js";
-export { menuSkills, minecraftSkills } from "./skills/index.js";
+export { primitives } from "./primitives/index.js";
+export { menuSkills, minecraftSkills, tidyBody } from "./skills/index.js";

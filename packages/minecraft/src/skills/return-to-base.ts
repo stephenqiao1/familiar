@@ -10,6 +10,7 @@ const RANGE = 2;
 export const returnToBase: Skill<MinecraftCtx> = {
   name: "return_to_base",
   description: "Walk back to the base chest.",
+  parts: ["legs", "hands"],
 
   canRun(ctx) {
     // Already there: walking back would end at once.

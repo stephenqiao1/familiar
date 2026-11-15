@@ -6,7 +6,8 @@ import { abortableGoto } from "./abort.js";
 const NO_PATH_MS = 10_000;
 
 /**
- * Walks to `goal` and reports how it went. Fails if the pathfinder hasn't found any route
+ * Walks to `goal` with the pathfinder (the walking rhythm, which moves the body directly; see abort.ts)
+ * and reports how it went. Fails if the pathfinder hasn't found any route
  * (full or partial) within 10 s; reports "interrupted" if `signal` fires.
  */
 export async function walkTo(bot: Bot, goal: goals.Goal, signal: AbortSignal): Promise<SkillResult> {

@@ -3,7 +3,7 @@ import type { Vec3 } from "vec3";
 import type { Base } from "./base.js";
 import { DEFAULT_BASE_FILE, loadBase, saveBase } from "./base-store.js";
 import { findBlockNear } from "./find-nearby.js";
-import { placeNearby } from "./placement.js";
+import { doPlaceNearby } from "./primitives/place-block.js";
 
 const SEARCH_RADIUS = 16;
 const isChest = (name: string) => name === "chest";
@@ -16,13 +16,21 @@ const isBed = (name: string) => name.endsWith("_bed");
 export async function setupBase(bot: Bot, file = DEFAULT_BASE_FILE): Promise<Base> {
   await bot.waitForChunksToLoad();
   const saved = await loadBase(file);
-  if (saved && blockIs(bot, saved.chest, isChest) && blockIs(bot, saved.bed, isBed)) return saved;
+  // A saved base too far away to see (its blocks are not loaded) is still the base: only a base
+  // whose blocks can be seen to be gone is replaced.
+  if (saved && stillThere(bot, saved.chest, isChest) && stillThere(bot, saved.bed, isBed)) return saved;
 
   const chest = findNearSpawn(bot, isChest) ?? (await placeFromInventory(bot, isChest, "chest"));
   const bed = findNearSpawn(bot, isBed) ?? (await placeFromInventory(bot, isBed, "bed"));
   const base = { chest, bed };
   await saveBase(base, file);
   return base;
+}
+
+/** True unless the block can be seen and is something else. */
+function stillThere(bot: Bot, pos: Vec3, test: (name: string) => boolean): boolean {
+  const block = bot.blockAt(pos);
+  return block === null || test(block.name);
 }
 
 function blockIs(bot: Bot, pos: Vec3, test: (name: string) => boolean): boolean {
@@ -41,7 +49,7 @@ async function placeFromInventory(bot: Bot, test: (name: string) => boolean, wha
   }
   let pos: Vec3;
   try {
-    pos = await placeNearby(bot, item, what === "bed");
+    pos = await doPlaceNearby(bot, item, what === "bed");
   } catch (error) {
     throw new Error(`No ${what} near spawn, and placing one failed: ${error instanceof Error ? error.message : error}`);
   }

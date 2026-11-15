@@ -1,10 +1,10 @@
 import type { ItemWant, SkillEvent } from "@familiar/contracts";
-import { createSkillExecutor } from "@familiar/core";
-import { minecraftSkills } from "@familiar/minecraft";
+import { createChainSkill, createSkillExecutor } from "@familiar/core";
+import { minecraftSkills, primitives, tidyBody } from "@familiar/minecraft";
 import type { ServerArgs } from "./args.js";
-import { formatSkillEvent } from "./format-skill-event.js";
+import { formatChanges, formatSkillEvent } from "./format-skill-event.js";
 import { joinWithBase } from "./join.js";
-import { chestsFile, loadChests, saveChests } from "./memory-store.js";
+import { chestsFile, learnedSkillsFile, loadChests, loadLearnedSkills, saveChests } from "./memory-store.js";
 
 export interface SkillRun {
   server: ServerArgs;
@@ -19,7 +19,9 @@ export interface SkillRun {
 
 /** Runs one skill through the executor (no decision loop), prints every event, then logs out. */
 export async function runSkill({ server, skill, target, interruptAfterMs, lingerMs, wants = [] }: SkillRun): Promise<void> {
-  if (!minecraftSkills.some((s) => s.name === skill)) {
+  const learned = await loadLearnedSkills(learnedSkillsFile(server.name), primitives.map((s) => s.name), minecraftSkills.map((s) => s.name));
+  const skills = [...minecraftSkills, ...learned.skills.map((s) => createChainSkill(s, primitives, tidyBody))];
+  if (!skills.some((s) => s.name === skill)) {
     throw new Error(`Unknown skill "${skill}". Run "pnpm start -- skills" to list them.`);
   }
   const { bot, base } = await joinWithBase(server);
@@ -29,10 +31,12 @@ export async function runSkill({ server, skill, target, interruptAfterMs, linger
   let finish: (event: SkillEvent) => void = () => {};
   const finished = new Promise<SkillEvent>((resolve) => (finish = resolve));
   const executor = createSkillExecutor({
-    skills: minecraftSkills,
+    skills,
     ctx: { bot, base, wants: () => wants, chests, log: (msg) => console.log(`  ${msg}`) },
     onEvent(event) {
       console.log(formatSkillEvent(event));
+      const changes = formatChanges(event);
+      if (changes) console.log(`  changes: ${changes}`);
       if (event.type !== "started") finish(event);
     },
   });

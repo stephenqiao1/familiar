@@ -2,6 +2,7 @@ import type { Skill } from "@familiar/contracts";
 import type { Bot } from "mineflayer";
 import pathfinder from "mineflayer-pathfinder";
 import { nearestHostile } from "../mobs.js";
+import { doUseOnBlock, doWake } from "../primitives/use-on.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { walkTo } from "../walk-to.js";
 
@@ -28,7 +29,7 @@ export const sleep: Skill<MinecraftCtx> = {
     if (!bed || !bot.isABed(bed)) return { status: "failed", reason: `no bed at ${base.bed}` };
 
     try {
-      await bot.sleep(bed);
+      await doUseOnBlock(bot, bed);
     } catch (error) {
       return { status: "failed", reason: error instanceof Error ? error.message : String(error) };
     }
@@ -45,7 +46,7 @@ function untilWake(bot: Bot, signal: AbortSignal): Promise<{ status: "done" | "i
     };
     const onAbort = () => {
       bot.off("wake", onWake);
-      void bot.wake().catch(() => {});
+      void doWake(bot).catch(() => {});
       resolve({ status: "interrupted" });
     };
     bot.once("wake", onWake);

@@ -3,6 +3,160 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-16: the primitives
+
+*Found by running every primitive on the test server with `pnpm skill-check` (20 scenes, each run
+once to completion and once interrupted), checked against an observer bot and the server console.*
+
+**Found and fixed.** None of these showed up in the unit tests.
+
+- **Items moved into a chest were not reported.** While a container is open, Mineflayer tracks the
+  bot's own items in that window, not in `bot.inventory`, so the before-and-after snapshot saw no
+  change. The snapshot now reads the open window when there is one.
+- **`hit` did not report the target as hurt** when given no target. The wrapper only watched a
+  named target. A primitive can now say what it acts on by default, and that is watched too.
+- **A stopped dig on a very hard block reported progress 0.** One second into obsidian by hand is
+  0.4% of the way. Progress is now kept to three decimals.
+
+**Status.** Fixed. All 20 scenes pass.
+
+## Primitives: looking while walking works by pressing other keys, with limits
+
+*Found 2026-11-16 while building "different body parts at the same time" (`--same-time`).*
+
+**What we saw.** The pathfinder walks by turning the head toward the next step and pressing
+"forward", so at first no walking skill left the head free. Movement keys are relative to where
+the head faces, though, so a held look (`packages/minecraft/src/primitives/gaze.ts`) now takes
+the head and presses the same direction of travel as a combination of forward, back, left and
+right. Live: the bot walked 9.7 blocks east with its head pointed north, stayed on its line, and
+arrived. `go_to`, `return_to_base` and `flee` now leave the head free.
+
+**Limits.**
+- Keys give eight directions. A heading between two of them is walked by switching between the
+  two nearest tick by tick, so it is right on average but wobbles slightly.
+- The look gives way, for that tick, whenever the pathfinder jumps, swims, sneaks to an edge,
+  digs or places a block. In rough ground the head flicks back to the path.
+- Sprinting only works straight ahead, so the bot slows to a walk while it looks aside. While
+  fleeing, a look costs speed.
+- A look alongside a walk lasts one second, then the head goes back to the path.
+- The storage skills, `attack`, `sleep` and the two escape skills still use the whole body.
+- It reads and writes the pathfinder's keys around its tick. A new pathfinder version that
+  steers differently could break it; the live check (`pnpm skill-check walk_and_look`) would show it.
+
+**Status.** Open (the limits). The mechanism works.
+
+## Primitives: a look that runs alongside is invisible to the rest of the brain
+
+*Found 2026-11-16 (`apps/run-bot/src/loop-mode.ts`).*
+
+**What we saw.** A movement run alongside the main skill is logged (in `skillEvents` with
+`alongside: true`, and as the tick's `alongside`), but it is not added to the workspace. Dopamine
+does not learn from it and patience does not time it.
+
+**Why.** Those regions assume one skill at a time: a second "started" event while another skill
+runs would be read as the first one ending.
+
+**What would fix it.** Teach episodes and persistence about side movements, once one matters.
+
+**Status.** Open.
+
+## Primitives: what `changes` cannot see
+
+*Found 2026-11-16 (`packages/minecraft/src/primitives/snapshot.ts`).*
+
+**What we saw.**
+- The target block's **type** is compared, not its state. Opening a door changes nothing in
+  `changes` (the block is still `oak_door`), so `use_on` expects nothing and is always "as expected".
+- `targetHurt` comes from the game's hurt event, which only arrives if the target is in view.
+- `drops` counts dropped items within 5 blocks before and after. A block's drop that lands
+  further away, or is picked up at once, shows as `gained` or not at all.
+- `jump` reports `moved` of about 1.2: the snapshot is taken at the top of the jump.
+- `look_at`, `brace`, `jump`, `use_item`, `use_on` and `move_item` expect nothing, so
+  `asExpected` is true whenever they finish.
+- The snapshot waits 100 to 300 ms after the movement for the world to catch up. A slower effect
+  (a crop growing, a mob dying later from fire) is missed.
+
+**What would fix it.** Compare block states as well as types; let each primitive name a sharper
+expectation as the prediction checker needs it.
+
+**Status.** Open.
+
+## Live testing: a bot that logged out far from base would not start
+
+*Found 2026-11-16 re-running `pnpm neuro-check` after the primitives work.*
+
+**What we saw.** After the ambush scene the bot had fled 73 blocks from base. On its next start
+it stopped with "No chest within 16 blocks of spawn": the saved base's blocks were not loaded
+from where it stood, which was read as the base being gone. The scene runner then hung instead of
+reporting it.
+
+**Why.** Before the brainstem layer the bot fought or fled a short way; with defence by distance
+it keeps retreating while the zombie follows. The base check was always this fragile.
+
+**What we did.** A saved base that is too far to see is kept; only a base whose blocks can be
+seen to be gone is replaced. Every scene now starts by bringing the bot to base, and the runner
+reports a bot that fails to start.
+
+**Status.** Fixed. Still open: the bot flees a long way from a single zombie and does not come
+back by reflex; getting home is left to Jev and the planner.
+
+## Live testing: the night and dark scenes depend on what Jev picks
+
+*Found 2026-11-16 re-running `pnpm neuro-check` after the primitives work.*
+
+**What we saw.** In one full run the `night` scene failed (the bot idled all night) and the `dark`
+scene failed (focus stayed at 0.5). Both passed when re-run with no code change.
+- Night: Jev was offered `idle` and `sleep` and preferred idle (0.72 to 0.28) on every tick. The
+  planner's goal was "check the base chest for supplies, then sleep".
+- Dark: Jev chose `sleep` 500 blocks from the bed. The skill spent the scene walking there, and a
+  running `sleep` counts as rest, which pulls focus down even though the bot is walking in the dark.
+
+**Why.** Nothing but Jev decides to go to bed, and "restful" is judged by the skill's name, not
+by what the bot is doing.
+
+**What would fix it.** Count `sleep` as restful only once the bot is in bed; consider a soft
+"sleepy at night" reflex so bedtime does not rest on Jev alone.
+
+**Status.** Open.
+
+## Same-time: a reflex that fired blocked the look beside its own skill
+
+*Found 2026-11-16 in the `glance` scene.*
+
+**What we saw.** A zombie appeared while the bot was eating. No look ran alongside, because the
+"eat when starving" reflex had fired that tick and a look is only proposed when no reflex spoke.
+
+**What we did.** A look that runs alongside the running skill takes nothing from it, so it is now
+proposed whatever reflexes fired. Live: the bot looked at the zombie and kept eating.
+
+**Status.** Fixed.
+
+## Primitives: things left as they are
+
+*Found 2026-11-16.*
+
+- **`step` takes one block, not "one or two".** A target carries a direction but no count. Two
+  steps is two calls (or a two-step chain).
+- **`sneak` and `open` leave something held on purpose.** Sneaking stays on until the next `sneak`
+  or `brace`; a container stays open until `close` or the next primitive that is not container
+  work. A chain always ends tidy (keys released, window closed).
+- **`item:<name>` is a fourth new target format.** The spec listed three (`ahead`, `dir:`,
+  `held`), but `equip`, `craft` and `move_item` need to name an item.
+- **`dir:forward` is the block beside the bot's feet,** not at eye level. `dir:up` is the block
+  above its head.
+- **`use_on` a bed waits until the bot is lying in it,** and fails with the game's reason by day.
+- **`pick_up` and `step_toward` walk with the pathfinder,** so they use the head as well as the legs.
+- **Eating changed slightly.** `eat` now holds the food through the shared `use_item` function,
+  which watches for the food being used up, instead of Mineflayer's `consume()`. Live it behaves
+  the same (the hunger scene passes), but a bite now ends on the item count or food bar changing.
+- **The old skills check moved.** `pnpm skill-check` now runs the primitives pass. The older
+  script that drives each full skill through the CLI is `pnpm skill-check:skills`; it was written
+  for an earlier world and container and has not been re-run.
+- **Learned skills are on Jev's menu like any skill,** with whatever description the file gives.
+  Nothing checks that a chain is useful or safe beyond each step's own checks.
+
+**Status.** Open, by choice.
+
 ## Live testing, 2026-11-15: the spinal cord and brainstem layer
 
 *Found by running the real bot on the test server with `pnpm neuro-check` (scenes `lava`,
@@ -222,7 +376,11 @@ would win and get the bot out of bed. Not seen live.
 
 **What would fix it.** A `skill-check` pass for each primitive on the test server.
 
-**Status.** Open.
+**Status.** Closed 2026-11-16. `use_item` now holds until the use finishes or 3 seconds, then
+always lets go. `break_block` is marked `long`, reports its progress, and stops cleanly. All 19
+primitives have unit tests and a live scene (`pnpm skill-check`): each completed, was interrupted
+cleanly, and reported changes that matched what an observer bot and the server saw. Body signals
+still have no reader (that is a later drives region, not a primitives gap).
 
 ## Live testing, 2026-11-14: what was found and fixed
 

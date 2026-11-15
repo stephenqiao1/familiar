@@ -1,12 +1,15 @@
-import type { Action, SkillEvent, TickLog } from "@familiar/contracts";
-import { createBrainLoop, createLogger, createSkillExecutor, createWorkspace, defaultLogPath } from "@familiar/core";
+import type { Action, Candidate, SkillEvent, TickLog } from "@familiar/contracts";
+import { createBrainLoop, createChainSkill, createLogger, createSkillExecutor, createWorkspace, defaultLogPath } from "@familiar/core";
 import { feelingNear, type Place } from "@familiar/memory";
 import {
   createFirstSeenTracker,
   DEFENCE_REFLEXES,
   encodeState,
+  headFree,
   isSignificantChange,
   minecraftSkills,
+  primitives,
+  tidyBody,
   posId,
   situationOf,
   threatPresent,
@@ -35,7 +38,9 @@ import { createArbiter, createBrain, patienceOf } from "./brain.js";
 import { createEngine, createPlanner } from "./create-engine.js";
 import {
   chestsFile,
+  learnedSkillsFile,
   loadChests,
+  loadLearnedSkills,
   loadMemories,
   loadNovelty,
   loadScorebook,
@@ -47,7 +52,7 @@ import {
   saveScorebook,
   scorebookFile,
 } from "./memory-store.js";
-import { formatSkillEvent } from "./format-skill-event.js";
+import { formatChanges, formatSkillEvent } from "./format-skill-event.js";
 import { formatTick } from "./format-tick.js";
 import { joinWithBase } from "./join.js";
 
@@ -88,6 +93,10 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     }
   };
   namePlaces();
+  // Learned skills are chains of primitives kept as data; none ship with the bot.
+  const learned = await loadLearnedSkills(learnedSkillsFile(server.name), primitives.map((s) => s.name), minecraftSkills.map((s) => s.name));
+  for (const problem of learned.problems) console.error(`Learned skill left out: ${problem}`);
+  const skills = [...minecraftSkills, ...learned.skills.map((s) => createChainSkill(s, primitives, tidyBody))];
   const workspace = createWorkspace();
   const view = workspace.viewFor("run-bot");
   const focus = () => view.signals[FOCUS_SIGNAL]?.value ?? focusSettings.resting;
@@ -135,12 +144,13 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       focus: focusSettings,
       brainstem,
       showPrimitives: brainArgs.primitives ?? false,
+      sameTime: brainArgs.sameTime ?? false,
       focusNotes,
       memoriesForPlanner: () => budget().remembered,
       memory,
       persistence,
       storage,
-      skills: minecraftSkills,
+      skills,
       ctx,
     },
     brainArgs.regions,
@@ -156,6 +166,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   );
   console.log(`Focus: resting ${focusSettings.resting}, trust in remembered things halves every ${focusSettings.trustHalfLifeMinutes} min.`);
   console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}, arousal gate ${brainstem.arousalGate}.`);
+  if (learned.skills.length) console.log(`Learned skills: ${learned.skills.map((s) => s.name).join(", ")}.`);
   console.log(`Logging to ${logPath}`);
 
   const pendingEvents: SkillEvent[] = [];
@@ -163,9 +174,26 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     pendingEvents.push(event);
     workspace.addEvent(event);
     persistence.observe(event);
-    console.log(`  ${formatSkillEvent(event)}`);
+    logEvent(event);
   };
-  const executor = createSkillExecutor({ skills: minecraftSkills, ctx, onEvent, defaultTimeoutMs: persistence.backstopMs() });
+  const logEvent = (event: SkillEvent) => {
+    const changes = formatChanges(event);
+    console.log(`  ${formatSkillEvent(event)}${changes ? `  [${changes}]` : ""}`);
+  };
+  // A movement run alongside the main skill is logged, but it is not the bot's "current skill":
+  // the brain's regions (rewards, persistence) never see it.
+  const onSideEvent = (event: SkillEvent) => {
+    pendingEvents.push(event);
+    logEvent(event);
+  };
+  const executor = createSkillExecutor({ skills, ctx, onEvent, onSideEvent, defaultTimeoutMs: persistence.backstopMs() });
+  /** With --same-time: a head-only movement runs alongside a running skill that leaves the head free. */
+  const skillNamed = (name: string | undefined) => skills.find((s) => s.name === name);
+  const runsAlongside = (c: Candidate) => {
+    if (!("skill" in c.action)) return false;
+    const parts = skillNamed(c.action.skill)?.parts;
+    return parts?.length === 1 && parts[0] === "head" && headFree(skillNamed(executor.current()?.skill));
+  };
 
   const alarm = () => view.signals[ALARM_SIGNAL]?.value ?? 0;
   let lastReward = 0;
@@ -227,7 +255,10 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   const loop = createBrainLoop({
     regions,
     workspace,
-    arbiter: createArbiter({ scorebook, personality, patience, persistence, skills: minecraftSkills }),
+    arbiter: createArbiter({ scorebook, personality, patience, persistence, skills }),
+    ...(brainArgs.sameTime
+      ? { alongside: { isSide: runsAlongside, onAction: (action: Action) => ("skill" in action ? executor.startAlongside(action.skill, action.target) : undefined) } }
+      : {}),
     getState: () => {
       const { x, y, z } = bot.entity.position.floored();
       const limit = budget().nearby;

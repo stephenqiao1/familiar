@@ -5,7 +5,7 @@ import { createNoveltyMemory, createScorebook } from "@familiar/neuromodulators"
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemory } from "@familiar/memory";
 import { createChestMemory } from "@familiar/minecraft";
-import { loadChests, loadMemories, loadNovelty, loadScorebook, saveChests, saveMemories, saveNovelty, saveScorebook } from "./memory-store.js";
+import { loadChests, loadLearnedSkills, loadMemories, loadNovelty, loadScorebook, saveChests, saveMemories, saveNovelty, saveScorebook } from "./memory-store.js";
 
 let dir: string;
 beforeEach(async () => {
@@ -71,5 +71,14 @@ describe("memory store", () => {
     await writeFile(file, JSON.stringify({ memories: [...saved.memories, { id: "x" }], places: [...saved.places, { name: "nowhere" }], facts: [{ text: "no id" }] }));
     expect((await loadMemories(file)).entries()).toEqual(saved);
     expect((await loadMemories(join(dir, "missing.json"))).entries()).toEqual({ memories: [], places: [], facts: [] });
+  });
+
+  it("loads learned skills from a JSON file; a missing file means none", async () => {
+    const file = join(dir, "learned-skills.json");
+    expect(await loadLearnedSkills(file, ["turn", "step"], ["go_to"])).toEqual({ skills: [], problems: [] });
+    await writeFile(file, JSON.stringify([{ name: "peek", description: "Turn and step.", steps: [{ primitive: "turn", target: "dir:left" }, { primitive: "step" }] }, { name: "go_to", steps: [{ primitive: "turn" }] }]));
+    const { skills, problems } = await loadLearnedSkills(file, ["turn", "step"], ["go_to"]);
+    expect(skills).toEqual([{ name: "peek", description: "Turn and step.", steps: [{ primitive: "turn", target: "dir:left" }, { primitive: "step" }] }]);
+    expect(problems).toEqual(['"go_to": the name is already taken']);
   });
 });

@@ -153,4 +153,75 @@ describe("createSkillExecutor", () => {
     await executor.start("mine");
     expect(types()).toEqual(["mine:failed(cannot run)"]);
   });
+
+  it("passes on what a run changed", async () => {
+    const dig: Skill<Ctx> = { name: "dig", description: "", canRun: () => true, run: async () => ({ status: "done", changes: { targetBlock: "air", asExpected: true } }) };
+    const { executor, events } = setup([dig]);
+    await executor.start("dig");
+    await tick();
+    expect(events.at(-1)).toMatchObject({ skill: "dig", type: "done", changes: { targetBlock: "air", asExpected: true } });
+    expect(events[0]).not.toHaveProperty("changes");
+  });
+
+  describe("different body parts at the same time", () => {
+    const part = (name: string, parts?: Skill<Ctx>["parts"]) => {
+      const pending = pendingSkill(name);
+      return { ...pending, skill: { ...pending.skill, ...(parts ? { parts } : {}) } };
+    };
+    function both(skills: Skill<Ctx>[]) {
+      const main: SkillEvent[] = [];
+      const side: SkillEvent[] = [];
+      const executor = createSkillExecutor({ skills, ctx: { canMine: false }, onEvent: (e) => main.push(e), onSideEvent: (e) => side.push(e) });
+      const show = (events: SkillEvent[]) => events.map((e) => `${e.skill}:${e.type}`);
+      return { executor, main: () => show(main), side: () => show(side), sideEvents: side };
+    }
+
+    it("a head-only movement runs alongside a legs-only one", async () => {
+      const [walk, look] = [part("step", ["legs"]), part("look_at", ["head"])];
+      const { executor, main, side, sideEvents } = both([walk.skill, look.skill]);
+      await executor.start("step");
+      await executor.startAlongside("look_at", "entity:1");
+      expect(main()).toEqual(["step:started"]);
+      expect(side()).toEqual(["look_at:started"]);
+      expect(sideEvents[0]).toMatchObject({ alongside: true, target: "entity:1" });
+      // The main skill is still the bot's current skill.
+      expect(executor.current()).toMatchObject({ skill: "step" });
+      look.finish();
+      await tick();
+      expect(side()).toEqual(["look_at:started", "look_at:done"]);
+      expect(main()).toEqual(["step:started"]);
+    });
+
+    it("two that share a part do not run together", async () => {
+      const [walk, brace, wholeBody] = [part("step", ["legs"]), part("brace", ["legs", "head"]), part("go_to")];
+      const { executor, main, side } = both([walk.skill, brace.skill, wholeBody.skill, part("look_at", ["head"]).skill]);
+      await executor.start("step");
+      await executor.startAlongside("brace");
+      expect(side()).toEqual([]);
+      // A skill that names no parts uses the whole body, so nothing runs beside it.
+      await executor.start("go_to");
+      await executor.startAlongside("look_at");
+      expect(side()).toEqual([]);
+      expect(main()).toEqual(["step:started", "step:interrupted", "go_to:started"]);
+    });
+
+    it("the main action always wins: a new main skill that needs the head stops the look", async () => {
+      const [eat, look, fight] = [part("eat", ["hands"]), part("look_at", ["head"]), part("attack")];
+      const { executor, main, side } = both([eat.skill, look.skill, fight.skill]);
+      await executor.start("eat");
+      await executor.startAlongside("look_at");
+      await executor.start("attack");
+      expect(side()).toEqual(["look_at:started", "look_at:interrupted"]);
+      expect(main()).toEqual(["eat:started", "eat:interrupted", "attack:started"]);
+    });
+
+    it("interrupt stops both", async () => {
+      const [eat, look] = [part("eat", ["hands"]), part("look_at", ["head"])];
+      const { executor, main, side } = both([eat.skill, look.skill]);
+      await executor.start("eat");
+      await executor.startAlongside("look_at");
+      await executor.interrupt();
+      expect([main().at(-1), side().at(-1)]).toEqual(["eat:interrupted", "look_at:interrupted"]);
+    });
+  });
 });

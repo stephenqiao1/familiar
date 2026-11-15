@@ -13,10 +13,13 @@ const SAFE_DISTANCE = 16;
 const STEP = 8;
 const REPLAN_MS = 500;
 
+// Fleeing is walking: it only sets the pathfinder's goal (the walking rhythm), so it needs no primitive.
+
 /** Runs from a mob (or the nearest hostile) until 16+ blocks away or out of its sight, preferring the way home. */
 export const flee: Skill<MinecraftCtx> = {
   name: "flee",
   description: "Run away from a mob (default: the nearest hostile), heading toward base when possible.",
+  parts: ["legs", "hands"],
 
   canRun(ctx, target) {
     // Nothing to flee from, or already safe from it: fleeing would end at once.

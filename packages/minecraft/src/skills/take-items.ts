@@ -1,6 +1,9 @@
 import type { ItemWant, Skill } from "@familiar/contracts";
 import pathfinder from "mineflayer-pathfinder";
 import type { Block } from "../mc-types.js";
+import { doClose } from "../primitives/close.js";
+import { doMoveItem } from "../primitives/move-item.js";
+import { doOpen } from "../primitives/open.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { walkTo } from "../walk-to.js";
 import { countByName } from "../encode/encode-self.js";
@@ -40,7 +43,7 @@ export const takeItems: Skill<MinecraftCtx> = {
 
     const block = bot.blockAt(chest.position);
     if (!block || block.name !== chest.name) return { status: "failed", reason: `no chest at ${chest.position}` };
-    const window = await bot.openContainer(block);
+    const window = await doOpen(bot, block);
     const taken: ItemWant[] = [];
     try {
       if (!("withdraw" in window)) return { status: "failed", reason: "container cannot be taken from" };
@@ -50,7 +53,7 @@ export const takeItems: Skill<MinecraftCtx> = {
         const count = Math.min(want.count, stacks.reduce((sum, i) => sum + i.count, 0));
         if (count === 0) continue;
         try {
-          await window.withdraw(stacks[0]!.type, null, count);
+          await doMoveItem(window, stacks[0]!.type, count, "out");
           taken.push({ item: want.item, count });
         } catch (error) {
           // Withdraw throws when the inventory is full: keep what was taken.
@@ -60,7 +63,7 @@ export const takeItems: Skill<MinecraftCtx> = {
       }
       ctx.chests.remember(posId(chest.position), countByName(window.containerItems()), Date.now());
     } finally {
-      await window.close();
+      await doClose(bot);
     }
     const short = stillWanted(ctx.wants(), countByName(bot.inventory.items()));
     ctx.log(`take_items: took ${taken.length ? describe(taken) : "nothing"}`);

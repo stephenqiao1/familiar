@@ -18,7 +18,8 @@ interface Tick {
   action: { skill?: string; target?: string; keepGoing?: boolean };
   goal: { text: string; setBy: string; stepsDone: number; steps: string[]; wants: unknown[]; watchFor: string[] } | null;
   signals: Record<string, { value: number }>;
-  skillEvents?: { skill: string; type: string; reason?: string; target?: string }[];
+  skillEvents?: { skill: string; type: string; reason?: string; target?: string; alongside?: boolean; changes?: Record<string, unknown> }[];
+  alongside?: { region: string; action: { skill?: string } };
 }
 
 const file = process.argv[2] ?? newestLog();
@@ -63,6 +64,14 @@ console.log(`RULE/TRIGGER ERRORS: ${list(count(ruleErrors, (e) => e))}`);
 console.log(`\nWINNERS BY REGION: ${list(count(ticks.filter((t) => t.winner), (t) => t.winner!.region))}`);
 const events = ticks.flatMap((t) => t.skillEvents ?? []);
 console.log(`SKILL EVENTS: ${list(count(events, (e) => `${e.skill} ${e.type}${e.type === "failed" && e.reason ? ` (${e.reason})` : ""}`), 20)}`);
+
+// What skills changed (primitives and learned skills report it), and what ran alongside the main skill.
+const reported = events.filter((e) => e.changes);
+const kinds = reported.flatMap((e) => Object.keys(e.changes!).filter((k) => k !== "asExpected" && k !== "steps"));
+const surprises = reported.filter((e) => e.type === "done" && e.changes!.asExpected === false);
+console.log(`CHANGES REPORTED: ${reported.length} runs; ${list(count(kinds, (k) => k))}`);
+console.log(`NOT AS EXPECTED: ${list(count(surprises, (e) => e.skill))}`);
+console.log(`RAN ALONGSIDE: ${list(count(events.filter((e) => e.alongside && e.type === "started"), (e) => e.skill))}`);
 
 // Dopamine.
 type Reward = { rule: string; amount: number; raw?: number };

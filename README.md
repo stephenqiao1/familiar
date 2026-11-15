@@ -34,7 +34,7 @@ java -Xmx2G -jar server.jar nogui
 pnpm start -- --host localhost --port 25565 --name Player
 ```
 
-Add `--engine jev` to use Jev for instinct, `--planner claude` to use Claude for the prefrontal cortex (needs `ANTHROPIC_API_KEY` in `.env`), `--regions reflex,instinct` to run with only some regions, and `--primitives` to let Jev choose the body's built-in actions (`look_at`, `step_toward`, ...) as well as skills.
+Add `--engine jev` to use Jev for instinct, `--planner claude` to use Claude for the prefrontal cortex (needs `ANTHROPIC_API_KEY` in `.env`), `--regions reflex,instinct` to run with only some regions, and `--primitives` to let Jev choose the body's built-in actions (`look_at`, `step_toward`, ...) as well as skills. `--same-time` lets a look run alongside a skill that leaves the head free. A bot's learned skills (chains of primitives, as data) are read from `data/<name>/learned-skills.json`.
 
 Each bot's settings live in `bots.json`, keyed by its `--name`. For now that's its dopamine personality: `restingDA` (higher is eager, lower is cautious), `learningRate` (quick to change its mind or stubborn) and `noveltyBonus` (explorer or creature of habit). A bot not listed gets the defaults (0.5, 0.1, 0.5). `patience` holds its serotonin settings: `resting` level, `timeConstantSeconds`, and the strength of each effect (`persistence`, `horizon`, `brake`; 0 turns one off, 1 is full). `noradrenaline` holds its alarm and search settings: `alarmGain` (jumpy or steady), `alarmDecaySeconds` (shakes it off or stays rattled), `searchResting` (restless or settled), and an on/off value (0 or 1) for each effect. `focus` holds its focus settings: `resting` (watchful or easy-going), `trustHalfLifeMinutes` (double-checker or assumer), `factSupport` (quick to generalise or cautious), and an on/off value for each effect. `brainstem` holds `bravery` (0 timid, 1 brave) and a 0-to-1 strength for each part that tunes the reflexes (`gains`, `startle`, `orienting`, `loadedResponses`, `holdBack`, `arousalGate`, `bodySignals`). `memory.halfLifeDays` sets how fast weak memories fade. What each bot learns and remembers (its scorebook, what it has met, what was in each chest it opened, and its memories of events and places) is kept in `data/<name>/`.
 
@@ -46,6 +46,7 @@ The bot joins as `Player` and prints one line per tick (tick, action, which regi
 pnpm test            # every automated test, including whole-brain behaviour tests (no server needed)
 pnpm neuro-check     # live scenes on the test server with Jev + Claude: calm, ambush, hunger, night, lava, drowning, ...
 pnpm neuro-check ambush soak   # only some scenes
+pnpm skill-check     # live pass for the primitives: each one run to completion and interrupted, checked against an observer
 pnpm brain-report    # summarise the newest run's log: each dial, rewards, reflexes and brainstem, memories, warnings, errors
 ```
 

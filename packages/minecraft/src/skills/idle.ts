@@ -1,6 +1,7 @@
 import type { Skill } from "@familiar/contracts";
 import { Vec3 } from "vec3";
 import { sleepFor } from "../abort.js";
+import { doLookAt } from "../primitives/look-at.js";
 import type { MinecraftCtx } from "../skill-context.js";
 
 const LOOK_RADIUS = 6;
@@ -23,7 +24,7 @@ export const idle: Skill<MinecraftCtx> = {
         signal.throwIfAborted();
         const eye = bot.entity.position.offset(0, bot.entity.height, 0);
         // Not forced, so the head turns smoothly instead of snapping.
-        await bot.lookAt(eye.plus(randomOffset()), false);
+        await doLookAt(bot, eye.plus(randomOffset()), false);
         await sleepFor(MIN_PAUSE_MS + Math.random() * (MAX_PAUSE_MS - MIN_PAUSE_MS), signal);
       }
     } catch (error) {

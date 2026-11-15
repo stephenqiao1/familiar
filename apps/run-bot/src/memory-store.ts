@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { parseLearnedSkills, type LearnedSkill } from "@familiar/core";
 import { createMemory, type Fact, type KnownPlace, type Memory, type MemoryOptions, type MemoryStore } from "@familiar/memory";
 import { createChestMemory, type ChestMemory, type ChestRecord } from "@familiar/minecraft";
 import { createNoveltyMemory, createScorebook, type NoveltyMemory, type SavedScore, type Scorebook } from "@familiar/neuromodulators";
@@ -11,6 +12,15 @@ export const scorebookFile = (bot: string) => `data/${bot}/scorebook.json`;
 export const noveltyFile = (bot: string) => `data/${bot}/novelty.json`;
 export const chestsFile = (bot: string) => `data/${bot}/chests.json`;
 export const memoriesFile = (bot: string) => `data/${bot}/memories.json`;
+export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
+
+/**
+ * The bot's learned skills: chains of primitives kept as data. A missing or empty file means none.
+ * `problems` lists entries that were left out and why.
+ */
+export async function loadLearnedSkills(file: string, primitiveNames: string[], takenNames: string[]): Promise<{ skills: LearnedSkill[]; problems: string[] }> {
+  return parseLearnedSkills(await readJson(file), primitiveNames, takenNames);
+}
 
 export async function loadScorebook(file: string): Promise<Scorebook> {
   const raw = await readJson(file);

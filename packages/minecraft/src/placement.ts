@@ -2,27 +2,13 @@ import type { Bot } from "mineflayer";
 import { Vec3 } from "vec3";
 import type { Block } from "./mc-types.js";
 
-type InventoryItem = ReturnType<Bot["inventory"]["items"]>[number];
-
-/**
- * Places `item` on clear flat ground 2–3 blocks from the bot and returns where it went.
- * `twoLong` reserves room for a bed's head. Throws if there is no spot or the server refuses.
- */
-export async function placeNearby(bot: Bot, item: InventoryItem, twoLong = false): Promise<Vec3> {
-  const spot = findPlacementSpot(bot, twoLong);
-  if (!spot) throw new Error(`no clear flat ground next to the bot to place ${item.name}`);
-
-  await bot.equip(item, "hand");
-  await bot.lookAt(spot.target.offset(0.5, 0, 0.5), true);
-  await bot.placeBlock(spot.floor, new Vec3(0, 1, 0));
-  return spot.target;
-}
+// Where a block could be placed. Finding the spot only looks; placing is done by the place_block primitive.
 
 /**
  * An air spot 2–3 blocks from the bot, on solid ground at its feet level. A bed's head goes one block
  * further away from the bot (the way it faces when placing), so that block must be clear too.
  */
-function findPlacementSpot(bot: Bot, needsHead: boolean): { target: Vec3; floor: Block } | null {
+export function findPlacementSpot(bot: Bot, needsHead: boolean): { target: Vec3; floor: Block } | null {
   const feet = bot.entity.position.floored();
   for (const offset of placementOffsets(needsHead)) {
     const target = feet.plus(offset);

@@ -1,5 +1,8 @@
 import type { Skill } from "@familiar/contracts";
 import pathfinder from "mineflayer-pathfinder";
+import { doClose } from "../primitives/close.js";
+import { doMoveItem } from "../primitives/move-item.js";
+import { doOpen } from "../primitives/open.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { walkTo } from "../walk-to.js";
 import { countByName } from "../encode/encode-self.js";
@@ -34,20 +37,20 @@ export const depositItems: Skill<MinecraftCtx> = {
 
     const block = bot.blockAt(chest.position);
     if (!block || block.name !== chest.name) return { status: "failed", reason: `no chest at ${chest.position}` };
-    const window = await bot.openContainer(block);
+    const window = await doOpen(bot, block);
     try {
       if (!("deposit" in window)) return { status: "failed", reason: "container cannot be stored in" };
       for (const item of toDeposit(ctx)) {
         if (signal.aborted) return { status: "interrupted" };
         try {
-          await window.deposit(item.type, null, item.count);
+          await doMoveItem(window, item.type, item.count, "in");
         } catch (error) {
           return { status: "failed", reason: `could not store ${item.name}: ${error instanceof Error ? error.message : error}` };
         }
       }
       ctx.chests.remember(posId(chest.position), countByName(window.containerItems()), Date.now());
     } finally {
-      await window.close();
+      await doClose(bot);
     }
     ctx.log("deposit_items: chest closed");
     return { status: "done" };

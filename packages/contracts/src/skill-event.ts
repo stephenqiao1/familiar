@@ -1,8 +1,14 @@
+import type { Changes } from "./skill.js";
+
 /** A change in a skill's lifecycle. */
 export interface SkillEvent {
   skill: string;
   target?: string;
   type: "started" | "done" | "failed" | "interrupted";
   reason?: string;
+  /** What the run changed, on the event that ends it, if the skill reported it. */
+  changes?: Changes;
+  /** True for a movement that ran alongside the main skill, using other body parts. */
+  alongside?: true;
   timestamp: number;
 }

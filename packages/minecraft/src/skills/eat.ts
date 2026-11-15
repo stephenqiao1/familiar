@@ -1,6 +1,7 @@
 import type { Skill } from "@familiar/contracts";
-import type { Bot } from "mineflayer";
 import { foodsByValue } from "../foods.js";
+import { doEquip } from "../primitives/equip.js";
+import { doUseItem } from "../primitives/use-item.js";
 import type { MinecraftCtx } from "../skill-context.js";
 
 const FULL = 20;
@@ -9,6 +10,8 @@ const FULL = 20;
 export const eat: Skill<MinecraftCtx> = {
   name: "eat",
   description: "Eat the best food in the inventory until full.",
+  // Eating is all in the hands, so the head and legs are free.
+  parts: ["hands"],
 
   canRun(ctx) {
     return ctx.bot.food < FULL && foodsByValue(ctx.bot).length > 0;
@@ -22,30 +25,12 @@ export const eat: Skill<MinecraftCtx> = {
       if (!food) break;
 
       ctx.log(`eat: eating ${food.name} (food ${bot.food}/${FULL})`);
-      await bot.equip(food, "hand");
-      const finished = await consumeUnlessAborted(bot, signal);
-      if (!finished) return { status: "interrupted" };
+      await doEquip(bot, food);
+      // Holds the food in use until it is eaten, and always lets go (also when stopped mid-bite).
+      const eaten = await doUseItem(bot, signal).catch(() => false);
+      if (signal.aborted) return { status: "interrupted" };
+      if (!eaten) return { status: "failed", reason: `could not eat ${food.name}` };
     }
     return { status: "done" };
   },
 };
-
-/** Eats one item. Stops chewing and returns false if the signal fires first. */
-async function consumeUnlessAborted(bot: Bot, signal: AbortSignal): Promise<boolean> {
-  let onAbort = () => {};
-  const aborted = new Promise<false>((resolve) => {
-    onAbort = () => {
-      bot.deactivateItem();
-      resolve(false);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  const eating = bot.consume().then(() => true as const);
-  // If we stop chewing, the abandoned consume() may still reject later; don't let that crash the process.
-  eating.catch(() => {});
-  try {
-    return await Promise.race([eating, aborted]);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-  }
-}

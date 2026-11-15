@@ -4,6 +4,8 @@ import pathfinder from "mineflayer-pathfinder";
 import { sleepFor } from "../abort.js";
 import type { Entity } from "../mc-types.js";
 import { isStillThere, resolveMobTarget } from "../mobs.js";
+import { doEquip } from "../primitives/equip.js";
+import { doHit } from "../primitives/hit.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { bestWeapon } from "../weapons.js";
 
@@ -30,7 +32,7 @@ export const attack: Skill<MinecraftCtx> = {
     if (!mob) return { status: "failed", reason: "no target" };
 
     const weapon = bestWeapon(bot);
-    if (weapon) await bot.equip(weapon, "hand");
+    if (weapon) await doEquip(bot, weapon);
     ctx.log(`attack: fighting ${mob.name ?? "entity"} ${mob.id} with ${weapon?.name ?? "bare hands"}`);
 
     try {
@@ -44,8 +46,7 @@ export const attack: Skill<MinecraftCtx> = {
           bot.pathfinder.setGoal(new GoalFollow(mob, REACH - 1), true);
         } else {
           bot.pathfinder.setGoal(null);
-          await bot.lookAt(mob.position.offset(0, mob.height * 0.8, 0), true);
-          bot.attack(mob);
+          await doHit(bot, mob);
         }
         await sleepFor(SWING_MS, signal);
       }

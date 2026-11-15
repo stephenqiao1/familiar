@@ -20,6 +20,8 @@ export interface BrainArgs {
   regions?: string[];
   /** Put the primitives (look_at, step_toward, ...) on the decision menu. Default: off. */
   primitives?: boolean;
+  /** Let a head-only movement (a look) run alongside a skill that leaves the head free. Default: off. */
+  sameTime?: boolean;
   /** The fixed plan the echo planner returns (for tests and live checks). Default: "Stay safe." */
   plan?: Plan;
 }
@@ -34,6 +36,7 @@ export type Command =
  *   [--planner echo|claude]                          what the prefrontal cortex plans with (default: echo)
  *   [--regions reflex,instinct,...]                  run only these regions (default: all)
  *   [--plan '{"goal":"...","ifThen":[...]}']         the echo planner's fixed plan, as JSON
+ *   [--same-time]                                    let a look run alongside a skill that leaves the head free
  *   [--primitives]                                   let the engine choose primitives too (default: reflexes only)
  * skills                                             list skills
  * skill <name> [--target t] [--interrupt-after s]    run one skill
@@ -57,6 +60,7 @@ export function parseCommand(argv: string[]): Command {
       planner: { type: "string", default: "echo" },
       regions: { type: "string" },
       primitives: { type: "boolean", default: false },
+      "same-time": { type: "boolean", default: false },
       plan: { type: "string" },
     },
   });
@@ -74,6 +78,7 @@ export function parseCommand(argv: string[]): Command {
     }
     const brain: BrainArgs = { engine: values.engine as EngineName, planner: values.planner as PlannerName };
     if (values.primitives) brain.primitives = true;
+    if (values["same-time"]) brain.sameTime = true;
     if (values.plan !== undefined) brain.plan = parsePlan(values.plan);
     if (values.regions !== undefined) brain.regions = values.regions.split(",").map((r) => r.trim()).filter(Boolean);
     return { kind: "loop", server, brain };

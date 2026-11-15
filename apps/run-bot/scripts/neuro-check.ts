@@ -33,7 +33,9 @@ interface Tick {
       memory: { nearby: string; kind: string } | null;
     };
   };
-  skillEvents?: { skill: string; type: string; reason?: string }[];
+  skillEvents?: { skill: string; type: string; reason?: string; alongside?: boolean }[];
+  /** A proposal acted on alongside the main action (with --same-time). */
+  alongside?: { region: string; action: { skill?: string } };
 }
 
 interface Run {
@@ -43,7 +45,7 @@ interface Run {
   at(t: Tick): number;
   signal(name: string): number[];
   trace(t: Tick, region: string): Record<string, unknown>;
-  events(): { skill: string; type: string; reason?: string }[];
+  events(): { skill: string; type: string; reason?: string; alongside?: boolean }[];
 }
 
 interface Scene {
@@ -60,6 +62,8 @@ interface Scene {
   keepMemory?: boolean;
   /** The bot to run (its settings come from bots.json). Default: Tester. Commands naming Tester are aimed at it. */
   bot?: string;
+  /** Extra flags for the bot (e.g. --same-time). */
+  flags?: string[];
   /** Use the echo planner with this fixed plan instead of Claude. */
   plan?: { goal: string; ifThen?: { when: string; skill: string }[]; holdBack?: string[] };
   /** Each check: what should be true, and whether it was. */
@@ -473,6 +477,37 @@ const scenes: Scene[] = [
       ];
     },
   },
+  {
+    name: "glance",
+    about: "With --same-time: a zombie appears far off while the bot is eating. It should look at it without stopping its meal.",
+    seconds: 34,
+    flags: ["--same-time"],
+    plan: { goal: "Stay on the plaza and keep fed." },
+    before: [...CALM, "difficulty easy", ...PLAZA],
+    during: [
+      [5, TO_PLAZA],
+      [6, `give ${BOT} bread 16`],
+      [8, `effect give ${BOT} hunger 7 255 true`],
+      // The meal starts about 12 to 13 s in and lasts about 8 s: the zombie appears in the middle of it.
+      [16, `execute at ${BOT} run summon zombie ~12 151 ~ {NoAI:1b,PersistenceRequired:1b}`],
+      [28, "kill @e[type=zombie]"],
+      [30, HOME],
+    ],
+    after: CLEAR_PLAZA,
+    checks: (run) => {
+      const beside = run.ticks.filter((t) => t.alongside?.action.skill === "look_at");
+      const first = beside[0];
+      const looks = run.events().filter((e) => e.alongside && e.skill === "look_at");
+      const cutShort = first ? (first.skillEvents ?? []).some((e) => e.skill === "eat" && e.type === "interrupted") : false;
+      return [
+        ["the bot ate", run.events().some((e) => e.skill === "eat" && e.type === "started")],
+        ["the zombie was seen while it was eating", run.ticks.some((t) => hostiles(t).length > 0 && t.action.skill === "eat" || (hostiles(t).length > 0 && first !== undefined))],
+        ["a look ran alongside the meal", first !== undefined && first.action.skill !== "look_at", first ? `main action that tick: ${first.action.skill ?? "keep going"}` : "no look ran alongside"],
+        ["the look started and finished as a side movement", looks.some((e) => e.type === "started") && looks.some((e) => e.type === "done"), looks.map((e) => e.type).join(", ")],
+        ["the meal was not interrupted by it", !cutShort],
+      ];
+    },
+  },
   temperamentScene("Brave", "Bravery 0.8, armed, with a zombie closing in from 6 blocks."),
   temperamentScene("Timid", "Bravery 0.2, the same ambush: it should flee more readily than the brave bot."),
   {
@@ -518,12 +553,17 @@ async function play(scene: Scene): Promise<Run> {
   for (const command of scene.before ?? []) send(command);
   rcon("kill @e[type=!player,type=!item,distance=..64,x=-8,y=68,z=16]");
   const planner = scene.plan ? ["--planner", "echo", "--plan", JSON.stringify(scene.plan)] : ["--planner", "claude"];
-  const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", "--engine", "jev", ...planner, "--name", bot], { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", "--engine", "jev", ...planner, ...(scene.flags ?? []), "--name", bot], { stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", (d: Buffer) => (output += d));
   child.stderr.on("data", (d: Buffer) => (output += d));
   const joined = Date.now();
-  while (!output.includes("Logging to") && Date.now() - joined < 30_000) await sleep(200);
+  let exited = false;
+  child.once("exit", () => (exited = true));
+  while (!output.includes("Logging to") && !exited && Date.now() - joined < 30_000) await sleep(200);
+  if (exited) throw new Error(`The bot stopped before it started playing:\n${output.slice(-600)}`);
+  // Every scene starts at base, wherever the last one left the bot.
+  send(HOME);
   send(`effect clear ${BOT}`);
   send(`effect give ${BOT} instant_health 1 10 true`);
   const started = Date.now();
@@ -533,7 +573,7 @@ async function play(scene: Scene): Promise<Run> {
     await sleep(250);
   }
   child.kill("SIGINT");
-  await new Promise((resolve) => child.once("exit", resolve));
+  if (!exited) await new Promise((resolve) => child.once("exit", resolve));
   for (const command of scene.after ?? []) send(command);
   const file = output.match(/Logging to (\S+)/)?.[1];
   if (!file) throw new Error(`The bot did not start:\n${output.slice(-600)}`);

@@ -2,6 +2,7 @@ import type { Skill } from "@familiar/contracts";
 import { sleepFor } from "../abort.js";
 import { isBurning } from "../body.js";
 import { inLavaOrFire, isSafeToStand, nearestSpot } from "../safety.js";
+import { releaseKeys } from "../primitives/keys.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { steerToward } from "../steer.js";
 
@@ -34,7 +35,7 @@ export const escapeHazard: Skill<MinecraftCtx> = {
         const water = isBurning(bot.entity) ? nearestSpot(bot, SEARCH_RADIUS, (pos) => bot.blockAt(pos)?.name === "water") : null;
         const goal = water ?? (inIt ? nearestSpot(bot, SEARCH_RADIUS, (pos) => isSafeToStand(bot, pos)) : null);
         // Out of the fire with no water to reach: stand still and let it burn out.
-        if (goal === null && !inIt) bot.clearControlStates();
+        if (goal === null && !inIt) releaseKeys(bot);
         // Jump to swim up out of lava or over a ledge; on open ground walk, so it drops into the water rather than hopping over it.
         else await steerToward(bot, goal, inIt || blocked(bot));
         await sleepFor(STEP_MS, signal);
@@ -44,7 +45,7 @@ export const escapeHazard: Skill<MinecraftCtx> = {
       if (signal.aborted) return { status: "interrupted" };
       throw error;
     } finally {
-      bot.clearControlStates();
+      releaseKeys(bot);
     }
   },
 };

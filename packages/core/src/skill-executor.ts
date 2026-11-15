@@ -1,4 +1,4 @@
-import type { RunningSkill, Skill, SkillEvent, SkillResult } from "@familiar/contracts";
+import type { BodyPart, RunningSkill, Skill, SkillEvent, SkillResult } from "@familiar/contracts";
 
 export interface SkillExecutorOptions<Ctx> {
   skills: Skill<Ctx>[];
@@ -6,6 +6,8 @@ export interface SkillExecutorOptions<Ctx> {
   onEvent: (event: SkillEvent) => void;
   /** How long a skill may run before it is stopped (it then fails with "timeout"). Default: 120 000. */
   defaultTimeoutMs?: number;
+  /** Events of a skill run alongside the main one. Default: dropped. */
+  onSideEvent?: (event: SkillEvent) => void;
 }
 
 export interface SkillExecutor {
@@ -16,6 +18,11 @@ export interface SkillExecutor {
   /** Gives up on the running skill: aborts it, and it ends as failed with this reason. */
   abandon(reason: string): Promise<void>;
   current(): RunningSkill | null;
+  /**
+   * Runs a second skill at the same time as the main one, if the two use different body parts.
+   * It is refused (silently) if they share a part, and stopped if a later main skill needs its parts.
+   */
+  startAlongside(name: string, target?: string): Promise<void>;
 }
 
 interface Run extends RunningSkill {
@@ -25,20 +32,32 @@ interface Run extends RunningSkill {
   settled: Promise<void>;
 }
 
-/** Runs at most one skill at a time. Never throws: every outcome is reported through `onEvent`. */
+const ALL_PARTS: BodyPart[] = ["head", "legs", "hands"];
+/** A skill that declares no parts uses the whole body. */
+const partsOf = (skill: { parts?: BodyPart[] } | undefined) => skill?.parts ?? ALL_PARTS;
+const share = (a: BodyPart[], b: BodyPart[]) => a.some((part) => b.includes(part));
+
+/**
+ * Runs one skill at a time, plus at most one more alongside it that uses different body parts.
+ * Never throws: every outcome is reported through `onEvent` (or `onSideEvent`).
+ */
 export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): SkillExecutor {
   const { ctx, onEvent, defaultTimeoutMs = 120_000 } = options;
   const skills = new Map(options.skills.map((s) => [s.name, s]));
   let running: Run | null = null;
+  /** The skill running alongside the main one, if any. */
+  let side: Run | null = null;
   // start/interrupt calls run one after another, so they never interleave.
   let queue: Promise<void> = Promise.resolve();
 
-  function emit(event: Omit<SkillEvent, "timestamp">): void {
-    const full: SkillEvent = { ...event, timestamp: Date.now() };
+  function emit(event: Omit<SkillEvent, "timestamp">, alongside = false): void {
+    const full: SkillEvent = { ...event, ...(alongside ? { alongside: true as const } : {}), timestamp: Date.now() };
     if (full.target === undefined) delete full.target;
     if (full.reason === undefined) delete full.reason;
+    if (full.changes === undefined) delete full.changes;
     try {
-      onEvent(full);
+      if (alongside) options.onSideEvent?.(full);
+      else onEvent(full);
     } catch (error) {
       console.error("[skills] onEvent failed:", error);
     }
@@ -60,17 +79,25 @@ export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): Sk
     run.controller.abort(new Error(reason));
   }
 
-  function launch(skill: Skill<Ctx>, target: string | undefined): void {
+  async function stopSide(): Promise<void> {
+    if (!side) return;
+    side.controller.abort(new Error("interrupted"));
+    await side.settled;
+  }
+
+  function launch(skill: Skill<Ctx>, target: string | undefined, alongside = false): void {
     const controller = new AbortController();
     const run: Run = { skill: skill.name, target, startedAt: Date.now(), controller, settled: Promise.resolve() };
     const timer = setTimeout(() => fail(run, "timeout"), defaultTimeoutMs);
-    running = run;
-    emit({ skill: skill.name, target, type: "started" });
+    if (alongside) side = run;
+    else running = run;
+    emit({ skill: skill.name, target, type: "started" }, alongside);
 
     run.settled = settle(skill, target, controller.signal).then((result) => {
       clearTimeout(timer);
       if (running === run) running = null;
-      emit({ skill: skill.name, target, ...finalResult(result, controller.signal.aborted, run.failure) });
+      if (side === run) side = null;
+      emit({ skill: skill.name, target, ...finalResult(result, controller.signal.aborted, run.failure) }, alongside);
     });
   }
 
@@ -99,11 +126,30 @@ export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): Sk
         if (!ok) return emit({ skill: name, target, type: "failed", reason: "cannot run" });
 
         await stopRunning();
+        // The main skill always wins: whatever runs alongside gives way if it needs the same parts.
+        if (side && share(partsOf(skills.get(side.skill)), partsOf(skill))) await stopSide();
         launch(skill, target);
       });
     },
+    startAlongside(name, target) {
+      return enqueue(async () => {
+        const skill = skills.get(name);
+        if (!skill || (side && side.skill === name && side.target === target)) return;
+        if (running && share(partsOf(skill), partsOf(skills.get(running.skill)))) return;
+        try {
+          if (!skill.canRun(ctx, target)) return;
+        } catch {
+          return;
+        }
+        await stopSide();
+        launch(skill, target, true);
+      });
+    },
     interrupt() {
-      return enqueue(stopRunning);
+      return enqueue(async () => {
+        await stopSide();
+        await stopRunning();
+      });
     },
     abandon(reason) {
       return enqueue(async () => {
@@ -119,10 +165,11 @@ export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): Sk
 }
 
 /** A skill that finished "done" keeps that result; otherwise an abort decides the outcome. */
-function finalResult(result: SkillResult, aborted: boolean, failure: string | undefined): Pick<SkillEvent, "type" | "reason"> {
-  if (result.status === "done" || !aborted) return { type: result.status, reason: result.reason };
-  if (failure !== undefined) return { type: "failed", reason: failure };
-  return { type: "interrupted", reason: result.reason };
+function finalResult(result: SkillResult, aborted: boolean, failure: string | undefined): Pick<SkillEvent, "type" | "reason" | "changes"> {
+  const { changes } = result;
+  if (result.status === "done" || !aborted) return { type: result.status, reason: result.reason, changes };
+  if (failure !== undefined) return { type: "failed", reason: failure, changes };
+  return { type: "interrupted", reason: result.reason, changes };
 }
 
 function errorMessage(error: unknown): string {

@@ -3,6 +3,7 @@ import type { Bot } from "mineflayer";
 import { sleepFor } from "../abort.js";
 import { airOf } from "../body.js";
 import { nearestSpot } from "../safety.js";
+import { releaseKeys } from "../primitives/keys.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { steerToward } from "../steer.js";
 
@@ -42,7 +43,7 @@ export const surface: Skill<MinecraftCtx> = {
       if (signal.aborted) return { status: "interrupted" };
       throw error;
     } finally {
-      bot.clearControlStates();
+      releaseKeys(bot);
     }
   },
 };

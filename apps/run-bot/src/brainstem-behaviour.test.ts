@@ -64,7 +64,8 @@ function state(p: Patch, ms: number): State {
 
 const skill = (name: string, flags: Partial<Skill<null>> = {}): Skill<null> => ({ name, description: name, canRun: () => true, run: async () => ({ status: "done" }), ...flags });
 const skills = [
-  ...["go_to", "idle", "eat", "flee", "sleep"].map((name) => skill(name)),
+  ...["go_to", "idle", "flee", "sleep"].map((name) => skill(name)),
+  skill("eat", { parts: ["hands"] }),
   skill("attack", { risky: true }),
   skill("escape_hazard", { reflexOnly: true }),
   skill("surface", { reflexOnly: true }),
@@ -73,7 +74,7 @@ const skills = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; only?: string[]; engineFails?: boolean; plan?: Plan } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; only?: string[]; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
   const store = createWorkspace();
   const calls = { engine: 0, planner: 0, menus: [] as string[][] };
   const engine: DecisionEngine = {
@@ -108,6 +109,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; only?: string[];
       noradrenaline: DEFAULT_NORADRENALINE,
       focus: DEFAULT_FOCUS,
       brainstem: { ...DEFAULT_BRAINSTEM, ...options.brainstem },
+      sameTime: options.sameTime ?? false,
       memory: createMemory(),
       persistence,
       storage: { chests: createChestMemory(), baseChest: "pos:0,63,0" },
@@ -401,6 +403,48 @@ describe("the decision menu", () => {
   it("never offers reflex-only skills, and primitives only when asked", async () => {
     const { tick, calls } = bot();
     await tick();
-    expect(calls.menus.at(-1)).toEqual(["go_to", "idle", "eat", "flee", "sleep", "attack"]);
+    expect(calls.menus.at(-1)).toEqual(["go_to", "idle", "flee", "sleep", "eat", "attack"]);
+  });
+});
+
+describe("looking while the hands are busy (the same-time flag)", () => {
+  it("off: no look is proposed while a skill other than idle runs", async () => {
+    const { tick } = bot();
+    await tick({}, "eat");
+    expect((await tick({ mobs: [mob("zombie", 12)] }, "eat")).candidates.some((c) => c.region === "brainstem")).toBe(false);
+  });
+
+  it("on: a look is proposed while eating (hands only), but not while a whole-body skill runs", async () => {
+    const eating = bot({ sameTime: true });
+    await eating.tick({}, "eat");
+    expect((await eating.tick({ mobs: [mob("zombie", 12)] }, "eat")).candidates).toContainEqual(expect.objectContaining({ region: "brainstem", action: { skill: "look_at", target: "entity:1" } }));
+    const walking = bot({ sameTime: true });
+    await walking.tick({}, "go_to");
+    expect((await walking.tick({ mobs: [mob("zombie", 12)] }, "go_to")).candidates.some((c) => c.region === "brainstem")).toBe(false);
+  });
+});
+
+describe("a look alongside a reflex's own skill (the same-time flag)", () => {
+  it("is still proposed when the reflex that fired runs a skill that leaves the head free", async () => {
+    const starving = { self: { food: 4, foodItems: 3 } };
+    const eating = bot({ sameTime: true });
+    await eating.tick(starving, "eat");
+    const out = await eating.tick({ ...starving, mobs: [mob("zombie", 12)] }, "eat");
+    expect(out.reflexes.map((r) => r.rule)).toEqual(["eat_when_starving"]);
+    expect(out.candidates).toContainEqual(expect.objectContaining({ region: "brainstem", action: { skill: "look_at", target: "entity:1" } }));
+  });
+});
+
+describe("looking while walking (the same-time flag)", () => {
+  it("on: a look is proposed while a walking skill runs, since walking leaves the head free", async () => {
+    const walk = skill("walk", { parts: ["legs", "hands"] });
+    skills.push(walk);
+    try {
+      const walking = bot({ sameTime: true });
+      await walking.tick({}, "walk");
+      expect((await walking.tick({ mobs: [mob("zombie", 12)] }, "walk")).candidates).toContainEqual(expect.objectContaining({ region: "brainstem", action: { skill: "look_at", target: "entity:1" } }));
+    } finally {
+      skills.pop();
+    }
   });
 });
