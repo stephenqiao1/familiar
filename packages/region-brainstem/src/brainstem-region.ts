@@ -1,7 +1,7 @@
 import type { Proposal, Region, State, Workspace } from "@familiar/contracts";
 import { createLoadedResponses, LOADED_URGENCY, type Thing } from "./loaded.js";
 import type { BrainstemSettings } from "./settings.js";
-import { AIR_SIGNAL, AROUSAL_SIGNAL, HUNGER_SIGNAL, ORIENTING_SIGNAL, PAIN_SIGNAL, STARTLE_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+import { AIR_SIGNAL, AROUSAL_SIGNAL, HUNGER_SIGNAL, ORIENTING_SIGNAL, PAIN_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
 
 /** What a detector looks at: the last tick's state, this tick's, and the workspace. */
 export interface BrainstemMoment {
@@ -24,6 +24,8 @@ export interface Body {
   air: number;
   /** How hungry (0 = full). */
   hunger: number;
+  /** The legs are stuck right now (trying to get free, or just gave up). Default: false. */
+  stuck?: boolean;
 }
 
 export interface BrainstemOptions {
@@ -70,6 +72,8 @@ export interface BrainstemOptions {
 const STARTLE_GAP_MS = 5000;
 /** Pain fades with this time constant: about gone after 10 seconds. */
 const PAIN_TAU_SECONDS = 3.3;
+/** Being stuck fades from the signal with this time constant: about gone after 5 seconds. */
+const STUCK_TAU_SECONDS = 1.7;
 /** Losing this share of full health at once is full pain. */
 const FULL_PAIN = 1 / 3;
 /** Below these, the bot is undisturbed enough to stay asleep with the upper layers paused. */
@@ -89,7 +93,7 @@ const STAY_ASLEEP_URGENCY = 0.5;
  *      reports loaded responses and hold-backs it had to ignore;
  *   e) arousal gate: shares `arousal`; while asleep and undisturbed, shares `upper_paused` so the
  *      deciding layers above make no calls. A startle, damage, a hard reflex or alarm ends it at once;
- *   f) body signals: shares `air`, `pain` and `hunger`.
+ *   f) body signals: shares `air`, `pain`, `hunger` and `stuck`.
  * Everything it does is in the trace.
  */
 export function createBrainstemRegion(options: BrainstemOptions): Region {
@@ -97,6 +101,7 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
   const loaded = createLoadedResponses(options.responseProblem);
   let before: State | null = null;
   let pain = 0;
+  let stuck = 0;
   let lastStartle = -Infinity;
   let checkedGoal: number | null = null;
 
@@ -121,7 +126,10 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
         ws.setSignal(AIR_SIGNAL, body.air);
         ws.setSignal(PAIN_SIGNAL, pain);
         ws.setSignal(HUNGER_SIGNAL, body.hunger);
-        trace.body = { air: body.air, pain, hunger: body.hunger };
+        // 1 while the legs are stuck, then fading.
+        stuck = body.stuck ? 1 : stuck * Math.exp(-dt / STUCK_TAU_SECONDS);
+        ws.setSignal(STUCK_SIGNAL, stuck);
+        trace.body = { air: body.air, pain, hunger: body.hunger, stuck };
       }
 
       // b) Startle.

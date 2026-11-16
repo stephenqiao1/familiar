@@ -36,6 +36,7 @@ export function fakeData(p: StatePatch = {}): MinecraftStateData {
       inWater: false,
       falling: false,
       lastHurt: null,
+      locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
       ...p.self,
     },
     nearby: { hazards: [], mobs: [], blocks: [], players: [], loud: [], ...p.nearby },

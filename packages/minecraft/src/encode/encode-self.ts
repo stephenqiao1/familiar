@@ -18,7 +18,7 @@ export interface LastHurt {
   by: string | null;
 }
 
-export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHurt: LastHurt | null = null, now = Date.now()): MinecraftStateData["self"] {
+export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHurt: LastHurt | null = null, now = Date.now()): Omit<MinecraftStateData["self"], "locomotion"> {
   const items = bot.inventory.items();
   const here = bot.blockAt(bot.entity.position.floored());
   const feet = bot.entity.position.floored();

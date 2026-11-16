@@ -1,16 +1,14 @@
 import type { ItemWant, Skill } from "@familiar/contracts";
-import pathfinder from "mineflayer-pathfinder";
 import type { Block } from "../mc-types.js";
 import { doClose } from "../primitives/close.js";
 import { doMoveItem } from "../primitives/move-item.js";
 import { doOpen } from "../primitives/open.js";
+import { withJourney } from "../locomotion/index.js";
 import type { MinecraftCtx } from "../skill-context.js";
-import { walkTo } from "../walk-to.js";
 import { countByName } from "../encode/encode-self.js";
 import { posId } from "../encode/scan-blocks.js";
 import { chosenContainer, containerAt, stillWanted } from "./storage.js";
 
-const { GoalLookAtBlock } = pathfinder.goals;
 
 /**
  * Takes from a chest what the current goal wants the bot to carry (the planner decides; this skill
@@ -38,7 +36,7 @@ export const takeItems: Skill<MinecraftCtx> = {
     const chest = target === undefined ? pickChest(ctx, missing) : containerAt(bot, target);
     if (!chest) return { status: "failed", reason: `no chest at ${target ?? "base"}` };
     ctx.log(`take_items: heading for ${chest.name} at ${chest.position} for ${describe(missing)}`);
-    const walk = await walkTo(bot, new GoalLookAtBlock(chest.position, bot.world), signal);
+    const walk = await ctx.locomotion.goTo(chest.position, { see: true }, signal);
     if (walk.status !== "done") return walk;
 
     const block = bot.blockAt(chest.position);
@@ -67,7 +65,7 @@ export const takeItems: Skill<MinecraftCtx> = {
     }
     const short = stillWanted(ctx.wants(), countByName(bot.inventory.items()));
     ctx.log(`take_items: took ${taken.length ? describe(taken) : "nothing"}`);
-    return short.length ? { status: "done", reason: `chest lacked ${describe(short)}` } : { status: "done" };
+    return withJourney(short.length ? { status: "done", reason: `chest lacked ${describe(short)}` } : { status: "done" }, walk);
   },
 };
 

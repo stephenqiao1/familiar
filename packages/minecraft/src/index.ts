@@ -2,6 +2,7 @@ export type { Base } from "./base.js";
 export { DEFAULT_BASE_FILE } from "./base-store.js";
 export * from "./brain/index.js";
 export { createChestMemory, withTrust, type ChestMemory, type ChestRecord, type RememberedLookup } from "./chest-memory.js";
+export { createLocomotion, type Drive, type Locomotion, type LocomotionStatus } from "./locomotion/index.js";
 export { trackBodyEvents, type BodyEvents } from "./body-events.js";
 export { connect } from "./connect.js";
 export { encodeState, SCHEMA_VERSION } from "./encode/encode-state.js";

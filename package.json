@@ -13,6 +13,8 @@
     "lint": "tsc -b && tsc --noEmit -p tsconfig.test.json",
     "check-log": "node apps/run-bot/scripts/check-log.ts",
     "skill-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/primitive-check.ts",
+    "demo": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/demo.ts",
+    "locomotion-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/locomotion-check.ts",
     "skill-check:skills": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/skill-check.ts",
     "jev-smoke": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/jev-smoke.ts",
     "reaction-report": "node apps/run-bot/scripts/reaction-report.ts",

@@ -2,6 +2,7 @@ export { playerAlarms, threatPresent } from "./alarm.js";
 export { drowsy, headFree, HOLDABLE, leaningOf, playerBrainstem, playerStartles, REFLEX_NOTE } from "./brainstem.js";
 export { asleep, moved, playerFocus, watchedThings } from "./focus.js";
 export { approachableThings, skillsToward, thingsInView } from "./cues.js";
+export { DEFAULT_LOCOMOTION, driveFrom, locomotionProblem, RESTING_DRIVE, type LocomotionSettings } from "./locomotion.js";
 export { placeOf, playerMemories } from "./memories.js";
 export { playerInstinct } from "./instinct.js";
 export { isShock, playerOutlook } from "./outlook.js";

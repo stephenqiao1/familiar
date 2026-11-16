@@ -3,6 +3,141 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## The demo runner: what it can and cannot show
+
+*Found 2026-11-16 while building `pnpm demo` (`apps/run-bot/scripts/demo.ts`), tested with a
+stand-in viewer that recorded what reached its screen.*
+
+**What we saw.** Ten demos, each tied to one finding. In my test runs:
+
+| Demo | Result |
+|---|---|
+| `follow` | Asked to stay within 3 blocks; typical gap 6.3. |
+| `door` | Door ahead: opened it. Door 4 blocks to the side: broke 6 blocks of glass to get past instead. |
+| `pond` | Low walls: went along the wall top. High walls: swam. |
+| `speeds` | Slow 7.7 s, resting 6.4 s, alarmed 6.1 s over 34 blocks. |
+| `glance` | Head on target 83% of a flat walk, 80% over steps. |
+| `stuck` | Tried a jump, then a sidestep, then ended as "no path found". |
+| `lava` | Got out, then burned for 14 s with no water near; lived at 4/20 health. |
+| `hold` | Lived at 6/20 health; `last_stand` pulled it out. |
+| `far` | Once it fled and attacked (the gap was too shallow, since fixed); once it only looked. |
+| `dawn` | Sleep started 45 times and refused 45 times. |
+
+**Limits.**
+- **Three demos do not show their limit every time.** `hold`, `far` and `dawn` run the whole brain
+  with Jev, so they vary. `glance` is close: the head only flicks away for a moment on each jump.
+  The runner says how many runs so far showed the limit.
+- **The `stuck` demo's jump cannot be seen.** The test holds the body still by switching the bot's
+  own movement off, so the jump and the sidestep happen only as key presses; chat names each one.
+- **The door demo's bot breaks the glass side wall, not the plank wall.** It takes the cheapest
+  way through, which is the point, but it is the glass you will see go.
+- **Only visible limits have demos.** What dopamine learns, memory strength and planner timing
+  stay in `pnpm brain-report`.
+- **I could not see it as you will.** The stand-in confirmed the camera moves, titles, chat lines,
+  the readout and the game-mode switch all arrive. Whether each camera spot gives a good view is
+  untested; you can fly freely as a spectator.
+- **One viewer.** It shows to the first player who is not a test bot (or `--viewer`).
+- **The whole-brain demos need `TYPESAFE_API_KEY`** (Jev) in `.env`. They use a fixed plan, so no
+  Claude calls are made.
+
+**Status.** Open.
+
+## Live testing, 2026-11-16: the locomotion controller
+
+*Found by running the controller on the test server with `pnpm locomotion-check` (nine scenes).
+None of this showed up in the unit tests.*
+
+**What the scenes showed.**
+
+| Scene | Result |
+|---|---|
+| Flat walk, 30 blocks | Arrived in 5.5 s; 27.5 blocks reported (it stops within range, a block short). |
+| Same walk, three speeds | Slow 6.8 s (never sprints); resting 5.7 s (sprints from 0.85 s); alarmed 5.4 s (sprints from the first step). |
+| Across a pond | Walk → swim → walk, arrived. |
+| Boxed in a pit | Failed at once with "No path to the goal!", standing still. |
+| Held fast on an open path | Tried a jump, then a sidestep, then ended cleanly with no keys held. |
+| Through a closed door | Opened it, walked through, left the wall whole. |
+| Follow a moving player, 30 s | Stayed within 8 blocks throughout, typically 6.2. |
+| Stop mid-journey | No keys held at once; did not move afterwards. |
+| Looking while walking | Head north, legs east, 0.1 blocks off its line, arrived. |
+
+**Found and fixed.**
+
+- **The pathfinder went round the pond along the top of the plaza's glass wall.** It prefers any
+  dry route. The scene now walls the pond in. In play this means the swim pattern is used only
+  when there is no dry way.
+- **Following never closed the gap.** The pathfinder plans to where the target was, and at a jog
+  the bot sprints only on stretches that have proved straight, which a route that keeps being
+  re-planned never does. A following bot now sprints to catch up once it is 2 blocks beyond its range.
+- **"Follow once" could never finish.** The pathfinder judges "within range" by whole blocks, so
+  it could stop at 2.3 blocks when 2 was asked, and the exact check never passed. Its word is now
+  taken as well.
+- **Slow-planning logs were noise.** The pathfinder reports a running total for a route, so every
+  report of a long search looked slow. Only a single slow round is logged now.
+
+**Seen, left as it is.**
+
+- **Alarm barely speeds up a long straight walk.** At the resting drive the bot is already
+  sprinting 0.85 s in, so full alarm saved 0.3 s over 30 blocks. The difference is on winding
+  routes, where a jog keeps dropping to a walk. A slow walk (speed under 0.3) is clearly slower.
+- **A pit does not exercise the recoveries.** The pathfinder knows there is no way out and says
+  so in 0.3 s, so the journey fails as "no path", not "stuck". That is clean, and better than
+  jumping about. Recoveries are for when the plan looks fine and the legs still get nowhere.
+- **The third recovery (plan again) and the final "stuck" failure were not seen live.** The
+  server's ways of holding a player still (a slowness effect, a movement speed of 0) do not hold
+  this client, so the scene switches the bot's own movement off, which also stops its route
+  planner. After the jump and the sidestep the journey ended as "no path found within 10s". The
+  full chain is covered by the unit tests.
+- **Following trails by about twice the range.** Asked to keep within 3, it sat at about 6. The
+  pathfinder plans to where the target was a moment ago.
+- **Times are only good to a quarter of a second,** which is how often the controller looks.
+
+**In the neuro-check regression afterwards.** 15 of 17 scenes passed in one run; `far` and `hold`
+failed and passed when re-run.
+- Both failed because the locomotion test world had left a stone floor under the plaza, so the
+  `far` scene's gap was only two deep and the zombie walked across it. The test world now cleans
+  up under the plaza, and the neuro-check plaza clears it too. `hold` passed on the first re-run.
+- `far` then failed once more for a different reason: Jev chose `flee` from the zombie 9 blocks
+  away (probability 0.59), though no reflex fired. It passed on the next run. This is the known
+  limit: Jev is only asked to leave far threats alone.
+
+**Status.** Fixed, except the items under "left as it is".
+
+## Locomotion: limits of this first version
+
+*Found 2026-11-16 while building `packages/minecraft/src/locomotion/`.*
+
+- **Doors are found by a simple rule.** A door counts only if the bot and its goal are on
+  opposite sides of it and the straight line between them passes within 1.2 blocks of it, within
+  6 blocks of the bot. A door round a corner is not found; the pathfinder then digs through the
+  wall (normal rules) or reports no path (careful rules). Fence gates and trapdoors are not handled.
+- **Swimming steers straight at the goal.** It does not plan a route through water or look for a
+  shore; a bank more than one block high can stop it. Then it plans again, up to three times.
+- **The jog is judged by heading.** "A straight open stretch" means the heading has held within
+  about 11 degrees for 0.8 s. It does not look at the route ahead.
+- **Sneaking near a drop** looks at the eight blocks round the feet. It does not know whether the
+  route goes that way.
+- **"Careful near home" is a fixed 16 blocks** round the base chest, and means no digging at all
+  there, even if digging is the only way.
+- **Late is only estimated for `goTo`.** Following and retreating have no fixed end. The estimate
+  uses the first route found, or the straight distance if that is longer.
+- **Hunger slows the bot through any speed link.** The spec's formula has no strength for hunger;
+  it is scaled by the larger of `speedFromAlarm` and `speedFromDopamine`, so with all strengths at
+  0 the drive is fixed as asked.
+- **The alarm override on caution follows `speedFromAlarm`.** With that at 0 a frightened bot
+  still tiptoes.
+- **`attack` chases through `follow`** and stops it to swing. Each chase is a separate journey,
+  so one fight can log several short journeys.
+- **A stuck spot is avoided by cost, not forbidden** (60 extra per step, where the pathfinder
+  treats over 100 as impossible), and the marks are not saved between runs.
+- **The pathfinder's thinking time is capped** at 3 s per route and 15 ms per game tick (it was
+  5 s and 40 ms). Long routes take more ticks to plan but hold up the rest of the brain less.
+- **The `stuck` signal has no reader yet.** The hook for the search dial is marked, not wired.
+- **The head override still reads and rewrites keys around the pathfinder's tick**; it now lives
+  in the controller (`tick.ts`), with `gaze.ts` only choosing the keys.
+
+**Status.** Open.
+
 ## Live testing, 2026-11-16: the primitives
 
 *Found by running every primitive on the test server with `pnpm skill-check` (20 scenes, each run

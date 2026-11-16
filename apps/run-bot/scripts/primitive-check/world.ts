@@ -40,8 +40,10 @@ export function buildPlaza(): void {
 export async function reset(give: string[] = []): Promise<void> {
   for (const command of [
     "kill @e[type=!player,x=60,y=151,z=40,distance=..30]",
-    "fill 52 151 36 68 156 44 air",
-    "fill 52 150 36 68 150 44 stone",
+    "fill 40 151 36 80 158 44 air",
+    "fill 40 147 35 80 150 45 stone",
+    "fill 40 153 35 80 158 35 air",
+    "fill 40 153 45 80 158 45 air",
     `clear ${BOT}`,
     `effect clear ${BOT}`,
     `effect give ${BOT} instant_health 1 10 true`,
@@ -55,7 +57,8 @@ export async function reset(give: string[] = []): Promise<void> {
 }
 
 export function tearDown(): void {
-  for (const command of ["kill @e[type=!player,x=60,y=151,z=40,distance=..48]", "fill 40 151 36 80 160 44 air", "gamerule spawn_mobs true", "forceload remove 39 35 81 45", `tp ${BOT} -8 69 14`]) rcon(command);
+  // Leave the plaza as the other live checks expect it: a two-block floor with nothing under it.
+  for (const command of ["kill @e[type=!player,x=60,y=151,z=40,distance=..48]", "fill 40 151 35 80 160 45 air", "fill 40 149 36 80 150 44 stone", "fill 40 147 35 80 148 45 air", "fill 39 151 35 81 152 35 glass", "fill 39 151 45 81 152 45 glass", "gamerule spawn_mobs true", "forceload remove 39 35 81 45", `tp ${BOT} -8 69 14`]) rcon(command);
 }
 
 /** How many of an item the bot carries, asked of the server (not of the bot). */

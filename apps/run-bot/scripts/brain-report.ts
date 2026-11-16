@@ -73,6 +73,24 @@ console.log(`CHANGES REPORTED: ${reported.length} runs; ${list(count(kinds, (k) 
 console.log(`NOT AS EXPECTED: ${list(count(surprises, (e) => e.skill))}`);
 console.log(`RAN ALONGSIDE: ${list(count(events.filter((e) => e.alongside && e.type === "started"), (e) => e.skill))}`);
 
+// Locomotion: every journey's report rides on its skill event; the pattern and gait are in each tick's state.
+type Journey = { skill: string; type: string; reason?: string; changes: { distance: number; seconds: number; patternSwitches: number; recoveries: number; recovered?: string; late: boolean } };
+const journeys = events.filter((e) => typeof e.changes?.distance === "number" && e.changes.patternSwitches !== undefined) as unknown as Journey[];
+const share = (n: number, of: number) => (of ? `${Math.round((100 * n) / of)}%` : "n/a");
+const finished = journeys.filter((j) => j.type === "done").length;
+console.log(`\nJOURNEYS: ${journeys.length}; finished ${finished} (${share(finished, journeys.length)}); late ${journeys.filter((j) => j.changes.late).length}; ${journeys.reduce((sum, j) => sum + j.changes.distance, 0).toFixed(0)} blocks in ${journeys.reduce((sum, j) => sum + j.changes.seconds, 0).toFixed(0)} s; pattern switches ${journeys.reduce((sum, j) => sum + j.changes.patternSwitches, 0)}`);
+const stumbles = journeys.filter((j) => j.changes.recoveries > 0);
+console.log(`STUCK EVENTS: ${stumbles.length}${stumbles.length ? `: ${list(count(stumbles, (j) => `${j.skill} tried ${j.changes.recovered} → ${j.type}${j.type === "failed" && j.reason ? ` (${j.reason.replace(/ at .*/, "")})` : ""}`), 6)}` : ""}`);
+type Legs = { moving: boolean; pattern: string | null; gait: string; stuck: boolean };
+const legsOf = (t: Tick) => ((t as Tick & { state?: { data?: { self?: { locomotion?: Legs } } } }).state?.data?.self?.locomotion ?? null);
+const travelling = ticks.map((t, i) => ({ legs: legsOf(t), ms: (ticks[i + 1]?.timestamp ?? t.timestamp) - t.timestamp })).filter((x) => x.legs?.moving);
+const timeIn = (key: (legs: Legs) => string) => {
+  const totals = new Map<string, number>();
+  for (const { legs, ms } of travelling) totals.set(key(legs!), (totals.get(key(legs!)) ?? 0) + ms);
+  return [...totals].sort((a, b) => b[1] - a[1]).map(([name, ms]) => `${name} ${(ms / 1000).toFixed(0)} s`).join(", ") || "none";
+};
+console.log(`TIME TRAVELLING: by pattern: ${timeIn((l) => l.pattern ?? "none")}; by gait: ${timeIn((l) => l.gait)}; stuck signal max ${Math.max(0, ...ticks.map((t) => t.signals.stuck?.value ?? 0)).toFixed(2)}`);
+
 // Dopamine.
 type Reward = { rule: string; amount: number; raw?: number };
 const rewards = ticks.flatMap((t) => (trace(t, "dopamine").rewards as Reward[] | undefined) ?? []);

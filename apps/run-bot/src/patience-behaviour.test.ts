@@ -52,6 +52,7 @@ function state(p: Patch, seconds: number): State {
       inWater: false,
       falling: false,
       lastHurt: null,
+      locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
     },
     nearby: { hazards: [], mobs: p.mobs ?? [], blocks: [], players: [], loud: [] },
     memory: null,

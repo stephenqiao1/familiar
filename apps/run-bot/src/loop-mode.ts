@@ -3,7 +3,9 @@ import { createBrainLoop, createChainSkill, createLogger, createSkillExecutor, c
 import { feelingNear, type Place } from "@familiar/memory";
 import {
   createFirstSeenTracker,
+  createLocomotion,
   DEFENCE_REFLEXES,
+  driveFrom,
   encodeState,
   headFree,
   isSignificantChange,
@@ -74,7 +76,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -119,9 +121,12 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     return { ...(remembered.length ? { remembered } : {}), ...(warning ? { attention: warning } : {}) };
   };
 
+  // The one thing that travels. Careful (no digging) near home; its notes go to the console.
+  const locomotion = createLocomotion(bot, { home: base.chest, log: (msg) => console.log(`    ${msg}`) });
   const ctx: MinecraftCtx = {
     bot,
     base,
+    locomotion,
     wants: () => workspace.goal()?.wants ?? [],
     chests: believedChests,
     log: (msg) => console.log(`    ${msg}`),
@@ -207,6 +212,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
    */
   async function act(action: Action): Promise<void> {
     const now = Date.now();
+    // The command from above, once per tick: how fast and how carefully to travel.
+    locomotion.setDrive(driveFrom(view.signals, locomotionSettings, { dopamine: personality.restingDA, focus: focusSettings.resting }));
     const reward = view.signals[REWARD_SIGNAL];
     if (reward && reward.at !== lastReward && reward.value > 0) persistence.progress(now);
     lastReward = reward?.at ?? lastReward;
@@ -268,6 +275,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         current: executor.current(),
         deaths,
         lastHurt: bodyEvents.lastHurt(),
+        locomotion: (({ moving, pattern, gait, stuck }) => ({ moving, pattern, gait, stuck }))(locomotion.status()),
         loud: bodyEvents.loud(),
         memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
         narrow: noradrenaline.focus > 0 && alarm() > NARROW_ABOVE,

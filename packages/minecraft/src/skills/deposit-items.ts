@@ -1,15 +1,13 @@
 import type { Skill } from "@familiar/contracts";
-import pathfinder from "mineflayer-pathfinder";
 import { doClose } from "../primitives/close.js";
 import { doMoveItem } from "../primitives/move-item.js";
 import { doOpen } from "../primitives/open.js";
+import { withJourney } from "../locomotion/index.js";
 import type { MinecraftCtx } from "../skill-context.js";
-import { walkTo } from "../walk-to.js";
 import { countByName } from "../encode/encode-self.js";
 import { posId } from "../encode/scan-blocks.js";
 import { chosenContainer } from "./storage.js";
 
-const { GoalLookAtBlock } = pathfinder.goals;
 
 type Deposit = { type: number; name: string; count: number };
 
@@ -32,7 +30,7 @@ export const depositItems: Skill<MinecraftCtx> = {
     const chest = chosenContainer(ctx, target);
     if (!chest) return { status: "failed", reason: `no chest at ${target ?? "base"}` };
     ctx.log(`deposit_items: heading for ${chest.name} at ${chest.position}`);
-    const walk = await walkTo(bot, new GoalLookAtBlock(chest.position, bot.world), signal);
+    const walk = await ctx.locomotion.goTo(chest.position, { see: true }, signal);
     if (walk.status !== "done") return walk;
 
     const block = bot.blockAt(chest.position);
@@ -53,7 +51,7 @@ export const depositItems: Skill<MinecraftCtx> = {
       await doClose(bot);
     }
     ctx.log("deposit_items: chest closed");
-    return { status: "done" };
+    return withJourney({ status: "done" }, walk);
   },
 };
 

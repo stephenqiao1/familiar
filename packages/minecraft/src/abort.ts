@@ -1,39 +1,3 @@
-import type { Bot } from "mineflayer";
-import type { goals } from "mineflayer-pathfinder";
-
-// Pathfinding is the walking rhythm: it drives the legs (and the head, to steer) directly, and
-// is the one thing besides the primitives that may. Everything else acts through primitives/.
-// It steers with the head, but a held gaze (primitives/gaze.ts) can take the head and walk the
-// same way with other keys, so walking skills leave the head free.
-
-/**
- * Walks to `goal`. If the signal fires, stops at once (cancels the path, releases the movement
- * keys, stops any digging) and rejects with `signal.reason` without waiting for the pathfinder.
- */
-export function abortableGoto(bot: Bot, goal: goals.Goal, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason);
-    const onAbort = () => {
-      bot.pathfinder.setGoal(null);
-      bot.clearControlStates();
-      bot.stopDigging();
-      reject(signal.reason);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    bot.pathfinder.goto(goal).then(
-      () => {
-        signal.removeEventListener("abort", onAbort);
-        if (signal.aborted) reject(signal.reason);
-        else resolve();
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(signal.aborted ? signal.reason : error);
-      },
-    );
-  });
-}
-
 /** Waits `ms`; rejects with `signal.reason` if the signal fires first. */
 export function sleepFor(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

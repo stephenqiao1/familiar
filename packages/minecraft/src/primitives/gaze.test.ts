@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Vec3 } from "vec3";
-import { fakeBot } from "./fake-bot.test-helper.js";
+import { fakeTraveller } from "../locomotion/fake.test-helper.js";
 import { createDither, holdGaze, keysFor } from "./gaze.js";
 
 const DEG = Math.PI / 180;
@@ -31,75 +31,77 @@ describe("createDither", () => {
   });
 });
 
-describe("holdGaze", () => {
-  /** One physics tick: the pathfinder (played here by `steer`) runs between the gaze's two hooks. */
-  function walker() {
-    const fake = fakeBot();
-    // The stand-in pathfinder faces north and presses forward and sprint, like the real one.
-    let steer = () => {
-      fake.state.entity.yaw = 0;
-      fake.bot.setControlState("forward", true);
-      fake.bot.setControlState("sprint", true);
-    };
-    fake.bot.on("physicsTick", () => steer());
-    fake.setWalking(true);
-    return { ...fake, tick: () => fake.emit("physicsTick"), setSteer: (next: () => void) => void (steer = next) };
+describe("holdGaze, through the locomotion controller", () => {
+  const never = new AbortController().signal;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** A bot walking north on a long journey. */
+  async function walker(speed = 0.2) {
+    const t = fakeTraveller();
+    t.locomotion.setDrive({ speed });
+    void t.locomotion.goTo(t.at(0, -200), {}, never);
+    await t.run(500);
+    const eye = () => t.state.entity.position.offset(0, 1.8, 0);
+    return { ...t, eye };
   }
-  const WEST = new Vec3(-20, 64.8, 0.5);
+  const west = (t: { state: { entity: { position: Vec3 } } }) => t.state.entity.position.offset(-30, 1.8, 0);
 
-  it("turns the head to the point and walks the same way with other keys", () => {
-    const bot = walker();
-    const release = holdGaze(bot.bot, () => WEST);
-    bot.tick();
+  it("turns the head to the point and keeps walking the same way with other keys", async () => {
+    const t = await walker();
+    const before = t.state.entity.position.clone();
+    const release = holdGaze(t.locomotion, t.eye, () => west(t));
+    await t.run(1000);
     // Looking west (to the left of north), so travelling north is to the right of the gaze.
-    expect(bot.state.entity.yaw).toBeCloseTo(Math.PI / 2);
-    expect(bot.keysDown()).toEqual(["right"]);
-    bot.tick();
-    expect(bot.keysDown()).toEqual(["right"]);
+    expect(t.state.entity.yaw).toBeCloseTo(Math.PI / 2, 1);
+    expect(t.keysDown()).toEqual(["right"]);
+    const moved = t.state.entity.position.minus(before);
+    expect(moved.z).toBeLessThan(-3); // still heading north
+    expect(Math.abs(moved.x)).toBeLessThan(0.5); // and not drifting toward what it looks at
     release();
-    // Given back exactly as the pathfinder left it.
-    expect(bot.keysDown()).toEqual(["forward", "sprint"]);
-    expect(bot.state.entity.yaw).toBe(0);
+    await t.run(100);
+    expect(t.keysDown()).toEqual(["forward"]);
+    expect(t.state.entity.yaw).toBeCloseTo(0, 1);
   });
 
-  it("keeps sprinting only when the gaze is straight ahead", () => {
-    const bot = walker();
-    holdGaze(bot.bot, () => new Vec3(0.5, 64.8, -20));
-    bot.tick();
-    expect(bot.keysDown()).toEqual(["forward", "sprint"]);
+  it("keeps sprinting only when the gaze is straight ahead", async () => {
+    const t = await walker(1);
+    holdGaze(t.locomotion, t.eye, () => t.state.entity.position.offset(0, 1.8, -30));
+    await t.run(200);
+    expect(t.keysDown()).toEqual(["forward", "sprint"]);
+    holdGaze(t.locomotion, t.eye, () => west(t));
+    await t.run(200);
+    expect(t.keysDown()).toEqual(["right"]);
   });
 
-  it("gives way while the pathfinder jumps, and when it is not walking", () => {
-    const jumping = walker();
-    jumping.setSteer(() => {
-      jumping.state.entity.yaw = 0;
-      jumping.bot.setControlState("forward", true);
-      jumping.bot.setControlState("jump", true);
-    });
-    holdGaze(jumping.bot, () => WEST);
-    jumping.tick();
-    expect(jumping.state.entity.yaw).toBe(0);
-    expect(jumping.keysDown()).toEqual(["forward", "jump"]);
-
-    const standing = walker();
-    standing.setWalking(false);
-    holdGaze(standing.bot, () => WEST);
-    standing.tick();
+  it("does nothing when the bot is not walking, and lets go for a tick when there is no point", async () => {
+    const standing = fakeTraveller();
+    holdGaze(standing.locomotion, () => standing.state.entity.position, () => new Vec3(-30, 64, 0));
+    await standing.run(200);
     expect(standing.state.entity.yaw).toBe(0);
+
+    const t = await walker();
+    let point: Vec3 | null = west(t);
+    holdGaze(t.locomotion, t.eye, () => point);
+    await t.run(200);
+    expect(t.keysDown()).toEqual(["right"]);
+    point = null;
+    await t.run(200);
+    expect(t.keysDown()).toEqual(["forward"]);
   });
 
-  it("follows a point that moves, and lets go for a tick when there is none", () => {
-    const bot = walker();
-    let point: Vec3 | null = WEST;
-    holdGaze(bot.bot, () => point);
-    bot.tick();
-    expect(bot.keysDown()).toEqual(["right"]);
-    point = new Vec3(20, 64.8, 0.5); // now to the east
-    bot.tick();
-    expect(bot.state.entity.yaw).toBeCloseTo(-Math.PI / 2);
-    expect(bot.keysDown()).toEqual(["left"]);
-    point = null;
-    bot.tick();
-    expect(bot.keysDown()).toEqual(["forward", "sprint"]);
+  it("follows a point that moves", async () => {
+    const t = await walker();
+    let east = false;
+    holdGaze(t.locomotion, t.eye, () => t.state.entity.position.offset(east ? 30 : -30, 1.8, 0));
+    await t.run(200);
+    expect(t.keysDown()).toEqual(["right"]);
+    east = true;
+    await t.run(200);
+    expect(t.state.entity.yaw).toBeCloseTo(-Math.PI / 2, 1);
+    expect(t.keysDown()).toEqual(["left"]);
   });
 });

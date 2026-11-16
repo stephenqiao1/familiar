@@ -2,7 +2,6 @@ import type { Skill } from "@familiar/contracts";
 import type { MinecraftCtx } from "../skill-context.js";
 import { attack } from "./attack.js";
 import { primitives } from "../primitives/index.js";
-import { releaseKeys } from "../primitives/keys.js";
 import { doClose } from "../primitives/windows.js";
 import { depositItems } from "./deposit-items.js";
 import { eat } from "./eat.js";
@@ -24,7 +23,7 @@ export const minecraftSkills: Skill<MinecraftCtx>[] = [goTo, returnToBase, idle,
 /** Leaves the body tidy after a chain of primitives: closes any open container and lets go of every key. */
 export async function tidyBody(ctx: MinecraftCtx): Promise<void> {
   await doClose(ctx.bot).catch(() => {});
-  releaseKeys(ctx.bot);
+  ctx.locomotion.stop();
 }
 
 /** The skills the deciding layers (instinct, planner) may choose: never reflex-only ones, and primitives only if asked. */

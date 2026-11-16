@@ -2,11 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FOCUS, DEFAULT_NORADRENALINE, DEFAULT_PATIENCE, DEFAULT_PERSONALITY } from "@familiar/neuromodulators";
+import { DEFAULT_LOCOMOTION } from "@familiar/minecraft";
 import { DEFAULT_BRAINSTEM } from "@familiar/region-brainstem";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, memory: DEFAULT_MEMORY };
 
 let dir: string;
 let file: string;
@@ -62,6 +63,12 @@ describe("loadBotConfig", () => {
     await expect(loadBotConfig("Scout", file)).rejects.toThrow(/must map bot names/);
     await writeFile(file, "{oops");
     await expect(loadBotConfig("Scout", file)).rejects.toThrow();
+  });
+
+  it("reads locomotion strengths and rejects a bad one", async () => {
+    await writeFile(file, JSON.stringify({ Steady: { locomotion: { speedFromAlarm: 0 } }, Bad: { locomotion: { cautionFromFocus: 2 } } }));
+    expect((await loadBotConfig("Steady", file)).locomotion).toEqual({ ...DEFAULT_LOCOMOTION, speedFromAlarm: 0 });
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow(/locomotion.cautionFromFocus must be 0 to 1/);
   });
 
   it("reads brainstem settings and rejects a bad one", async () => {

@@ -1,15 +1,12 @@
-import pathfinder from "mineflayer-pathfinder";
-import { walkTo } from "../walk-to.js";
 import { pointOf, PRIMITIVE_MS } from "./aim.js";
 import { primitive } from "./primitive.js";
 
-const { GoalNear } = pathfinder.goals;
 /** One step covers at most this many blocks. */
 const STEP_BLOCKS = 3;
 
 /**
  * Takes a few steps toward a target, then stops. Not a journey: call it again to keep going.
- * It walks with the pathfinder (the walking rhythm), which also turns the head.
+ * It travels through the locomotion controller, whose walking also turns the head.
  */
 export const stepToward = primitive({
   name: "step_toward",
@@ -31,7 +28,7 @@ export const stepToward = primitive({
     const distance = Math.hypot(gap.x, gap.z);
     const spot = distance <= STEP_BLOCKS ? point : me.plus(gap.scaled(STEP_BLOCKS / distance));
     // The time limit ends the step, which is not a failure.
-    const result = await walkTo(bot, new GoalNear(spot.x, spot.y, spot.z, 1), AbortSignal.any([signal, AbortSignal.timeout(PRIMITIVE_MS)]));
-    return signal.aborted ? { status: "interrupted" } : result.status === "failed" ? result : { status: "done" };
+    const result = await ctx.locomotion.goTo(spot, { range: 1 }, AbortSignal.any([signal, AbortSignal.timeout(PRIMITIVE_MS)]));
+    return signal.aborted ? { status: "interrupted" } : result.status === "failed" ? { status: "failed", ...(result.reason ? { reason: result.reason } : {}) } : { status: "done" };
   },
 });

@@ -8,7 +8,7 @@ import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 export interface EncodeContext {
   base: Base;
@@ -20,6 +20,8 @@ export interface EncodeContext {
   memory?: MinecraftStateData["memory"];
   /** When the bot was last hurt, and by whom. Default: never. */
   lastHurt?: LastHurt | null;
+  /** What the locomotion controller reports. Default: standing still. */
+  locomotion?: MinecraftStateData["self"]["locomotion"];
   /** Loud events heard lately (explosions, thunder). Default: none. */
   loud?: LoudEvent[];
   /** How many of each kind of nearby thing to keep (focus sets it). Default: 10. */
@@ -27,6 +29,9 @@ export interface EncodeContext {
   /** Narrow attention (high alarm): keep threats, drop friendly mobs and useful blocks. Default: false. */
   narrow?: boolean;
 }
+
+/** Not travelling. */
+const STANDING: MinecraftStateData["self"]["locomotion"] = { moving: false, pattern: null, gait: "walk", stuck: false };
 
 /** A loud event the bot heard. */
 export interface LoudEvent {
@@ -45,7 +50,7 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
   const limit = ctx.limit ?? DEFAULT_LIMIT;
   const data: MinecraftStateData = {
     time: { isNight: !bot.time.isDay, lightLevel: lightLevel(bot) },
-    self: encodeSelf(bot, ctx.base.chest, ctx.deaths, ctx.lastHurt ?? null, now),
+    self: { ...encodeSelf(bot, ctx.base.chest, ctx.deaths, ctx.lastHurt ?? null, now), locomotion: ctx.locomotion ?? STANDING },
     nearby: {
       hazards: scanHazards(bot, limit),
       mobs: ctx.narrow ? scanMobs(bot, limit).filter((m) => m.hostile) : scanMobs(bot, limit),

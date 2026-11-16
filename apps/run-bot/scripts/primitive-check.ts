@@ -4,8 +4,8 @@
 //   pnpm skill-check [primitive ...]
 import type { Changes, SkillEvent } from "@familiar/contracts";
 import { createSkillExecutor } from "@familiar/core";
-import { connect, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
-import { doorwayViolations, moduleRuleViolations } from "./skill-check/module-rule.ts";
+import { connect, createLocomotion, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
+import { doorwayViolations, moduleRuleViolations, travelViolations } from "./skill-check/module-rule.ts";
 import { scenes, type Scene } from "./primitive-check/scenes.ts";
 import { walkAndLook } from "./primitive-check/walk-and-look.ts";
 import { BOT, buildPlaza, reset, sleep, startObserver, tearDown, type Observer } from "./primitive-check/world.ts";
@@ -21,7 +21,7 @@ await reset();
 const observer = await startObserver();
 
 let ended: (event: SkillEvent) => void = () => {};
-const ctx: MinecraftCtx = { bot, base: { chest: bot.entity.position.clone(), bed: bot.entity.position.clone() }, wants: () => [], chests: {} as MinecraftCtx["chests"], log: () => {} };
+const ctx: MinecraftCtx = { bot, base: { chest: bot.entity.position.clone(), bed: bot.entity.position.clone() }, wants: () => [], locomotion: createLocomotion(bot), chests: {} as MinecraftCtx["chests"], log: () => {} };
 const sideEvents: SkillEvent[] = [];
 const executor = createSkillExecutor({ skills: minecraftSkills, ctx, onEvent: (event) => void (event.type !== "started" && ended(event)), onSideEvent: (event) => void sideEvents.push(event) });
 
@@ -116,8 +116,8 @@ for (const [i, row] of table.entries()) {
   console.log(row.map((cell, c) => cell.padEnd(widths[c]!)).join(" | "));
   if (i === 0) console.log(widths.map((w) => "-".repeat(w)).join("-|-"));
 }
-const violations = [...moduleRuleViolations(), ...doorwayViolations()];
-console.log(violations.length ? `\nModule rules BROKEN:\n${violations.join("\n")}` : "\nModule rules OK: no Minecraft imports in the game-free packages, and nothing outside primitives/ moves the body.");
+const violations = [...moduleRuleViolations(), ...doorwayViolations(), ...travelViolations()];
+console.log(violations.length ? `\nModule rules BROKEN:\n${violations.join("\n")}` : "\nModule rules OK: no Minecraft imports in the game-free packages, and nothing outside primitives/ and locomotion/ moves the body, and only locomotion/ travels.");
 if (together) console.log(`\nDifferent body parts at the same time (walking east, looking north): ${together.ok ? "PASS" : "FAIL"}`);
 const failed = [...rows.filter((r) => !r.ok).map((r) => r.name), ...(together && !together.ok ? ["walk_and_look"] : [])];
 console.log(failed.length ? `\nFAIL: ${failed.join(", ")}` : `\nPASS: all ${rows.length} scenes${together ? ", and walking while looking" : ""}.`);

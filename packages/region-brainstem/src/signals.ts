@@ -12,5 +12,7 @@ export const UPPER_PAUSED_SIGNAL = "upper_paused";
 export const AIR_SIGNAL = "air";
 /** Recent damage, fading over about 10 seconds. */
 export const PAIN_SIGNAL = "pain";
+/** 1 while the legs are stuck (trying to get free, or just gave up), fading over about 5 seconds. */
+export const STUCK_SIGNAL = "stuck";
 /** How hungry: 0 when full, 1 when starving. */
 export const HUNGER_SIGNAL = "hunger";

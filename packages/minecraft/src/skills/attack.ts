@@ -1,6 +1,5 @@
 import type { Skill } from "@familiar/contracts";
 import type { Bot } from "mineflayer";
-import pathfinder from "mineflayer-pathfinder";
 import { sleepFor } from "../abort.js";
 import type { Entity } from "../mc-types.js";
 import { isStillThere, resolveMobTarget } from "../mobs.js";
@@ -9,7 +8,6 @@ import { doHit } from "../primitives/hit.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { bestWeapon } from "../weapons.js";
 
-const { GoalFollow } = pathfinder.goals;
 const MAX_DISTANCE = 16;
 const REACH = 3;
 const LOW_HEALTH = 6;
@@ -35,6 +33,9 @@ export const attack: Skill<MinecraftCtx> = {
     if (weapon) await doEquip(bot, weapon);
     ctx.log(`attack: fighting ${mob.name ?? "entity"} ${mob.id} with ${weapon?.name ?? "bare hands"}`);
 
+    // Chasing runs beside this loop: the controller keeps the bot within reach while it swings.
+    let chasing = false;
+    const chase = new AbortController();
     try {
       while (true) {
         if (!isStillThere(bot, mob)) return { status: "done" };
@@ -43,9 +44,10 @@ export const attack: Skill<MinecraftCtx> = {
         if (distance > MAX_DISTANCE) return { status: "failed", reason: "target out of range" };
 
         if (distance > REACH) {
-          bot.pathfinder.setGoal(new GoalFollow(mob, REACH - 1), true);
+          if (!chasing) void ctx.locomotion.follow(mob, { range: REACH - 1 }, chase.signal).finally(() => (chasing = false));
+          chasing = true;
         } else {
-          bot.pathfinder.setGoal(null);
+          if (chasing) ctx.locomotion.stop();
           await doHit(bot, mob);
         }
         await sleepFor(SWING_MS, signal);
@@ -54,7 +56,8 @@ export const attack: Skill<MinecraftCtx> = {
       if (signal.aborted) return { status: "interrupted" };
       throw error;
     } finally {
-      bot.pathfinder.setGoal(null);
+      chase.abort(new Error("attack ended"));
+      ctx.locomotion.stop();
     }
   },
 };

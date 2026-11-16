@@ -136,6 +136,10 @@ export function goalProgress(): SearchInput {
 }
 
 /** A fresh set of every search input (each keeps its own running state). */
+// HOOK(stuck): the brainstem shares a `stuck` signal (1 while the legs cannot get anywhere, fading
+// over about 5 seconds). Being stuck is a sign the current approach is not working, so it belongs
+// here as one more input that pushes search up. Not wired yet.
+
 export function createSearchInputs(): SearchInput[] {
   return [rewardTrend(), failedPredictions(), goalProgress()];
 }

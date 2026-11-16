@@ -49,6 +49,11 @@
       "arousalGate": 1,
       "bodySignals": 1
     },
+    "locomotion": {
+      "speedFromAlarm": 1,
+      "speedFromDopamine": 1,
+      "cautionFromFocus": 1
+    },
     "memory": {
       "halfLifeDays": 2
     }

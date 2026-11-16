@@ -199,7 +199,17 @@ export function fakeBot(options: FakeOptions = {}) {
   if (options.held) state.heldItem = items.find((i) => i.name === options.held) ?? null;
 
   const bot = state as unknown as Bot;
-  const ctx: MinecraftCtx = { bot, base: { chest: new Vec3(0, 63, 0), bed: new Vec3(0, 63, 1) }, wants: () => [], chests: {} as MinecraftCtx["chests"], log: () => {} };
+  // A stand-in controller: travel is not what these tests are about. `stop` lets go of every key, as the real one does.
+  const locomotion = {
+    stop: () => (log.push("path cleared"), keys.clear()),
+    status: () => ({ moving: walking, pattern: walking ? "walk" : null, gait: "walk", stuck: false, progress: 0, recoveries: 0 }),
+    setHeadOverride: () => {},
+    setDrive: () => {},
+    goTo: async () => ({ status: "failed", reason: "no fake travel" }),
+    follow: async () => ({ status: "failed", reason: "no fake travel" }),
+    awayFrom: async () => ({ status: "failed", reason: "no fake travel" }),
+  } as unknown as MinecraftCtx["locomotion"];
+  const ctx: MinecraftCtx = { bot, base: { chest: new Vec3(0, 63, 0), bed: new Vec3(0, 63, 1) }, wants: () => [], locomotion, chests: {} as MinecraftCtx["chests"], log: () => {} };
   return {
     bot,
     ctx,

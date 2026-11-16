@@ -74,7 +74,7 @@ describe("encodeState", () => {
     });
     const state = encodeState(bot, 7, { base, current: null, deaths: 2 });
 
-    expect(state).toMatchObject({ schemaVersion: 10, tick: 7 });
+    expect(state).toMatchObject({ schemaVersion: 11, tick: 7 });
     expect(state.data).toEqual({
       time: { isNight: false, lightLevel: 15 },
       self: {
@@ -99,6 +99,7 @@ describe("encodeState", () => {
         inWater: false,
         falling: false,
         lastHurt: null,
+        locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
       },
       nearby: {
         hazards: [{ id: "pos:0,62,5", type: "lava", dist: 5 }],

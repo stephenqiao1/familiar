@@ -1,6 +1,5 @@
 import mineflayer, { type Bot } from "mineflayer";
 import { pathfinder } from "mineflayer-pathfinder";
-import { createDefaultMovements } from "./movements.js";
 
 export interface ConnectOptions {
   host: string;
@@ -23,7 +22,6 @@ export function connect({ host, port, username }: ConnectOptions): Promise<Bot> 
     };
     const onSpawn = () => {
       cleanup();
-      bot.pathfinder.setMovements(createDefaultMovements(bot));
       resolve(bot);
     };
     const onKicked = (reason: unknown) => fail(`kicked (${formatReason(reason)})`);

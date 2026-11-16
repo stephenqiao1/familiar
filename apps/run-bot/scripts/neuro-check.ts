@@ -79,6 +79,7 @@ const CALM = ["gamerule spawn_mobs false", "difficulty peaceful", "time set 1000
 const HOME = `tp ${BOT} -8 69 14`;
 const PLAZA = [
   "forceload add 39 35 81 45",
+  "fill 40 140 35 80 148 45 air",
   "fill 40 149 36 80 150 44 stone",
   "fill 40 151 36 80 158 44 air",
   "fill 39 151 35 81 152 35 glass",

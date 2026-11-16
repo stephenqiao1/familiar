@@ -136,7 +136,7 @@ export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, sameTime = 
     drowsy,
     body(state) {
       const self = minecraftDataOf(state)?.self;
-      return self ? { health: self.health / MAX.health, air: 1 - self.air / MAX.air, hunger: 1 - self.food / MAX.food } : null;
+      return self ? { health: self.health / MAX.health, air: 1 - self.air / MAX.air, hunger: 1 - self.food / MAX.food, stuck: self.locomotion.stuck } : null;
     },
     skills: { brace: "brace", lookAt: "look_at" },
     orientUrgency: LOOK_URGENCY,

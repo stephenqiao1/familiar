@@ -20,7 +20,7 @@ Arbiter: urgency + 0.2 × learned value wins (value from the scorebook, weighed 
          plus a stay bonus for the running skill and a brake on risky skills (both from patience);
          a full-urgency proposal (a hard reflex, a startle) always wins; ties go to the faster layer
    ▼
-Skill executor → skills → primitives (the single doorway) → Minecraft
+Skill executor → skills → primitives (every movement) and locomotion (all travel) → Minecraft
 ```
 
 Alongside these run layer-0 regions that propose little or nothing but shape the rest:
@@ -119,9 +119,10 @@ else is built from, and the **single doorway** to the bot's body.
 
 - **One doorway.** Each primitive file exports the skill and a plain function that does the
   movement (`doHit`, `doEquip`, `doLookAt`, ...). Every skill and helper acts only through those
-  functions. Pathfinding is the exception: it is the walking rhythm and moves the body directly
-  (`abort.ts`, `walk-to.ts`, `movements.ts`). `pnpm test` and `pnpm skill-check` fail if any other
-  file calls the bot's action methods.
+  functions. Travel is the other doorway: the locomotion controller (below) owns the pathfinder
+  and the keys held for a journey. `pnpm test` and `pnpm skill-check` fail if any file outside
+  `primitives/` and `locomotion/` calls the bot's action methods, or if any file outside
+  `locomotion/` touches the pathfinder or holds movement keys for travel.
 - **Safe to try at random.** A primitive that cannot run refuses, or fails with a reason. It
   respects `safety.ts` and `protected.ts` (no stepping into lava or off a drop, no breaking the
   base). It lets go of keys and items when it ends or is stopped. `break_block` is the one long
@@ -144,8 +145,9 @@ else is built from, and the **single doorway** to the bot's body.
   primitive (a look) may run alongside a running skill that leaves the head free: walking
   (`go_to`, `return_to_base`, `flee`) and eating. The main action always wins. While walking, the
   look is held for a second: the head turns to the target and the legs keep their direction by
-  pressing other keys (`gaze.ts`), so the bot looks one way and walks another. The brainstem's
-  orienting look uses this.
+  pressing other keys, so the bot looks one way and walks another. `gaze.ts` decides where to
+  look and which keys that takes; the locomotion controller knows whether the bot is walking
+  plainly and which way, and presses them. The brainstem's orienting look uses this.
 - **Learned skills** are chains of primitives kept as data, never code. The runner
   (`packages/core/src/chain.ts`) runs the steps in order, stops at the first failure, and returns
   each step's result and changes. Any chain in `data/<bot>/learned-skills.json`
@@ -158,6 +160,72 @@ Reflexes can always use primitives. They are off Jev's menu unless the bot runs 
 If the bot dies soon after a soft defence reflex was held back or outvoted with a hostile within
 8 blocks, the run prints `!! DIED WITH DEFENCE OVERRULED` with the gain and what won, and the
 tick's log line carries `defenceOverruledBeforeDeath`.
+
+## Locomotion: one controller owns all travel
+
+The spinal cord produces the rhythm of walking by itself; the brain only sends "go", "faster",
+"stop". The locomotion controller (`packages/minecraft/src/locomotion/`, one per bot, on
+`MinecraftCtx.locomotion`) is that circuit. Every skill that travels asks it; nothing else touches
+the pathfinder.
+
+**Commands.** Each travel command returns a result (done, failed with a reason, or interrupted),
+takes an abort signal, and always leaves the body still with no keys held. One journey at a time:
+a new command replaces the current one.
+
+| Command | Does |
+|---|---|
+| `goTo(place, { range, see, urgent, until })` | Travel to within range of a place. `see`: end where the block can be seen (for a chest). `urgent`: a dash to safety. |
+| `follow(entity, { range, once })` | Keep within range of something that moves; `once` ends the first time it is in range. |
+| `awayFrom(threat, { distance, prefer, until })` | Get that far from it, leaning toward a preferred place (home) when that is not toward the threat. |
+| `stop()` | End travel now and release every key. |
+| `setDrive({ speed, caution })` | Faster, slower, more or less careful. Takes effect at once, also mid-journey. |
+| `status()` | `{ moving, pattern, gait, stuck, progress, recoveries }` |
+
+**Patterns** (one small file each, chosen from what the body senses; each switch is logged):
+- `walk`: the pathfinder, with one of two rule sets. *Normal* may dig its way through. *Careful*
+  does no digging and no placing; it is used within 16 blocks of home and when caution is above
+  0.6. Neither ever parkours, digs a door, or breaks what `safety.ts` or `protected.ts` forbids.
+- `swim`: held-key steering, used while the bot is afloat (the pathfinder plans badly in liquid).
+  It switches back to walking when the feet are out of the water.
+- `dash`: the same straight-line steering on land, for an urgent journey (`escape_hazard`, `surface`).
+- More patterns (climbing, boats) have a marked slot in `patterns.ts`. They are not built.
+
+**Drive: faster, slower, careful.** `packages/minecraft/src/brain/locomotion.ts` maps the brain's
+signals to the drive once per tick:
+- speed = 0.4 + 0.5 × alarm + 0.3 × (dopamine − 0.5) − 0.3 × hunger
+- caution = 0.3 + 0.3 × focus, and 0 while alarm is above 0.6 (a frightened bot does not tiptoe)
+
+Speed sets the gait: below 0.3 a walk; up to 0.7 a jog (sprinting only once a stretch has proved
+straight); above 0.7 a sprint whenever the game allows. The bot never sprints at 6 food or less
+(the game's rule). Following something, it sprints to catch up when it falls behind. Caution above
+0.6 uses the careful rules and sneaks within one block of a drop of 3 or more. Each bot's
+strengths are in `bots.json` under `locomotion` (`speedFromAlarm`, `speedFromDopamine`,
+`cautionFromFocus`); with all three at 0 the drive is fixed at speed 0.4, caution 0.3.
+
+**Feeling the ground.** About four times a second while travelling:
+- *Stuck*: supposed to be moving, but less than half a block covered in 1.5 s, and not digging.
+  It tries up to three local corrections, each logged: a jump; a step back and a sidestep (only
+  onto somewhere safe to stand); dropping the route and planning again. Then it gives up and
+  returns `failed` with the reason `stuck at x,y,z`, and the layer above decides. An urgent
+  journey skips the fiddling and only plans again. Failing as stuck three times within a minute
+  at one place marks the spot, and routes avoid it for 5 minutes.
+- *A door in the way*: the pathfinder sees a door as a wall. If the bot and its goal are on
+  opposite sides of a door, the controller walks up to it, opens it with the `use_on` movement,
+  steps through, and carries on.
+- *Late*: when the route is known, the journey's time is estimated from its length and the gait.
+  Past twice that, the result's changes say `late: true`. Nothing reacts to it yet.
+
+**What it reports.**
+- The state: `self.locomotion` is `{ moving, pattern, gait, stuck }`.
+- The brainstem shares a `stuck` signal: 1 while the legs are stuck, fading over about 5 seconds.
+  The hook for the search dial to read it is marked in `noradrenaline/search.ts`; it is not wired.
+- Each journey's skill event carries in `changes`: `distance`, `seconds`, `patternSwitches`,
+  `recoveries` (and which, in `recovered`), `late`, and `asExpected` (done and not late). This is
+  the same mechanism the primitives use.
+- `pnpm brain-report` has a locomotion section: journeys, the share that finished, stuck events
+  and how each ended, and time in each pattern and gait.
+
+`step`, `jump` and `sneak` are single movements, not journeys, and hold their own key.
 
 ## The neuromodulators
 
@@ -210,6 +278,12 @@ in `data/<name>/`.
 | Add a startle detector | `packages/minecraft/src/brain/brainstem.ts` (write a detector, add it to `playerStartles`) |
 | Add a primitive | `packages/minecraft/src/primitives/`: one file that exports a `do...` function and a skill made with `primitive({ parts, expects, ... })`; add it to `primitives` in `index.ts` and a scene to `apps/run-bot/scripts/primitive-check/scenes.ts` |
 | Make a skill act on the body | Call a primitive's `do...` function. Never call the bot's action methods outside `primitives/` (the doorway rule fails the build's tests). |
+| Add a locomotion pattern | `packages/minecraft/src/locomotion/`: one small file like `swim.ts`, a name in `types.ts`, and a branch in `patterns.ts` (the slot is marked) |
+| Change what sets speed or caution | `packages/minecraft/src/brain/locomotion.ts` (`driveFrom`); a bot's strengths are in `bots.json` under `locomotion` |
+| Change the gaits | `packages/minecraft/src/locomotion/gait.ts` |
+| Change stuck detection or recovery | `packages/minecraft/src/locomotion/feel.ts` (when, and in what order) and `recover.ts` (what each correction does) |
+| Change the pathing rules | `packages/minecraft/src/locomotion/rules.ts` (normal and careful) |
+| Make a skill travel | Call `ctx.locomotion.goTo`, `follow` or `awayFrom`. Never touch `bot.pathfinder` outside `locomotion/`. |
 | Add a target format | `packages/minecraft/src/target.ts` (parse) and `resolve-target.ts` (resolve) |
 | Change what `changes` reports | `packages/minecraft/src/primitives/snapshot.ts` |
 | Add a learned skill by hand | `data/<bot>/learned-skills.json` |

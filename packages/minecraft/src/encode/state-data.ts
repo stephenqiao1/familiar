@@ -1,4 +1,4 @@
-/** What a schemaVersion 10 Minecraft State carries in `data`. Distances are whole blocks. */
+/** What a schemaVersion 11 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
   time: { isNight: boolean; lightLevel: number };
   self: {
@@ -35,6 +35,8 @@ export interface MinecraftStateData {
     inWater: boolean;
     /** Off the ground with a drop of 3 or more blocks below. */
     falling: boolean;
+    /** What the locomotion controller is doing: travelling or not, the pattern and gait, and whether it is stuck. */
+    locomotion: { moving: boolean; pattern: "walk" | "swim" | "dash" | null; gait: "walk" | "jog" | "sprint"; stuck: boolean };
     /** The last time the bot was hurt (within the last minute), and by whom if the game said. */
     lastHurt: { msAgo: number; by: string | null } | null;
   };

@@ -1,13 +1,9 @@
 import type { Skill } from "@familiar/contracts";
-import { sleepFor } from "../abort.js";
 import { isBurning } from "../body.js";
 import { inLavaOrFire, isSafeToStand, nearestSpot } from "../safety.js";
-import { releaseKeys } from "../primitives/keys.js";
 import type { MinecraftCtx } from "../skill-context.js";
-import { steerToward } from "../steer.js";
 
 const SEARCH_RADIUS = 6;
-const STEP_MS = 100;
 const GIVE_UP_MS = 12_000;
 
 /**
@@ -25,32 +21,17 @@ export const escapeHazard: Skill<MinecraftCtx> = {
 
   async run(ctx, _target, signal) {
     const { bot } = ctx;
-    bot.pathfinder.setGoal(null);
-    const started = Date.now();
     ctx.log("escape_hazard: getting out");
-    try {
-      while (inLavaOrFire(bot) || isBurning(bot.entity)) {
-        if (Date.now() - started > GIVE_UP_MS) return { status: "failed", reason: "still in danger after 12 s" };
-        const inIt = inLavaOrFire(bot);
-        const water = isBurning(bot.entity) ? nearestSpot(bot, SEARCH_RADIUS, (pos) => bot.blockAt(pos)?.name === "water") : null;
-        const goal = water ?? (inIt ? nearestSpot(bot, SEARCH_RADIUS, (pos) => isSafeToStand(bot, pos)) : null);
-        // Out of the fire with no water to reach: stand still and let it burn out.
-        if (goal === null && !inIt) releaseKeys(bot);
-        // Jump to swim up out of lava or over a ledge; on open ground walk, so it drops into the water rather than hopping over it.
-        else await steerToward(bot, goal, inIt || blocked(bot));
-        await sleepFor(STEP_MS, signal);
-      }
-      return { status: "done" };
-    } catch (error) {
-      if (signal.aborted) return { status: "interrupted" };
-      throw error;
-    } finally {
-      releaseKeys(bot);
-    }
+    const inDanger = () => inLavaOrFire(bot) || isBurning(bot.entity);
+    /** Where to head right now: water if burning and some is close, else the nearest safe ground; null to stand and let it burn out. */
+    const refuge = () => {
+      const water = isBurning(bot.entity) ? nearestSpot(bot, SEARCH_RADIUS, (pos) => bot.blockAt(pos)?.name === "water") : null;
+      const spot = water ?? (inLavaOrFire(bot) ? nearestSpot(bot, SEARCH_RADIUS, (pos) => isSafeToStand(bot, pos)) : null);
+      return spot?.offset(0.5, 0, 0.5) ?? null;
+    };
+    const tooLong = AbortSignal.timeout(GIVE_UP_MS);
+    const result = await ctx.locomotion.goTo(refuge, { urgent: true, until: () => !inDanger() }, AbortSignal.any([signal, tooLong]));
+    if (result.status === "interrupted" && !signal.aborted) return { ...result, status: "failed", reason: "still in danger after 12 s" };
+    return result;
   },
 };
-
-/** Walking into something: a ledge to hop. */
-function blocked(bot: MinecraftCtx["bot"]): boolean {
-  return (bot.entity as { isCollidedHorizontally?: boolean }).isCollidedHorizontally === true;
-}

@@ -72,7 +72,7 @@ describe("playerBrainstem", () => {
   });
 
   it("reads the body: health, breath and hunger as 0 to 1", () => {
-    expect(settings.body(fakeState({ self: { health: 10, air: 5, food: 15 } }))).toEqual({ health: 0.5, air: 0.75, hunger: 0.25 });
+    expect(settings.body(fakeState({ self: { health: 10, air: 5, food: 15 } }))).toEqual({ health: 0.5, air: 0.75, hunger: 0.25, stuck: false });
     expect(settings.body({ schemaVersion: 0, tick: 0, timestamp: 0, data: {} })).toBeNull();
   });
 

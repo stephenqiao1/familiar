@@ -13,8 +13,8 @@ export async function doLookAt(bot: Bot, point: Vec3, snap = true): Promise<void
 }
 
 /**
- * Turns the head to face a target. If the pathfinder is walking the bot, the look is held for a
- * second while the legs keep going the way they were (see gaze.ts), following the target if it moves.
+ * Turns the head to face a target. If the bot is walking, the look is held for a second while
+ * the legs keep going the way they were (see gaze.ts), following the target if it moves.
  */
 export const lookAt = primitive({
   name: "look_at",
@@ -30,7 +30,9 @@ export const lookAt = primitive({
   async run(ctx, target, signal) {
     const point = pointOf(ctx.bot, target);
     if (!point) return { status: "failed", reason: `target "${target}" not found` };
-    if (ctx.bot.pathfinder.isMoving()) await doGaze(ctx.bot, () => pointOf(ctx.bot, target), GAZE_MS, signal);
+    const { bot, locomotion } = ctx;
+    const eye = () => bot.entity.position.offset(0, bot.entity.height, 0);
+    if (locomotion.status().pattern === "walk") await doGaze(locomotion, eye, () => pointOf(bot, target), GAZE_MS, signal);
     else await doLookAt(ctx.bot, point);
     return signal.aborted ? { status: "interrupted" } : { status: "done" };
   },

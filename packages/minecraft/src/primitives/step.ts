@@ -54,7 +54,7 @@ export const step = primitive({
     const dir = target === undefined ? "forward" : directionOf(target);
     if (!dir || !STEPS.includes(dir)) return { status: "failed", reason: `cannot step "${target}"` };
     if (!safeStep(ctx.bot, dir)) return { status: "failed", reason: "nowhere safe to stand that way" };
-    ctx.bot.pathfinder.setGoal(null);
+    ctx.locomotion.stop();
     await doStep(ctx.bot, dir, signal);
     return { status: "done" };
   },

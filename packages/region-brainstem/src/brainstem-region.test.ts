@@ -185,12 +185,27 @@ describe("createBrainstemRegion", () => {
     it("shares air and hunger, and pain that fades over about 10 seconds", async () => {
       const { tick, value } = bot();
       await tick({ air: 0.4, hunger: 0.7 });
-      expect([value("air"), value("hunger"), value("pain")]).toEqual([0.4, 0.7, 0]);
+      expect([value("air"), value("hunger"), value("pain"), value("stuck")]).toEqual([0.4, 0.7, 0, 0]);
       await tick({ health: 0.8 });
       expect(value("pain")).toBeCloseTo(0.6);
       await tick({ health: 0.8 }, null, 10_000);
       expect(value("pain")).toBeLessThan(0.05);
     });
+  });
+
+  it("shares stuck: 1 while the legs are stuck, then fading over about 5 seconds", async () => {
+    const stuck = { current: false };
+    const { tick, value } = bot({}, { body: () => ({ health: 1, air: 0, hunger: 0, stuck: stuck.current }) });
+    await tick();
+    expect(value("stuck")).toBe(0);
+    stuck.current = true;
+    await tick();
+    expect(value("stuck")).toBe(1);
+    stuck.current = false;
+    await tick({}, null, 1000);
+    expect(value("stuck")).toBeGreaterThan(0.4);
+    await tick({}, null, 5000);
+    expect(value("stuck")).toBeLessThan(0.05);
   });
 
   it("with every strength at 0 it proposes nothing and shares nothing but arousal", async () => {
