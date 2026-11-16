@@ -12,7 +12,19 @@ export const scorebookFile = (bot: string) => `data/${bot}/scorebook.json`;
 export const noveltyFile = (bot: string) => `data/${bot}/novelty.json`;
 export const chestsFile = (bot: string) => `data/${bot}/chests.json`;
 export const memoriesFile = (bot: string) => `data/${bot}/memories.json`;
+export const hurtsFile = (bot: string) => `data/${bot}/hurts.json`;
 export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
+
+/** What the bot has learned hurts: block type → how many separate times it hurt. A missing file means nothing yet. */
+export async function loadHurts(file: string): Promise<Record<string, number>> {
+  const raw = await readJson(file);
+  const entries = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? Object.entries(raw) : [];
+  return Object.fromEntries(entries.filter(([, n]) => Number.isInteger(n) && (n as number) > 0)) as Record<string, number>;
+}
+
+export async function saveHurts(hurts: Record<string, number>, file: string): Promise<void> {
+  await writeJson(file, hurts);
+}
 
 /**
  * The bot's learned skills: chains of primitives kept as data. A missing or empty file means none.

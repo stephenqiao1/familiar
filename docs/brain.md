@@ -83,6 +83,48 @@ life-saving ones cannot be overruled. Each bot's settings are the `brainstem` bl
     Creepers and ranged mobs are always fled from.
 - Soft: `eat_when_starving`, base 0.9.
 
+**Withdrawal and stretch reflexes** (the body's fastest protections; rules in
+`packages/minecraft/src/brain/protective-reflexes.ts`, switched per bot in `bots.json` under `reflexes`):
+
+| Reflex | Kind | Fires when | Does |
+|---|---|---|---|
+| `pain_withdrawal` | hard | Hurt in the last 600 ms, with no attacker, and not by falling, drowning, starving, lava or fire | `withdraw`: move to the nearest safe place at least 2 blocks from where it hurt (4, then 6, if hurt again there). It needs no knowledge of what the thing is. |
+| `buried` | hard | The head is inside a solid block | `dig_out`: break the block at head height or move to open space, whichever is quicker |
+| `about_to_touch` | hard | Moving (a single step, a push; not a planned route) and the next block that way is lava, fire or a block known to hurt | `recoil`: stop at once and step back |
+| `hold_ground` | soft, base 0.8 | Pushed, and the push is carrying it toward a big drop, lava, fire or a block known to hurt within 2 blocks | `steady`: sneak and step back to where it stood |
+| `edge_guard` | soft, base 0.6 | Stepping (not on a planned route) toward a drop of 3 or more within 1 block | `steady`: stop and step back |
+
+- The three older hard reflexes are unchanged and come first. There is no reflex for falling:
+  mid-air there is nothing a body can do (a slot is marked in the file).
+- The soft two take the brainstem's gain (alarm raises them) and a goal's `holdBack` can name
+  them, for example when the bot means to drop down. They never fire while a hard reflex's skill runs.
+- **The place moved to must itself hold.** `withdraw` only picks a spot that is safe to stand on,
+  not beside anything known to hurt, and not at the edge of a big drop. If nowhere within 6 blocks
+  qualifies it stays put.
+- **Switching off the opposing movement.** When a hard protective reflex takes over, the journey
+  is stopped, the spot that hurt is avoided by routes for 5 minutes, and the skill that was running
+  ends as *failed* ("cut short by withdraw at x,y,z"), so the scorebook learns it cost something.
+- **Sore.** For 30 seconds after a withdrawal the brainstem shares a `sore` signal (1 fading to 0):
+  `about_to_touch` looks 2 blocks ahead instead of 1, and `hold_ground`'s base rises to 0.9.
+- Each withdrawal's skill event carries, in `changes`: the cause it blamed, where it hurt, where
+  it went, the time from the hurt to the skill starting (`hurtToStartMs`), and anything learned.
+
+**Learning what hurts** (`packages/minecraft/src/pain.ts`). The bot is born knowing only what
+`reflexes.innateHurts` lists (by default lava, fire, soul_fire, magma_block, cactus). Each
+withdrawal blames a cause: the block the game's damage kind names if the body is touching one,
+else every block it is touching. A block type blamed on two separate occasions (at least 2
+seconds apart) becomes *known to hurt*: the standing checks, the pathing rules and the reflexes
+above all respect it from then on, and a memory of kind "danger" is recorded. Only damage with no
+attacker teaches anything, and air, water and the base's own blocks are never learned. The record
+is kept per bot in `data/<name>/hurts.json`.
+
+**What the body feels** (state schema 12): `self.lastHurt` has the game's own name for the damage
+(`kind`: "cactus", "hot_floor", "in_wall", "fall", "mob_attack"...) and where it happened (`at`);
+`self.touching` (blocks at the feet, head, under the feet and on the four sides); `self.inBlock`;
+`self.pushed` (moved without meaning to, which way, and the first danger within 2 blocks that
+way); `self.motion` (which way it is moving, and the danger ahead). `nearby.hazards` also lists
+blocks known to hurt within 3 blocks.
+
 **Brainstem** (`brainstem` region and `createReflexGain`, settings in `packages/minecraft/src/brain/brainstem.ts`):
 - **Reflex gains.** A soft reflex's urgency is base × gain, where
   gain = (0.6 + 0.8 × alarm) × bravery factor × hold-back factor, kept within 0.3 to 1.5. Brave
@@ -273,6 +315,10 @@ in `data/<name>/`.
 
 | To... | Edit |
 |---|---|
+| Change what the bot is born knowing hurts | `bots.json`: `reflexes.innateHurts` (an empty list makes it learn everything; `in_lava_or_fire` still works, since it reads the body, not the list) |
+| Add a withdrawal (a protective reflex) | `packages/minecraft/src/brain/protective-reflexes.ts` (write the rule, add it to `protectiveReflexes`, give it a strength in `ReflexSettings`); its skill, if new, goes in `packages/minecraft/src/skills/` as `reflexOnly` and into `REFLEX_SKILLS` |
+| Change how many incidents it takes to learn that something hurts | `INCIDENTS_TO_LEARN` in `packages/minecraft/src/pain.ts` |
+| Change which kinds of damage call for pulling away | `NOT_A_PLACE` in `protective-reflexes.ts` |
 | Add a hard reflex | `packages/minecraft/src/brain/reflexes.ts` (write a rule with `"hard"`, add it to `playerReflexes`). Keep these to what saves the bot's life: nothing can overrule them. |
 | Add a soft reflex | Same file, with `"soft"` and a base urgency. If it defends the bot, add its name to `DEFENCE_REFLEXES`; if its skill moves toward or away from a threat, add the skill to `LEANINGS` in `brainstem.ts`. |
 | Add a startle detector | `packages/minecraft/src/brain/brainstem.ts` (write a detector, add it to `playerStartles`) |
@@ -330,6 +376,7 @@ in `data/<name>/`.
 pnpm start -- --engine jev --planner claude          # full brain
 pnpm start -- --regions reflex,instinct              # without the prefrontal cortex
 pnpm start -- --engine jev --primitives              # let Jev choose primitives too
+pnpm start -- --regions reflex,brainstem --manual    # reflexes only; type "do <skill> [target]" to drive the body by hand
 pnpm start -- --engine jev --same-time               # let a look run alongside a skill that leaves the head free
 pnpm start -- skill break_block --target dir:forward # run one skill or primitive and print what it changed
 pnpm start -- --plan '{"goal":"Explore","ifThen":[{"when":"creeper","skill":"flee"}]}'   # a fixed plan for the echo planner

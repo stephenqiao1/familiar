@@ -6,7 +6,8 @@ export { DEFAULT_LOCOMOTION, driveFrom, locomotionProblem, RESTING_DRIVE, type L
 export { placeOf, playerMemories } from "./memories.js";
 export { playerInstinct } from "./instinct.js";
 export { isShock, playerOutlook } from "./outlook.js";
-export { DEFENCE_REFLEXES, playerReflexes, zoneOf, type Zone } from "./reflexes.js";
+export { DEFAULT_REFLEXES, REFLEX_SKILLS, reflexesProblem, type ReflexSettings } from "./protective-reflexes.js";
+export { createPlayerReflexes, DEFENCE_REFLEXES, playerReflexes, zoneOf, type Zone } from "./reflexes.js";
 export { curiosity, playerRewards } from "./rewards.js";
 export { describeSituation, type Storage } from "./situation.js";
 export { situationOf } from "./situation-labels.js";

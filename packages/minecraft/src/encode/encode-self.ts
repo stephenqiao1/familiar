@@ -1,5 +1,6 @@
 import type { Vec3 } from "vec3";
 import { airOf, isBurning } from "../body.js";
+import type { Hurt } from "../pain.js";
 import { foodValue } from "../foods.js";
 import { bestWeaponOf } from "../weapons.js";
 import type { EncodableBot, EncodableItem } from "./encodable-bot.js";
@@ -12,13 +13,7 @@ const INVENTORY_SLOTS = 36;
 const HURT_MEMORY_MS = 60_000;
 const BURNING = new Set(["fire", "soul_fire"]);
 
-/** When the bot was last hurt, and by whom (a target id) if the game said. */
-export interface LastHurt {
-  at: number;
-  by: string | null;
-}
-
-export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHurt: LastHurt | null = null, now = Date.now()): Omit<MinecraftStateData["self"], "locomotion"> {
+export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHurt: Hurt | null = null, now = Date.now()): Omit<MinecraftStateData["self"], "locomotion" | "touching" | "inBlock" | "pushed" | "motion"> {
   const items = bot.inventory.items();
   const here = bot.blockAt(bot.entity.position.floored());
   const feet = bot.entity.position.floored();
@@ -46,7 +41,7 @@ export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHu
     inLava: around.includes("lava"),
     inWater,
     falling: bot.entity.onGround === false && !inWater && dropBelow(bot, feet) >= BIG_DROP,
-    lastHurt: lastHurt && now - lastHurt.at <= HURT_MEMORY_MS ? { msAgo: Math.max(0, now - lastHurt.at), by: lastHurt.by } : null,
+    lastHurt: lastHurt && now - lastHurt.at <= HURT_MEMORY_MS ? { msAgo: Math.max(0, now - lastHurt.at), by: lastHurt.by, kind: lastHurt.kind, at: lastHurt.where } : null,
   };
 }
 

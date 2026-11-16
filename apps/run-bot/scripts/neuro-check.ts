@@ -250,16 +250,21 @@ const scenes: Scene[] = [
     name: "dark",
     about: "Dropped somewhere unknown, far from bed, at midnight: focus should rise and the outlook fall.",
     seconds: 45,
-    before: [...CALM, "time set 18000"],
+    // It joins by day and is moved before night falls: joining at night beside its bed, it goes
+    // straight to sleep, and a bot woken by being moved starts from its lowest focus.
+    before: CALM,
     during: [
       [2, `spreadplayers 400 400 0 20 false ${BOT}`],
+      [3, "time set 18000"],
       [44, `tp ${BOT} -8 69 14`],
     ],
     checks: (run) => {
-      const dark = run.ticks.flatMap((t) => (run.trace(t, "acetylcholine").inputs as Record<string, number> | undefined)?.darkness ?? []);
-      const shelter = run.ticks.flatMap((t) => (run.trace(t, "serotonin").inputs as Record<string, number> | undefined)?.light_and_shelter ?? []);
+      // Judged once it is there, in the dark (the first seconds are by day, at base).
+      const there = run.ticks.filter((t) => run.at(t) > 6);
+      const dark = there.flatMap((t) => (run.trace(t, "acetylcholine").inputs as Record<string, number> | undefined)?.darkness ?? []);
+      const shelter = there.flatMap((t) => (run.trace(t, "serotonin").inputs as Record<string, number> | undefined)?.light_and_shelter ?? []);
       return [
-        ["it is night throughout", run.ticks.every((t) => t.state.data.time.isNight)],
+        ["it is night once it is there", run.ticks.filter((t) => run.at(t) > 6).every((t) => t.state.data.time.isNight)],
         ["the darkness input is up", mean(dark) > 0.3, `mean ${mean(dark).toFixed(2)}`],
         ["focus rises above its resting level", (run.signal("focus").at(-1) ?? 0) > 0.5, `ends at ${(run.signal("focus").at(-1) ?? 0).toFixed(2)}`],
         ["the outlook's light-and-shelter input is low", mean(shelter) < 0.3, `mean ${mean(shelter).toFixed(2)}`],
@@ -426,6 +431,8 @@ const scenes: Scene[] = [
       [3, `give ${BOT} stone_sword 1`],
       [6, TO_PLAZA],
       [14, `summon zombie 66.5 151 40.5 ${HELMET}`],
+      // Whatever the first fight cost, start the hard part from full health: 14 damage then leaves 6.
+      [33, `effect give ${BOT} instant_health 1 10 true`],
       [34, `execute at ${BOT} run summon zombie ~2 ~ ~ ${HELMET}`],
       [35, `damage ${BOT} 14`],
       [50, "kill @e[type=zombie]"],
@@ -534,7 +541,8 @@ const scenes: Scene[] = [
       return [
         ["the bot slept most of the night", asleepSeconds > 300, `${asleepSeconds.toFixed(0)} s asleep, upper layers paused ${pausedSeconds.toFixed(0)} s`],
         ["no Jev call is made while paused", callsWhilePaused === 0, `${callsWhilePaused} calls in ${paused.length} paused ticks`],
-        ["no plan arrives while paused", plansWhilePaused <= 1, `${plansWhilePaused}`],
+        // A plan already being made when the pause begins may still arrive: once at the start, once after the hit.
+        ["no new plan is made while paused", plansWhilePaused <= 2, `${plansWhilePaused} arrived that were started before a pause`],
         ["REPORT calls", true, `Jev: ${engineCalls} made, ${paused.length} saved; planner: about ${Math.floor(pausedSeconds / 15)} runs saved`],
         ["the hit wakes the upper layers on the same tick", hit !== undefined && (hit.signals.upper_paused?.value ?? 1) === 0 && run.trace(hit, "instinct").paused !== true, hit ? `at ${run.at(hit).toFixed(0)} s: ${String(run.trace(hit, "brainstem").woken ?? "not asleep")}` : "no hit seen"],
         ["it goes back to sleep afterwards", backAsleep],

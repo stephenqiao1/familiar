@@ -3,6 +3,114 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-16: the withdrawal and stretch reflexes
+
+*Found by running the real bot, with only its reflexes deciding, on the test server with
+`pnpm reflex-check`. None of this showed up in the unit tests.*
+
+**What the scenes showed** (a bot born knowing only that lava and fire hurt):
+
+| Scene | Result | Hurt to withdrawal starting |
+|---|---|---|
+| Cactus | Pulled away twice, learned cactus, then walked past it unhurt | 18 ms, 50 ms |
+| Magma floor | Pulled away twice, learned magma_block, then crossed a strip of it through the one gap | 19 ms, 68 ms |
+| Berry bush | Pulled away twice, learned sweet_berry_bush, then passed a hedge through the gap | 60 ms, 134 ms |
+| Buried in sand | Head inside a block; got out by moving to open space; full health | |
+| Lava edge, one step at a time | Stopped at z=38 with lava from z=37; never in lava | |
+| Shoved toward a drop | Held and stepped back all 3 times (urgency 0.77 to 0.95) | |
+| Shoved, hold_ground held back | Gain fell to 0.30 to 0.42 (urgency 0.24 to 0.33); it still held, see below | |
+
+Hurt to withdrawal starting: median 60 ms, slowest 134 ms, none over the 250 ms aim.
+
+**Found and fixed.**
+
+- **The bot could not be knocked back at all.** On 1.21.11 the server sends a knock in blocks per
+  tick, but Mineflayer still divides it by 8000 (the old packet's scale), so a hit moved the bot
+  nowhere. Every fight so far had been against a bot that could not be shoved. The real push is
+  now applied (`packages/minecraft/src/body-events.ts`).
+- **The new pathing rule crashed the bot on a long route.** Planning 500 blocks home, the
+  pathfinder looked past the loaded world and handed the rule a block with no position; the rule
+  asked the world about it and the whole process died. Only the `dark` scene walks that far, and
+  only when Jev picks `return_to_base`, so it showed up on the third regression run. The rule now
+  treats such a block as unknown. Nothing in the unit tests could have caught it: the rules are
+  only ever run by the real pathfinder.
+- **A typed-command input kept the bot's process alive after Ctrl+C** (`--manual`). It is closed
+  on shutdown, and the scene runner kills a bot that does not stop.
+
+**Seen, left as it is.**
+
+- **A hit throws the bot about 6 blocks.** The server's knock for a standing punch is 1.2 blocks
+  per tick sideways and 0.4 up, and the bot is in the air for most of it, where no reflex can act.
+  `hold_ground` can only work on what is left after it lands. I could not compare this with a
+  vanilla client; 1.2 looks large against the 0.4 the game's own code suggests. If you hit the
+  bot in your own client and it flies further than a player would, the number is wrong.
+- **Pistons do not move this client.** Nor do the server's slowness effect or a movement speed of
+  0 (found earlier). Only knocks and explosions push it, so being pushed is rarer for this bot
+  than for a real player.
+- **Holding back `hold_ground` made no difference in the scene.** The goal damped it to a gain of
+  0.30 to 0.42, but with Jev out of the scene nothing else proposed anything, so even at urgency
+  0.24 it won and the bot stepped back. A hold-back only matters when something competes. Also,
+  in neither run would the bot have gone over: each knock left it a block short of the edge.
+- **On the lava edge both protections acted.** The `step` primitive refused the last step by
+  itself once (it will not step where it cannot stand), and `about_to_touch` fired once.
+- **Buried, it walked out rather than dug.** Sand fell on its head; open space was one block away.
+  Digging out when boxed in is covered by unit tests only.
+- **Hurt-to-start times are better than the loop's regular tick** (500 ms) because a hurt wakes
+  the loop at once: it checks for a significant change every 100 ms. The worst case is about
+  100 ms to notice, plus the tick itself.
+
+**In the regressions afterwards.** The reflex check (7 scenes), the locomotion check (9) and the
+primitives pass (20) all passed in one run each. In `pnpm neuro-check` 13 of 17 scenes passed
+first time; the other four passed once understood:
+- `hold`: the bot can now be knocked about, so it reached the scene's fixed 14 damage with only
+  14 health and died. The scene now heals it first. Fights cost the bot more than they used to.
+- `drowning`: Jev chose to walk home, and the swim pattern kept the bot's head above water, so
+  it never ran short of air. Passed on re-run.
+- `dark`: starting at night beside its bed, the bot went straight to sleep, and a bot woken by
+  being moved starts from its lowest focus. The scene now moves it before night falls. It then
+  exposed the crash above.
+- `sleepgate`: two plans arrived while paused, both started before a pause began. The check now
+  allows two.
+
+**Status.** Fixed, except the items under "left as it is".
+
+## Reflexes: limits of the withdrawal, stretch and learning
+
+*Found 2026-11-16 while building `packages/minecraft/src/brain/protective-reflexes.ts` and `pain.ts`.*
+
+- **The pathfinder did not avoid what the safety checks called dangerous.** By itself it keeps
+  out of fire, lava and cobwebs only: it would cross a magma floor or brush a cactus. The pathing
+  rules now refuse to step on or into a block known to hurt, and charge for brushing past one.
+- **Blame is a guess.** If the game's damage kind does not name a block the body is touching,
+  every block it is touching is blamed. Two incidents on plain stone next to an unnamed hazard
+  would teach it that stone hurts, and it would then refuse to stand on stone. `hot_floor` is the
+  one kind with a hand-written pointer (it blames what is under the feet).
+- **Learning is all or nothing, and never forgotten.** Two incidents make a block type known to
+  hurt for good. There is no unlearning, no "hurts a little", and no notion of a harmless state of
+  the same block (a berry bush with no berries).
+- **"Never learn the base's blocks" is a short list**: chests, beds and crafting tables.
+- **`about_to_touch` reads the direction the body is moving**, taken over the last 150 ms. A bot
+  standing still next to lava does not trigger it, and it looks at the whole block ahead, not the
+  exact path.
+- **It is skipped on any planned walk.** That trusts the pathing rules. A journey that steers by
+  keys (`swim`, `dash`) is not skipped.
+- **"Pushed" means half a block of movement, across the ground, in 300 ms, with no journey under
+  way and no movement key held.** A slow push (flowing water) is under the threshold. For 300 ms
+  after its own movement stops, sliding is not counted. Falling is not a push.
+- **`steady` and `recoil` step back to a spot worked out from whole-block position**, so the spot
+  can be up to half a block off; if it is not safe to stand on they only stop and sneak.
+- **Soreness only changes two numbers** (the look-ahead and `hold_ground`'s base). Nothing else
+  reads the `sore` signal yet.
+- **The soft reflexes' strength settings scale their base urgency**; the hard ones are on or off.
+- **`withdraw` can run two or three times for one hurt.** The reflex fires while the hurt is fresh
+  (600 ms) and the bot is within 2 blocks of the place; each run after the first finds it is
+  already clear and ends at once.
+- **Falling has no reflex**, by design. `edge_guard` and `hold_ground` are the protection.
+- **`--manual` is plumbing for live checks**: the bot takes "do <skill> [target]" lines on its
+  standard input. It is off unless asked for.
+
+**Status.** Open.
+
 ## The demo runner: what it can and cannot show
 
 *Found 2026-11-16 while building `pnpm demo` (`apps/run-bot/scripts/demo.ts`), tested with a

@@ -66,6 +66,7 @@ export const hold: Demo = {
         [3, TO_PLAZA],
         [4, `effect give ${BOT} glowing 600 0 true`],
         [12, `summon zombie 66.5 151 40.5 ${HELMET}`],
+        [29, `effect give ${BOT} instant_health 1 10 true`],
         [30, `execute at ${BOT} run summon zombie ~2 ~ ~ ${HELMET}`],
         [31, `damage ${BOT} 14`],
         [46, "kill @e[type=zombie]"],

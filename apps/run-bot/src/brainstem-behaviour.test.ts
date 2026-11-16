@@ -53,6 +53,10 @@ function state(p: Patch, ms: number): State {
       inWater: false,
       falling: false,
       lastHurt: null,
+      touching: { feet: "air", head: "air", below: "stone", sides: ["air", "air", "air", "air"] },
+      inBlock: false,
+      pushed: null,
+      motion: null,
       locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
       ...p.self,
     },
@@ -273,7 +277,7 @@ describe("startle", () => {
   it("a hit from something unseen startles and turns the bot toward it", async () => {
     const { tick, value } = bot();
     await tick();
-    const out = await tick({ self: { health: 17, lastHurt: { msAgo: 20, by: "entity:9" } }, mobs: [{ ...mob("skeleton", 20, 9) }] });
+    const out = await tick({ self: { health: 17, lastHurt: { msAgo: 20, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } }, mobs: [{ ...mob("skeleton", 20, 9) }] });
     expect(value("startle")).toBe(1);
     expect(out.traces.brainstem?.startle).toEqual({ by: "hurt_unseen", source: { id: "entity:9", kind: "skeleton" } });
   });

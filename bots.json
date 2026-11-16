@@ -54,6 +54,22 @@
       "speedFromDopamine": 1,
       "cautionFromFocus": 1
     },
+    "reflexes": {
+      "innateHurts": [
+        "lava",
+        "fire",
+        "soul_fire",
+        "magma_block",
+        "cactus"
+      ],
+      "painWithdrawal": 1,
+      "buried": 1,
+      "aboutToTouch": 1,
+      "holdGround": 1,
+      "edgeGuard": 1,
+      "learnHurts": 1,
+      "sensitise": 1
+    },
     "memory": {
       "halfLifeDays": 2
     }
@@ -66,6 +82,15 @@
   "Timid": {
     "brainstem": {
       "bravery": 0.2
+    }
+  },
+  "Naive": {
+    "reflexes": {
+      "innateHurts": [
+        "lava",
+        "fire",
+        "soul_fire"
+      ]
     }
   }
 }

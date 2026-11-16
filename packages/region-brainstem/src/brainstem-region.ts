@@ -1,7 +1,7 @@
 import type { Proposal, Region, State, Workspace } from "@familiar/contracts";
 import { createLoadedResponses, LOADED_URGENCY, type Thing } from "./loaded.js";
 import type { BrainstemSettings } from "./settings.js";
-import { AIR_SIGNAL, AROUSAL_SIGNAL, HUNGER_SIGNAL, ORIENTING_SIGNAL, PAIN_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+import { AIR_SIGNAL, AROUSAL_SIGNAL, HUNGER_SIGNAL, ORIENTING_SIGNAL, PAIN_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
 
 /** What a detector looks at: the last tick's state, this tick's, and the workspace. */
 export interface BrainstemMoment {
@@ -26,6 +26,8 @@ export interface Body {
   hunger: number;
   /** The legs are stuck right now (trying to get free, or just gave up). Default: false. */
   stuck?: boolean;
+  /** How sore: 1 just after pulling away from pain, fading to 0. Default: 0. */
+  sore?: number;
 }
 
 export interface BrainstemOptions {
@@ -93,7 +95,7 @@ const STAY_ASLEEP_URGENCY = 0.5;
  *      reports loaded responses and hold-backs it had to ignore;
  *   e) arousal gate: shares `arousal`; while asleep and undisturbed, shares `upper_paused` so the
  *      deciding layers above make no calls. A startle, damage, a hard reflex or alarm ends it at once;
- *   f) body signals: shares `air`, `pain`, `hunger` and `stuck`.
+ *   f) body signals: shares `air`, `pain`, `hunger`, `stuck` and `sore`.
  * Everything it does is in the trace.
  */
 export function createBrainstemRegion(options: BrainstemOptions): Region {
@@ -129,7 +131,8 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
         // 1 while the legs are stuck, then fading.
         stuck = body.stuck ? 1 : stuck * Math.exp(-dt / STUCK_TAU_SECONDS);
         ws.setSignal(STUCK_SIGNAL, stuck);
-        trace.body = { air: body.air, pain, hunger: body.hunger, stuck };
+        ws.setSignal(SORE_SIGNAL, body.sore ?? 0);
+        trace.body = { air: body.air, pain, hunger: body.hunger, stuck, sore: body.sore ?? 0 };
       }
 
       // b) Startle.

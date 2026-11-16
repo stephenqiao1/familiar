@@ -17,7 +17,8 @@ import {
   playerInstinct,
   playerMemories,
   playerOutlook,
-  playerReflexes,
+  createPlayerReflexes,
+  type ReflexSettings,
   playerRewards,
   REFLEX_NOTE,
   situationOf,
@@ -92,6 +93,12 @@ export interface BrainParts<Ctx> {
   focus: FocusSettings;
   /** This bot's brainstem temperament: bravery, and how strong each reflex-tuning part is (from bots.json). */
   brainstem: BrainstemSettings;
+  /** This bot's protective reflexes (from bots.json). Default: all on, born knowing the usual five. */
+  reflexes?: ReflexSettings;
+  /** How sore the bot is right now (1 just after pulling away from pain, fading to 0). Default: never. */
+  sore?: () => number;
+  /** The block types the bot has just learned hurt, for remembering. Default: it learns none. */
+  justLearnedHurts?: () => string[];
   /** Offer the primitives (look_at, step_toward, ...) on the decision menu. Default: false. */
   showPrimitives?: boolean;
   /** A look may run alongside a skill that leaves the head free. Default: false. */
@@ -127,12 +134,12 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
   const all: Region[] = [
     createReflexRegion({
-      rules: playerReflexes,
+      rules: createPlayerReflexes(parts.reflexes),
       // The brainstem sets how strongly each soft reflex fires (alarm, bravery, the goal's hold-backs).
       ...(hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? { gainOf: createReflexGain({ settings: brainstem, alarmOf, leaningOf }) } : {}),
     }), //                                                                                  layer 0, every tick
     createBrainstemRegion({
-      ...playerBrainstem(skills, ctx, parts.sameTime),
+      ...playerBrainstem(skills, ctx, parts.sameTime, parts.sore),
       settings: brainstem,
       alarmOf,
       reflexFired: (ws) => up(ws, REFLEX_SIGNAL),
@@ -157,7 +164,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createNoradrenalineRegion({ triggers: playerAlarms(focus.noisyOrChanged > 0), threatPresent, settings: noradrenaline }), // layer 0, every tick
     createMemoryRegion({
       memory,
-      triggers: playerMemories(),
+      triggers: playerMemories(parts.justLearnedHurts),
       placeOf,
       factSupport: focus.factSupport,
       ...(noradrenaline.memoryTag > 0 ? { alarmOf: (ws: Workspace) => level(ws, ALARM_SIGNAL) } : {}),

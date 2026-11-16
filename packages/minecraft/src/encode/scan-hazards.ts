@@ -1,5 +1,6 @@
 import { Vec3 } from "vec3";
 import type { EncodableBot } from "./encodable-bot.js";
+import { isDangerousBlock } from "../safety.js";
 import { posId, scanBlocks } from "./scan-blocks.js";
 import { DEFAULT_LIMIT } from "./scan-mobs.js";
 import type { Nearby } from "./state-data.js";
@@ -9,14 +10,18 @@ const RADIUS = 8;
 export const BIG_DROP = 3;
 const FIRE = new Set(["lava", "fire", "soul_fire"]);
 
-/** Lava, fire, and drops of 3+ blocks within 8 blocks, the nearest `limit`. */
+/** Other blocks the bot knows hurt are listed this close. */
+const HURT_RADIUS = 3;
+
+/** Lava, fire, and drops of 3+ blocks within 8 blocks, and other blocks the bot knows hurt within 3; the nearest `limit`. */
 export function scanHazards(bot: EncodableBot, limit = DEFAULT_LIMIT): Nearby[] {
   const me = bot.entity.position;
   const blocks = scanBlocks(bot, (name) => FIRE.has(name), RADIUS, limit).map((pos) => ({
     pos,
     type: bot.blockAt(pos)?.name === "lava" ? "lava" : "fire",
   }));
-  const hazards = [...blocks, ...drops(bot).map((pos) => ({ pos, type: "drop" }))];
+  const hurts = scanBlocks(bot, (name) => !FIRE.has(name) && isDangerousBlock(name, bot), HURT_RADIUS, limit).map((pos) => ({ pos, type: bot.blockAt(pos)?.name ?? "unknown" }));
+  const hazards = [...blocks, ...hurts, ...drops(bot).map((pos) => ({ pos, type: "drop" }))];
   return hazards
     .map((h) => ({ id: posId(h.pos), type: h.type, dist: Math.round(h.pos.distanceTo(me)) }))
     .sort((a, b) => a.dist - b.dist)

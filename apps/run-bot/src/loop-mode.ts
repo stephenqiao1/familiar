@@ -1,9 +1,11 @@
+import { createInterface } from "node:readline";
 import type { Action, Candidate, SkillEvent, TickLog } from "@familiar/contracts";
 import { createBrainLoop, createChainSkill, createLogger, createSkillExecutor, createWorkspace, defaultLogPath } from "@familiar/core";
 import { feelingNear, type Place } from "@familiar/memory";
 import {
   createFirstSeenTracker,
   createLocomotion,
+  createPain,
   DEFENCE_REFLEXES,
   driveFrom,
   encodeState,
@@ -11,6 +13,8 @@ import {
   isSignificantChange,
   minecraftSkills,
   primitives,
+  REFLEX_SKILLS,
+  setKnownHurts,
   tidyBody,
   posId,
   situationOf,
@@ -37,11 +41,14 @@ import { REFLEX_SIGNAL, type FiredReflex } from "@familiar/region-reflex";
 import type { BrainArgs, ServerArgs } from "./args.js";
 import { loadBotConfig } from "./bot-config.js";
 import { createArbiter, createBrain, patienceOf } from "./brain.js";
+import { cutShortReason } from "./cut-short.js";
 import { createEngine, createPlanner } from "./create-engine.js";
 import {
   chestsFile,
+  hurtsFile,
   learnedSkillsFile,
   loadChests,
+  loadHurts,
   loadLearnedSkills,
   loadMemories,
   loadNovelty,
@@ -49,6 +56,7 @@ import {
   memoriesFile,
   noveltyFile,
   saveChests,
+  saveHurts,
   saveMemories,
   saveNovelty,
   saveScorebook,
@@ -76,7 +84,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -123,10 +131,23 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
 
   // The one thing that travels. Careful (no digging) near home; its notes go to the console.
   const locomotion = createLocomotion(bot, { home: base.chest, log: (msg) => console.log(`    ${msg}`) });
+  // What the bot knows hurts (born knowing some, learning the rest), and how sore it is. The
+  // safety checks, pathing and reflexes all ask it. It never learns the base's own blocks as harmful.
+  const pain = createPain({
+    innate: reflexes.innateHurts,
+    learned: await loadHurts(hurtsFile(server.name)),
+    neverLearn: (name) => name === "chest" || name.endsWith("_bed") || name === "crafting_table",
+    learnHurts: reflexes.learnHurts,
+    sensitise: reflexes.sensitise,
+  });
+  setKnownHurts(bot, pain.knows);
+  const bodyEvents = trackBodyEvents(bot, () => locomotion.status().moving);
   const ctx: MinecraftCtx = {
     bot,
     base,
     locomotion,
+    pain,
+    lastHurt: () => bodyEvents.lastHurt(),
     wants: () => workspace.goal()?.wants ?? [],
     chests: believedChests,
     log: (msg) => console.log(`    ${msg}`),
@@ -148,6 +169,9 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       noradrenaline,
       focus: focusSettings,
       brainstem,
+      reflexes,
+      sore: () => pain.sore(Date.now()),
+      justLearnedHurts: () => pain.justLearned(),
       showPrimitives: brainArgs.primitives ?? false,
       sameTime: brainArgs.sameTime ?? false,
       focusNotes,
@@ -229,12 +253,15 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     if (!("skill" in action) || action.skill === executor.current()?.skill) return interrupted && !savingItself ? executor.interrupt() : undefined;
     // The choice was to keep going with a skill that has finished since the tick began: it is done, not due again.
     if (action.skill === runningAtTick && executor.current() === null) return;
+    // A protective reflex cutting a skill short switches it off as a failure, naming the reflex and
+    // the place, so the scorebook learns the skill cost something here (an interruption teaches nothing).
+    const cutShort = cutShortReason(action.skill, executor.current()?.skill, REFLEX_SKILLS, bot.entity.position.floored());
+    if (cutShort) await executor.abandon(cutShort);
     await executor.start(action.skill, action.target);
   }
 
   const fileLogger = createLogger(logPath);
   const firstSeen = createFirstSeenTracker();
-  const bodyEvents = trackBodyEvents(bot);
   const defenceWatch = createDefenceWatch();
   let loggedDeaths = 0;
   /**
@@ -275,6 +302,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         current: executor.current(),
         deaths,
         lastHurt: bodyEvents.lastHurt(),
+        pushed: bodyEvents.pushed(),
+        motion: bodyEvents.motion(),
         locomotion: (({ moving, pattern, gait, stuck }) => ({ moving, pattern, gait, stuck }))(locomotion.status()),
         loud: bodyEvents.loud(),
         memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
@@ -315,16 +344,31 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       saveScorebook(scorebook, scorebookFile(server.name)),
       saveNovelty(novelty, noveltyFile(server.name)),
       saveChests(chests, chestsFile(server.name)),
+      saveHurts(pain.entries(), hurtsFile(server.name)),
       saveMemories(memory, memoriesFile(server.name)),
     ]).catch((error) => console.error(`Could not save what the bot learned: ${error}`));
   };
   const saveTimer = setInterval(() => void saveLearning(), SAVE_LEARNING_MS);
+
+  // --manual: skill commands typed on standard input start that skill at once, as if a region had
+  // proposed it. With the deciding regions left out (--regions), only the reflexes can overrule it.
+  const typed = brainArgs.manual ? createInterface({ input: process.stdin }) : null;
+  if (typed) {
+    typed.on("line", (line) => {
+      const [verb, skill, target] = line.trim().split(/\s+/);
+      if (verb === "do" && skill) void executor.start(skill, target);
+      if (verb === "stop") void executor.interrupt();
+    });
+  }
 
   let stopping = false;
   async function shutdown(reason: string, exitCode: number): Promise<void> {
     if (stopping) return;
     stopping = true;
     console.log(`Stopping (${reason})...`);
+    // Stop listening for typed commands, or the open input would keep the process alive.
+    typed?.close();
+    process.stdin.unref?.();
     await loop.stop();
     await executor.interrupt();
     clearInterval(saveTimer);

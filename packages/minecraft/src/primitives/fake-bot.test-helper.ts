@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { Bot } from "mineflayer";
 import { Vec3 } from "vec3";
+import { createPain } from "../pain.js";
+import { INNATE_HURTS } from "../safety.js";
 import type { MinecraftCtx } from "../skill-context.js";
 
 /** A stack in the fake inventory. */
@@ -209,7 +211,7 @@ export function fakeBot(options: FakeOptions = {}) {
     follow: async () => ({ status: "failed", reason: "no fake travel" }),
     awayFrom: async () => ({ status: "failed", reason: "no fake travel" }),
   } as unknown as MinecraftCtx["locomotion"];
-  const ctx: MinecraftCtx = { bot, base: { chest: new Vec3(0, 63, 0), bed: new Vec3(0, 63, 1) }, wants: () => [], locomotion, chests: {} as MinecraftCtx["chests"], log: () => {} };
+  const ctx: MinecraftCtx = { bot, base: { chest: new Vec3(0, 63, 0), bed: new Vec3(0, 63, 1) }, wants: () => [], locomotion, pain: createPain({ innate: INNATE_HURTS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
   return {
     bot,
     ctx,

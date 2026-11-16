@@ -171,7 +171,27 @@ export function goalDone(): MemoryTrigger {
 
 // TODO(memory): a "social" trigger (a meaningful exchange with another player) once social features exist.
 
-/** A fresh set of every moment the player remembers (some triggers keep their own state). */
-export function playerMemories(): MemoryTrigger[] {
-  return [tookDamage, closeCall(), died, notableReward, firstSight, skillFailed, goalDone()];
+/**
+ * A block type has just become known to hurt (it hurt on two separate occasions). Heavy damage
+ * has a memory of its own (`tookDamage`); this one is for the lesson, which a cactus prick is too
+ * small to leave otherwise.
+ */
+export function learnedWhatHurts(justLearned: () => string[]): MemoryTrigger {
+  return {
+    name: "learned_what_hurts",
+    check({ after }) {
+      const names = justLearned();
+      const d = minecraftDataOf(after);
+      if (!names.length || !d) return null;
+      return { kind: "danger", summary: `Learned that ${names.join(" and ")} hurts to touch`, involved: names, outcome: { feeling: "bad", value: -0.3 }, context: context(d) };
+    },
+  };
+}
+
+/**
+ * A fresh set of every moment the player remembers (some triggers keep their own state).
+ * `justLearned`: the block types just learned to hurt, if the bot learns them.
+ */
+export function playerMemories(justLearned?: () => string[]): MemoryTrigger[] {
+  return [tookDamage, closeCall(), died, notableReward, firstSight, skillFailed, goalDone(), ...(justLearned ? [learnedWhatHurts(justLearned)] : [])];
 }

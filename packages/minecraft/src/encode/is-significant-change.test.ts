@@ -53,8 +53,8 @@ describe("isSignificantChange: the body", () => {
   const state = (self: Partial<MinecraftStateData["self"]> = {}, loud: MinecraftStateData["nearby"]["loud"] = []) => fakeState({ self, nearby: { loud } });
 
   it("is true when the bot is hurt again, catches fire, falls into lava or runs low on air", () => {
-    expect(isSignificantChange(state(), state({ lastHurt: { msAgo: 10, by: null } }))).toBe(true);
-    expect(isSignificantChange(state({ lastHurt: { msAgo: 900, by: null } }), state({ lastHurt: { msAgo: 20, by: null } }))).toBe(true);
+    expect(isSignificantChange(state(), state({ lastHurt: { msAgo: 10, by: null, kind: null, at: { x: 0, y: 63, z: 0 } } }))).toBe(true);
+    expect(isSignificantChange(state({ lastHurt: { msAgo: 900, by: null, kind: null, at: { x: 0, y: 63, z: 0 } } }), state({ lastHurt: { msAgo: 20, by: null, kind: null, at: { x: 0, y: 63, z: 0 } } }))).toBe(true);
     expect(isSignificantChange(state(), state({ onFire: true }))).toBe(true);
     expect(isSignificantChange(state(), state({ inLava: true }))).toBe(true);
     expect(isSignificantChange(state({ air: 7 }), state({ air: 6 }))).toBe(true);
@@ -65,7 +65,7 @@ describe("isSignificantChange: the body", () => {
   });
 
   it("is false while those simply continue", () => {
-    expect(isSignificantChange(state({ lastHurt: { msAgo: 100, by: null } }), state({ lastHurt: { msAgo: 600, by: null } }))).toBe(false);
+    expect(isSignificantChange(state({ lastHurt: { msAgo: 100, by: null, kind: null, at: { x: 0, y: 63, z: 0 } } }), state({ lastHurt: { msAgo: 600, by: null, kind: null, at: { x: 0, y: 63, z: 0 } } }))).toBe(false);
     expect(isSignificantChange(state({ onFire: true, air: 5 }), state({ onFire: true, air: 4 }))).toBe(false);
   });
 });

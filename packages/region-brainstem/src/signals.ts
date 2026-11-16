@@ -14,5 +14,7 @@ export const AIR_SIGNAL = "air";
 export const PAIN_SIGNAL = "pain";
 /** 1 while the legs are stuck (trying to get free, or just gave up), fading over about 5 seconds. */
 export const STUCK_SIGNAL = "stuck";
+/** 1 just after pulling away from pain, fading to 0 over 30 seconds: the body is more sensitive for a while. */
+export const SORE_SIGNAL = "sore";
 /** How hungry: 0 when full, 1 when starving. */
 export const HUNGER_SIGNAL = "hunger";

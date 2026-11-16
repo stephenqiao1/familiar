@@ -5,7 +5,7 @@ import type { EncodableBot, EncodableEntity, EncodableItem } from "./encodable-b
 import { encodeState } from "./encode-state.js";
 import type { MinecraftStateData } from "./state-data.js";
 
-const NAMES = ["air", "stone", "lava", "fire", "water", "chest", "wheat", "bell"];
+const NAMES = ["air", "stone", "lava", "fire", "water", "chest", "wheat", "bell", "cactus", "sand", "magma_block"];
 const NOT_SOLID = new Set(["air", "lava", "fire", "water", "wheat"]);
 const base = { chest: new Vec3(10, 63, 0), bed: new Vec3(10, 63, 1) };
 
@@ -74,7 +74,7 @@ describe("encodeState", () => {
     });
     const state = encodeState(bot, 7, { base, current: null, deaths: 2 });
 
-    expect(state).toMatchObject({ schemaVersion: 11, tick: 7 });
+    expect(state).toMatchObject({ schemaVersion: 12, tick: 7 });
     expect(state.data).toEqual({
       time: { isNight: false, lightLevel: 15 },
       self: {
@@ -99,6 +99,10 @@ describe("encodeState", () => {
         inWater: false,
         falling: false,
         lastHurt: null,
+        touching: { feet: "air", head: "air", below: "stone", sides: ["air", "air", "air", "air"] },
+        inBlock: false,
+        pushed: null,
+        motion: null,
         locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
       },
       nearby: {
@@ -293,9 +297,11 @@ describe("encodeState", () => {
 
     it("reports who last hurt the bot and how long ago, for a minute", () => {
       const now = Date.now();
-      expect(self(fakeBot(), { lastHurt: { at: now - 500, by: "entity:9" } }).lastHurt).toMatchObject({ by: "entity:9" });
-      expect(self(fakeBot(), { lastHurt: { at: now - 500, by: null } }).lastHurt?.by).toBeNull();
-      expect(self(fakeBot(), { lastHurt: { at: now - 120_000, by: "entity:9" } }).lastHurt).toBeNull();
+      const hurt = (at: number, by: string | null, kind: string | null) => ({ at, by, kind, where: { x: 3, y: 63, z: -2 }, touching: { feet: "air", head: "air", below: "sand", sides: ["cactus", "air", "air", "air"] } });
+      expect(self(fakeBot(), { lastHurt: hurt(now - 500, "entity:9", "mob_attack") }).lastHurt).toMatchObject({ by: "entity:9", kind: "mob_attack" });
+      // No attacker: the game's own name for the damage, and where it happened.
+      expect(self(fakeBot(), { lastHurt: hurt(now - 500, null, "cactus") }).lastHurt).toMatchObject({ by: null, kind: "cactus", at: { x: 3, y: 63, z: -2 } });
+      expect(self(fakeBot(), { lastHurt: hurt(now - 120_000, "entity:9", "mob_attack") }).lastHurt).toBeNull();
     });
 
     it("lists loud events from the last 2 seconds, with their distance", () => {
@@ -307,6 +313,40 @@ describe("encodeState", () => {
       ];
       const data = encodeState(fakeBot(), 0, { base, current: null, deaths: 0, loud }).data as unknown as MinecraftStateData;
       expect(data.nearby.loud).toEqual([{ type: "explosion", dist: 6 }]);
+    });
+
+    it("feels what it is touching: at the feet, at the head, under the feet and on the four sides", () => {
+      const bot = fakeBot({ blocks: { "1,63,0": "cactus", "0,62,0": "sand", "0,64,0": "water" } });
+      expect(self(bot).touching).toEqual({ feet: "air", head: "water", below: "sand", sides: ["cactus", "air", "air", "air"] });
+    });
+
+    it("knows when its head is inside a solid block", () => {
+      expect(self(fakeBot({ blocks: { "0,64,0": "sand" } })).inBlock).toBe(true);
+      expect(self(fakeBot()).inBlock).toBe(false);
+    });
+
+    it("reports a push, with the first danger within 2 blocks that way: a drop, or a block known to hurt", () => {
+      const pit = Object.fromEntries([62, 61, 60, 59].map((y) => [`2,${y},0`, "air"]));
+      const east = { blocks: 0.7, toward: { x: 1, z: 0 } };
+      expect(self(fakeBot({ blocks: pit }), { pushed: east }).pushed).toEqual({ ...east, danger: { what: "drop", blocks: 2 } });
+      expect(self(fakeBot({ blocks: { "1,63,0": "cactus" } }), { pushed: east }).pushed?.danger).toEqual({ what: "cactus", blocks: 1 });
+      expect(self(fakeBot({ blocks: { "1,62,0": "magma_block" } }), { pushed: east }).pushed?.danger).toEqual({ what: "magma_block", blocks: 1 });
+      // Pushed in the open: no danger. Not pushed: nothing.
+      expect(self(fakeBot(), { pushed: east }).pushed).toEqual({ ...east, danger: null });
+      expect(self(fakeBot()).pushed).toBeNull();
+    });
+
+    it("reports which way it is moving, with the danger ahead; a wall ends the look", () => {
+      const north = { x: 0, z: -1 };
+      expect(self(fakeBot({ blocks: { "0,63,-2": "lava" } }), { motion: north }).motion).toEqual({ toward: north, danger: { what: "lava", blocks: 2 } });
+      const walled = { "0,63,-1": "stone", "0,64,-1": "stone", "0,63,-2": "lava" };
+      expect(self(fakeBot({ blocks: walled }), { motion: north }).motion?.danger).toBeNull();
+      expect(self(fakeBot()).motion).toBeNull();
+    });
+
+    it("lists blocks the bot knows hurt within 3 blocks among the hazards", () => {
+      const data = encodeState(fakeBot({ blocks: { "2,63,0": "cactus", "6,63,0": "cactus" } }), 0, { base, current: null, deaths: 0 }).data as unknown as MinecraftStateData;
+      expect(data.nearby.hazards).toEqual([{ id: "pos:2,63,0", type: "cactus", dist: 2 }]);
     });
 
     it("marks a hostile unreachable when a wall is in the way or it is far above or below", () => {

@@ -4,6 +4,8 @@ export * from "./brain/index.js";
 export { createChestMemory, withTrust, type ChestMemory, type ChestRecord, type RememberedLookup } from "./chest-memory.js";
 export { createLocomotion, type Drive, type Locomotion, type LocomotionStatus } from "./locomotion/index.js";
 export { trackBodyEvents, type BodyEvents } from "./body-events.js";
+export { createPain, INCIDENTS_TO_LEARN, type Hurt, type Pain } from "./pain.js";
+export { INNATE_HURTS, setKnownHurts } from "./safety.js";
 export { connect } from "./connect.js";
 export { encodeState, SCHEMA_VERSION } from "./encode/encode-state.js";
 export { DEFAULT_LIMIT } from "./encode/scan-mobs.js";

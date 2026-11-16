@@ -73,6 +73,24 @@ console.log(`CHANGES REPORTED: ${reported.length} runs; ${list(count(kinds, (k) 
 console.log(`NOT AS EXPECTED: ${list(count(surprises, (e) => e.skill))}`);
 console.log(`RAN ALONGSIDE: ${list(count(events.filter((e) => e.alongside && e.type === "started"), (e) => e.skill))}`);
 
+// Protective reflexes: withdrawals carry their report on the skill event; pushes are in each tick's state.
+type Withdrew = { skill: string; type: string; reason?: string; changes: { cause: string; hurtAt: string; hurtToStartMs: number; radius: number; learned?: string; to?: string } };
+const withdrawals = events.filter((e) => e.skill === "withdraw" && e.type !== "started" && e.changes?.cause !== undefined) as unknown as Withdrew[];
+const middle = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+console.log(`\nWITHDRAWALS: ${withdrawals.length}; by cause: ${list(count(withdrawals, (w) => w.changes.cause))}; stayed put (nowhere safe): ${withdrawals.filter((w) => w.reason?.startsWith("nowhere safe")).length}`);
+const delays = withdrawals.map((w) => w.changes.hurtToStartMs);
+console.log(`HURT TO WITHDRAWAL STARTING: ${delays.length ? `median ${middle(delays)} ms, slowest ${Math.max(...delays)} ms, over 250 ms: ${delays.filter((d) => d > 250).length} of ${delays.length}` : "none"}`);
+const lessons = ticks.flatMap((t) => (t.skillEvents ?? []).filter((e) => e.skill === "withdraw" && e.changes?.learned).map((e) => `${String(e.changes!.learned)} (${((t.timestamp - ticks[0]!.timestamp) / 1000).toFixed(0)} s in)`));
+console.log(`LEARNED TO HURT: ${lessons.join(", ") || "nothing"}`);
+type Body = { pushed: { danger: unknown } | null; deaths: number };
+const bodyOf = (t: Tick) => (t as Tick & { state?: { data?: { self?: Body } } }).state?.data?.self ?? null;
+const reflexWins = (rule: string) => ticks.filter((t) => t.winner?.region === "reflex" && ((trace(t, "reflex").rules as { rule: string }[] | undefined) ?? []).some((r) => r.rule === rule) && ["steady", "recoil", "dig_out"].includes(t.winner.action.skill ?? "")).length;
+const pushes = ticks.filter((t) => bodyOf(t)?.pushed);
+console.log(`PUSHES: ${pushes.length} ticks pushed (${pushes.filter((t) => bodyOf(t)!.pushed!.danger).length} toward danger); held (hold_ground won): ${reflexWins("hold_ground")}; edge stops (edge_guard won): ${reflexWins("edge_guard")}; about-to-touch stops: ${reflexWins("about_to_touch")}; dug out: ${events.filter((e) => e.skill === "dig_out" && e.type === "done").length}`);
+const died = ticks.filter((t, i) => i > 0 && (bodyOf(t)?.deaths ?? 0) > (bodyOf(ticks[i - 1]!)?.deaths ?? 0));
+const afterWithdrawal = died.filter((d) => ticks.some((t) => d.timestamp - t.timestamp >= 0 && d.timestamp - t.timestamp <= 5000 && (t.skillEvents ?? []).some((e) => e.skill === "withdraw")));
+console.log(`DEATHS WITHIN 5 s OF A WITHDRAWAL: ${afterWithdrawal.length} of ${died.length} deaths; sore signal max ${Math.max(0, ...ticks.map((t) => t.signals.sore?.value ?? 0)).toFixed(2)}`);
+
 // Locomotion: every journey's report rides on its skill event; the pattern and gait are in each tick's state.
 type Journey = { skill: string; type: string; reason?: string; changes: { distance: number; seconds: number; patternSwitches: number; recoveries: number; recovered?: string; late: boolean } };
 const journeys = events.filter((e) => typeof e.changes?.distance === "number" && e.changes.patternSwitches !== undefined) as unknown as Journey[];

@@ -1,5 +1,6 @@
 import type { ReflexRule } from "@familiar/region-reflex";
 import type { MinecraftStateData } from "../encode/state-data.js";
+import { DEFAULT_REFLEXES, protectiveReflexes, type ReflexSettings } from "./protective-reflexes.js";
 import { DANGER_DISTANCE, minecraftDataOf } from "./read-state.js";
 
 // The player's wired-in reactions, in two classes.
@@ -98,8 +99,17 @@ export const eatWhenStarving = rule("eat_when_starving", "soft", ({ self }) =>
   self.food > STARVING_FOOD || self.foodItems === 0 ? null : { action: { skill: "eat" }, urgency: 0.9, reason: `food ${self.food}/20` },
 );
 
-/** Every player reflex, checked every tick. */
-export const playerReflexes: ReflexRule[] = [inLavaOrFire, drowning, lastStand, threatContact, threatApproaching, eatWhenStarving];
+/**
+ * Every reflex for a bot with these settings, checked every tick: the hard ones (the three that
+ * were always there, then withdrawal, buried and about-to-touch), then the soft ones.
+ */
+export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES): ReflexRule[] {
+  const protective = protectiveReflexes(settings);
+  return [inLavaOrFire, drowning, lastStand, ...protective.hard, threatContact, threatApproaching, ...protective.soft, eatWhenStarving];
+}
+
+/** Every player reflex with the default settings. */
+export const playerReflexes: ReflexRule[] = createPlayerReflexes();
 
 /** The soft reflexes that defend the bot (a death while one was overruled is logged). */
 export const DEFENCE_REFLEXES = [threatApproaching.name, threatContact.name];

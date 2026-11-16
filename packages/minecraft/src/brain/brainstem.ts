@@ -13,7 +13,7 @@ const MAX = { health: 20, air: 20, food: 20 };
 /** A loud event this close startles. */
 const LOUD_WITHIN = 16;
 /** The skills a soft reflex may propose, and which way each takes the bot. */
-const LEANINGS: Record<string, Leaning> = { flee: "away", attack: "toward", eat: null };
+const LEANINGS: Record<string, Leaning> = { flee: "away", attack: "toward", eat: null, steady: null };
 const IDLE = "idle";
 
 /** Which way a reflex's skill takes the bot: fleeing is away from the threat, attacking is toward it. */
@@ -108,7 +108,7 @@ export const REFLEX_NOTE =
   `Life-saving reflexes (${playerReflexes.filter((r) => r.kind === "hard").map((r) => r.name).join(", ")}) cannot be held back.`;
 
 /** What the brainstem region needs from the player (everything but the bot's own settings and alarm). */
-export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, sameTime = false): Pick<
+export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, sameTime = false, sore: () => number = () => 0): Pick<
   BrainstemOptions,
   "startle" | "novel" | "mayOrient" | "thingsOf" | "responseProblem" | "acceptsTarget" | "holdable" | "asleep" | "drowsy" | "body" | "skills" | "orientUrgency" | "looksAlongside"
 > {
@@ -136,7 +136,7 @@ export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, sameTime = 
     drowsy,
     body(state) {
       const self = minecraftDataOf(state)?.self;
-      return self ? { health: self.health / MAX.health, air: 1 - self.air / MAX.air, hunger: 1 - self.food / MAX.food, stuck: self.locomotion.stuck } : null;
+      return self ? { health: self.health / MAX.health, air: 1 - self.air / MAX.air, hunger: 1 - self.food / MAX.food, stuck: self.locomotion.stuck, sore: sore() } : null;
     },
     skills: { brace: "brace", lookAt: "look_at" },
     orientUrgency: LOOK_URGENCY,

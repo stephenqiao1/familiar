@@ -273,6 +273,7 @@ export function createLocomotion(bot: Bot, options: LocomotionOptions = {}): Loc
         recoveries: run?.recoveries.length ?? 0,
       };
     },
+    avoid: (spot) => spots.mark(spot, Date.now()),
     setHeadOverride(override) {
       head = override;
     },

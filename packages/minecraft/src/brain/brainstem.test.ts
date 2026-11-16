@@ -19,14 +19,14 @@ describe("player startle detectors", () => {
   });
 
   it("hurt unseen: hit by something while no threat was in view", () => {
-    const hit = { self: { lastHurt: { msAgo: 10, by: "entity:9" } } };
+    const hit = { self: { lastHurt: { msAgo: 10, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } };
     expect(hurtUnseen.check(moment({}, hit))).toEqual({ source: null });
     expect(hurtUnseen.check(moment({}, { ...hit, nearby: { mobs: [zombie(20, 9)] } }))).toEqual({ source: { id: "entity:9", kind: "zombie" } });
     // A threat was already in view: being hit is no surprise.
     expect(hurtUnseen.check(moment({ nearby: { mobs: [zombie(4)] } }, { ...hit, nearby: { mobs: [zombie(4)] } }))).toBeNull();
     // A fall, fire or hunger has no attacker, and an old hurt is not a new one.
-    expect(hurtUnseen.check(moment({}, { self: { lastHurt: { msAgo: 10, by: null } } }))).toBeNull();
-    expect(hurtUnseen.check(moment({ self: { lastHurt: { msAgo: 100, by: "entity:9" } } }, { self: { lastHurt: { msAgo: 600, by: "entity:9" } } }))).toBeNull();
+    expect(hurtUnseen.check(moment({}, { self: { lastHurt: { msAgo: 10, by: null, kind: null, at: { x: 0, y: 63, z: 0 } } } }))).toBeNull();
+    expect(hurtUnseen.check(moment({ self: { lastHurt: { msAgo: 100, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } }, { self: { lastHurt: { msAgo: 600, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } }))).toBeNull();
   });
 
   it("loud nearby: an explosion or thunder within 16 blocks", () => {
@@ -42,7 +42,7 @@ describe("somethingNew (orienting)", () => {
     expect(somethingNew(data({}), data({ nearby: { players: [{ id: "entity:4", type: "player", dist: 9 }] } }))).toEqual({ id: "entity:4", kind: "player" });
     expect(somethingNew(data({ nearby: { mobs: [zombie(12)] } }), data({ nearby: { mobs: [zombie(11)] } }))).toBeNull();
     expect(somethingNew(data({}), data({ nearby: { mobs: [{ ...zombie(5), hostile: false, type: "cow" }] } }))).toBeNull();
-    const hurtBy = data({ self: { lastHurt: { msAgo: 5, by: "entity:2" } }, nearby: { mobs: [zombie(12), zombie(14, 2)] } });
+    const hurtBy = data({ self: { lastHurt: { msAgo: 5, by: "entity:2", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } }, nearby: { mobs: [zombie(12), zombie(14, 2)] } });
     expect(somethingNew(data({ nearby: { mobs: [zombie(12), zombie(14, 2)] } }), hurtBy)).toEqual({ id: "entity:2", kind: "zombie" });
   });
 });
@@ -72,7 +72,7 @@ describe("playerBrainstem", () => {
   });
 
   it("reads the body: health, breath and hunger as 0 to 1", () => {
-    expect(settings.body(fakeState({ self: { health: 10, air: 5, food: 15 } }))).toEqual({ health: 0.5, air: 0.75, hunger: 0.25, stuck: false });
+    expect(settings.body(fakeState({ self: { health: 10, air: 5, food: 15 } }))).toEqual({ health: 0.5, air: 0.75, hunger: 0.25, stuck: false, sore: 0 });
     expect(settings.body({ schemaVersion: 0, tick: 0, timestamp: 0, data: {} })).toBeNull();
   });
 
@@ -90,7 +90,7 @@ describe("playerBrainstem", () => {
 
   it("knows which way each reflex skill leans, and what a goal may hold back", () => {
     expect([leaningOf("flee"), leaningOf("attack"), leaningOf("eat")]).toEqual(["away", "toward", null]);
-    expect(HOLDABLE).toEqual(["threat_contact", "threat_approaching", "eat_when_starving", "flee", "attack", "eat"]);
+    expect(HOLDABLE).toEqual(["threat_contact", "threat_approaching", "hold_ground", "edge_guard", "eat_when_starving", "flee", "attack", "eat", "steady"]);
     expect(REFLEX_NOTE).toContain("in_lava_or_fire, drowning, last_stand");
   });
 

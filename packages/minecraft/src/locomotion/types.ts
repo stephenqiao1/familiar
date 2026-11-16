@@ -78,6 +78,8 @@ export interface Locomotion {
   /** Faster, slower, more or less careful. Takes effect at once, also mid-journey. */
   setDrive(drive: Partial<Drive>): void;
   status(): LocomotionStatus;
+  /** Keeps routes away from a spot for 5 minutes (somewhere that hurt). */
+  avoid(spot: { x: number; y: number; z: number }): void;
   /** Lets something else (a held look) take the head during a plain walk; null gives it back. */
   setHeadOverride(override: HeadOverride | null): void;
 }

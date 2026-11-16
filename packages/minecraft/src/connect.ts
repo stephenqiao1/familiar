@@ -1,5 +1,6 @@
 import mineflayer, { type Bot } from "mineflayer";
 import { pathfinder } from "mineflayer-pathfinder";
+import { rememberDamageTypes } from "./body-events.js";
 
 export interface ConnectOptions {
   host: string;
@@ -13,6 +14,7 @@ export function connect({ host, port, username }: ConnectOptions): Promise<Bot> 
   // Errors are reported through the rejection below (and by the app after spawn), not printed by mineflayer.
   const bot = mineflayer.createBot({ host, port, username, hideErrors: true });
   bot.loadPlugin(pathfinder);
+  rememberDamageTypes(bot);
 
   return new Promise((resolve, reject) => {
     const fail = (message: string) => {

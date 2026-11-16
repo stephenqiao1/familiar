@@ -2,12 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FOCUS, DEFAULT_NORADRENALINE, DEFAULT_PATIENCE, DEFAULT_PERSONALITY } from "@familiar/neuromodulators";
-import { DEFAULT_LOCOMOTION } from "@familiar/minecraft";
+import { DEFAULT_LOCOMOTION, DEFAULT_REFLEXES } from "@familiar/minecraft";
 import { DEFAULT_BRAINSTEM } from "@familiar/region-brainstem";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, memory: DEFAULT_MEMORY };
 
 let dir: string;
 let file: string;
@@ -63,6 +63,14 @@ describe("loadBotConfig", () => {
     await expect(loadBotConfig("Scout", file)).rejects.toThrow(/must map bot names/);
     await writeFile(file, "{oops");
     await expect(loadBotConfig("Scout", file)).rejects.toThrow();
+  });
+
+  it("reads the reflexes block: what the bot is born knowing, and which reflexes are on", async () => {
+    await writeFile(file, JSON.stringify({ Naive: { reflexes: { innateHurts: ["lava", "fire"], edgeGuard: 0.5 } }, Half: { reflexes: { painWithdrawal: 0.5 } }, List: { reflexes: { innateHurts: "lava" } } }));
+    expect((await loadBotConfig("Naive", file)).reflexes).toEqual({ ...DEFAULT_REFLEXES, innateHurts: ["lava", "fire"], edgeGuard: 0.5 });
+    // A hard reflex is on or off: nothing in between.
+    await expect(loadBotConfig("Half", file)).rejects.toThrow(/reflexes.painWithdrawal must be 0 or 1/);
+    await expect(loadBotConfig("List", file)).rejects.toThrow(/reflexes.innateHurts must be a list/);
   });
 
   it("reads locomotion strengths and rejects a bad one", async () => {
