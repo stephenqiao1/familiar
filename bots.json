@@ -70,6 +70,21 @@
       "learnHurts": 1,
       "sensitise": 1
     },
+    "medulla": {
+      "innateBadFoods": [
+        "rotten_flesh",
+        "spider_eye",
+        "poisonous_potato",
+        "pufferfish",
+        "chorus_fruit",
+        "suspicious_stew"
+      ],
+      "needAir": 1,
+      "eatToHeal": 1,
+      "cure": 1,
+      "learnBadFoods": 1,
+      "vitals": 1
+    },
     "memory": {
       "halfLifeDays": 2
     }
@@ -91,6 +106,9 @@
         "fire",
         "soul_fire"
       ]
+    },
+    "medulla": {
+      "innateBadFoods": []
     }
   }
 }

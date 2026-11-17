@@ -18,6 +18,10 @@ import {
   playerMemories,
   playerOutlook,
   createPlayerReflexes,
+  DEFAULT_MEDULLA,
+  medullaUrges,
+  playerVitals,
+  type MedullaSettings,
   type ReflexSettings,
   playerRewards,
   REFLEX_NOTE,
@@ -61,7 +65,7 @@ import {
   type Scorebook,
   type Thing,
 } from "@familiar/neuromodulators";
-import { createBrainstemRegion, createReflexGain, UPPER_PAUSED_SIGNAL, type BrainstemSettings } from "@familiar/region-brainstem";
+import { createBrainstemRegion, createMedullaRegion, createReflexGain, UPPER_PAUSED_SIGNAL, URGE_SIGNAL, type BrainstemSettings } from "@familiar/region-brainstem";
 import { createInstinctRegion } from "@familiar/region-instinct";
 import { createPrefrontalRegion } from "@familiar/region-prefrontal";
 import { createReflexRegion, REFLEX_SIGNAL } from "@familiar/region-reflex";
@@ -70,6 +74,8 @@ import { createReflexRegion, REFLEX_SIGNAL } from "@familiar/region-reflex";
 const LEARNING_WINDOW_MS = 2000;
 /** Alarm below this counts as calm enough to consolidate memories. */
 const CALM_ALARM = 0.2;
+/** The alarm level at which a reflex's gain is exactly 1 (0.6 + 0.8 × 0.5). */
+const NEUTRAL_ALARM = 0.5;
 /** Above this search level, more of the engine's options are offered. */
 const WIDER_OPTIONS_ABOVE = 0.6;
 
@@ -95,6 +101,10 @@ export interface BrainParts<Ctx> {
   brainstem: BrainstemSettings;
   /** This bot's protective reflexes (from bots.json). Default: all on, born knowing the usual five. */
   reflexes?: ReflexSettings;
+  /** This bot's medulla: its upkeep urges and vital signs (from bots.json). Default: all on. */
+  medulla?: MedullaSettings;
+  /** The foods the bot has just learned are bad, for remembering. Default: it learns none. */
+  justLearnedBadFoods?: () => string[];
   /** How sore the bot is right now (1 just after pulling away from pain, fading to 0). Default: never. */
   sore?: () => number;
   /** The block types the bot has just learned hurt, for remembering. Default: it learns none. */
@@ -130,14 +140,20 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   // With the brainstem lesioned (--regions), reflex gains stay at 1 and nothing is ever paused.
   const hasBrainstem = !only || only.includes("brainstem");
   const alarmOf = (ws: Workspace) => ws.signals[ALARM_SIGNAL]?.value ?? 0;
+  const medulla = parts.medulla ?? DEFAULT_MEDULLA;
+  // The brainstem sets how strongly each soft reflex and each upkeep urge fires (alarm, bravery, the goal's hold-backs).
+  // The upkeep urges take a goal's hold-backs, but not alarm or bravery: needing air is no weaker for being calm.
+  const upkeepGain = hasBrainstem && brainstem.holdBack > 0 ? createReflexGain({ settings: brainstem, alarmOf: () => NEUTRAL_ALARM, leaningOf: () => null }) : undefined;
+  const gainOf = hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? createReflexGain({ settings: brainstem, alarmOf, leaningOf }) : undefined;
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
   const all: Region[] = [
     createReflexRegion({
       rules: createPlayerReflexes(parts.reflexes),
-      // The brainstem sets how strongly each soft reflex fires (alarm, bravery, the goal's hold-backs).
-      ...(hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? { gainOf: createReflexGain({ settings: brainstem, alarmOf, leaningOf }) } : {}),
+      ...(gainOf ? { gainOf } : {}),
     }), //                                                                                  layer 0, every tick
+    // The medulla: vital signs, and the graded urges of upkeep. Left out (--regions), the hard reflexes above still fire.
+    createMedullaRegion({ vitals: playerVitals, share: medulla.vitals, urges: medullaUrges(medulla), asleep, ...(upkeepGain ? { gainOf: upkeepGain } : {}) }), // layer 0, every tick
     createBrainstemRegion({
       ...playerBrainstem(skills, ctx, parts.sameTime, parts.sore),
       settings: brainstem,
@@ -164,7 +180,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createNoradrenalineRegion({ triggers: playerAlarms(focus.noisyOrChanged > 0), threatPresent, settings: noradrenaline }), // layer 0, every tick
     createMemoryRegion({
       memory,
-      triggers: playerMemories(parts.justLearnedHurts),
+      triggers: playerMemories(parts.justLearnedHurts, parts.justLearnedBadFoods),
       placeOf,
       factSupport: focus.factSupport,
       ...(noradrenaline.memoryTag > 0 ? { alarmOf: (ws: Workspace) => level(ws, ALARM_SIGNAL) } : {}),
@@ -239,7 +255,8 @@ export function patienceOf(ws: Pick<Workspace, "signals">, patience: PatienceSet
 /**
  * THE ARBITER: picks by urgency, nudged by what dopamine has learned about each skill in the
  * current situation (weighed by the current DA level). Patience adds a bonus for staying with the
- * running skill (smaller when search is high, so switching gets easier) and brakes risky skills.
+ * running skill (smaller when search is high or the body has an urge, so switching gets easier)
+ * and brakes risky skills.
  * A full-urgency reflex always wins.
  */
 export function createArbiter<Ctx>(parts: {
@@ -255,8 +272,12 @@ export function createArbiter<Ctx>(parts: {
   return createValueWeightedArbiter({
     valueOf: (skill, ws) =>
       skillValue(scorebook.get(situationOf(ws.state), skill), ws.signals[DOPAMINE_SIGNAL]?.value ?? personality.restingDA),
+    // A body that is asking for something loosens the hold of whatever is running: the stay bonus
+    // shrinks as the medulla's urge grows, so a pressing need is not outvoted by habit alone.
     bonusOf: (skill, ws) =>
-      (persistence?.stayBonus(skill, Date.now()) ?? 0) * switchMarginFactor(ws.signals[SWITCHING_SIGNAL]?.value ?? NEUTRAL_SEARCH),
+      (persistence?.stayBonus(skill, Date.now()) ?? 0) *
+      switchMarginFactor(ws.signals[SWITCHING_SIGNAL]?.value ?? NEUTRAL_SEARCH) *
+      (1 - (ws.signals[URGE_SIGNAL]?.value ?? 0)),
     scaleOf: (skill, ws) => (risky.has(skill) ? brakeFactor(patienceOf(ws, patience), patience.brake) : 1),
   });
 }

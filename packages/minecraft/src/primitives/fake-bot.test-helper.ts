@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { Bot } from "mineflayer";
 import { Vec3 } from "vec3";
+import { INNATE_BAD_FOODS } from "../foods.js";
+import { createGut } from "../gut.js";
 import { createPain } from "../pain.js";
 import { INNATE_HURTS } from "../safety.js";
 import type { MinecraftCtx } from "../skill-context.js";
@@ -37,7 +39,7 @@ export interface FakeOptions {
 }
 
 const EMPTY = new Set(["air", "cave_air", "water", "lava", "fire", "oak_door"]);
-const TYPES = ["air", "dirt", "stone", "bread", "oak_log", "oak_planks", "stick", "wooden_pickaxe", "stone_sword", "bow", "chest", "crafting_table"];
+const TYPES = ["air", "dirt", "stone", "bread", "oak_log", "oak_planks", "stick", "wooden_pickaxe", "stone_sword", "bow", "chest", "crafting_table", "milk_bucket", "spider_eye", "cooked_beef", "rotten_flesh"];
 export const item = (name: string, count = 1): FakeItem => ({ name, type: TYPES.indexOf(name), count });
 export const entity = (id: number, name: string, x: number, z: number, type = "hostile"): FakeEntity => ({ id, name, type, position: new Vec3(x + 0.5, 63, z + 0.5), height: 1.8, isValid: true });
 
@@ -211,7 +213,7 @@ export function fakeBot(options: FakeOptions = {}) {
     follow: async () => ({ status: "failed", reason: "no fake travel" }),
     awayFrom: async () => ({ status: "failed", reason: "no fake travel" }),
   } as unknown as MinecraftCtx["locomotion"];
-  const ctx: MinecraftCtx = { bot, base: { chest: new Vec3(0, 63, 0), bed: new Vec3(0, 63, 1) }, wants: () => [], locomotion, pain: createPain({ innate: INNATE_HURTS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
+  const ctx: MinecraftCtx = { bot, base: { chest: new Vec3(0, 63, 0), bed: new Vec3(0, 63, 1) }, wants: () => [], locomotion, pain: createPain({ innate: INNATE_HURTS }), gut: createGut({ innate: INNATE_BAD_FOODS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
   return {
     bot,
     ctx,

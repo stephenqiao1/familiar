@@ -3,6 +3,105 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-17: the medulla (body upkeep)
+
+*Found by running the real bot on the test server with `pnpm medulla-check`. The two dive scenes
+run the whole brain with Jev; the rest run without instinct, so only the reflexes and the medulla
+decide.*
+
+| Scene | Result |
+|---|---|
+| Dive, free | The urge to breathe rose from 0.30 (air 12) to 0.90 (air 7) and won only at air 7; see below |
+| Dive, urge held back by the goal | Urge damped to 0.09 to 0.27; the bot stayed down; `drowning` took over at air 6; it lived |
+| Hurt and hungry, safe food | Ate up to food 18 and stopped; health went from 10 to 19 |
+| Starving | `eat_when_starving` fired and it ate |
+| Bad food | Poisoned twice by spider eye, learned it, then ate only the bread |
+| Poisoned, carrying milk | Drank it 1.8 s after the poison began |
+| Hungry while asleep | Woke and ate, but late; see below |
+
+**Found and fixed.**
+
+- **The urges lost to instinct whenever the bot was calm.** They first used the brainstem's gain,
+  which is 0.6 with no alarm, so a 0.5 urge fired at 0.3 and never won. Upkeep now takes only a
+  goal's hold-back, not alarm or bravery.
+- **A bad food was never learned.** A spider eye's poison arrives with the last mouthful, before
+  the `eat` skill has noted that the meal ended, so the gut had nothing to blame. The meal is now
+  noted as the bite begins as well.
+- **Effects outlived the body.** Mineflayer keeps a dead bot's status effects, so a respawned bot
+  still read as poisoned. They are cleared on death, as is the freezing meter.
+- **The urge at its strongest still lost to habit.** At air 7 the urge (0.90) faced `idle` at
+  0.78 plus learned value plus the stay bonus for the running skill (+0.13): about 0.96. It won
+  in some runs and not others. The medulla now shares its strongest urge as an `urge` signal, and
+  the arbiter shrinks the stay bonus by it (bonus × (1 − urge)). Three runs in a row then
+  surfaced from the urge. This changes the arbiter slightly for every skill while an urge is
+  firing, including the urge's own skill once it is running.
+- **The body heals at food 18, not 17**, on 1.21.11. `eat_to_heal` eats to 18.
+- **A chest that would not open froze the whole brain for 20 seconds.** In a `neuro-check`
+  drowning run, Jev picked `take_items` just as the bot was moved into the water. The chest never
+  opened, Mineflayer waits 20 seconds for it, and the brain waits for a stopped skill to finish
+  before its next tick. No reflex could act: air went from 20 to 0 and the bot took damage before
+  `drowning` got a turn. Opening a container can now be stopped at once
+  (`packages/minecraft/src/primitives/open.ts`). This was not new with the medulla; the scene just
+  happened to catch it. Other waits on the game inside a skill may hide the same thing (see the
+  limits below).
+
+**Seen, left as it is.**
+
+- **The urge to breathe wins late.** It is 0.90 at air 7, and until then Jev's `idle` (about
+  0.78 plus its learned value) outvotes it. So the bot starts up at air 7, needs a second or two
+  to swim, and `drowning` still fires on the way. The spec's "well before 6" is not met: it
+  surfaces from the soft urge, but one point before the limit. **Fix later:** start the urge
+  higher or earlier (`NEED_AIR` in `medulla.ts`); the 0.3-to-0.9 curve was left as specified.
+- **With a goal that tells Jev to stay still at the bottom, the urge may never win** (Jev's
+  confidence in `idle` goes to 0.98 and stays there), and only `drowning` saves the bot. The
+  free-dive scene uses a goal that does not say that.
+- **A sleeping bot let itself starve until it hurt.** `eat_when_starving` fired at 0.54 (soft,
+  gain 0.6 while calm) and lost to "stay asleep" (0.5 plus learned value plus the stay bonus). It
+  woke only when starvation damage began, 4.5 s after food reached 6. `eat_when_starving` is a
+  reflex, not a medulla urge, so the new `urge` signal does not help it. **Fix later:** give the
+  starving reflex the medulla's gain, or move it into the medulla.
+
+## The medulla: limits of this first version
+
+- **Nothing acts on `cold`, `tired`, `reserve` or `vitals`.** They are shared and logged for a
+  later drives region. `cold` was checked by reading the freezing meter in powder snow, not by a scene.
+- **`tired` counts time since the bot last woke from a bed**, by the world's age. A bot that has
+  never slept counts from when it first joined. Phantoms, the game's own cost of not sleeping,
+  are not modelled.
+- **Blame for a bad meal is by timing alone.** Any harmful effect that starts within 5 seconds of
+  a meal is blamed on the food, unless a hostile is within 8 blocks, in which case the food is
+  never blamed (a witch could hide a truly bad food for a while). A splash potion thrown from
+  further away, or a beacon-like source, would be blamed on lunch. Two occasions are needed, so
+  one coincidence teaches nothing.
+- **Foods whose harm is a chance are learned slowly or never.** Rotten flesh gives hunger 80% of
+  the time, raw chicken 30%: a bot born without them needs two unlucky meals. Chorus fruit and
+  suspicious stew harm in ways that are not status effects (a teleport) or vary by stew, and can
+  only be known from the born-knowing list.
+- **`hunger` (the effect) counts as sickness.** It is how rotten flesh is learned, but it also
+  means a bot under a husk's hunger effect reads as sick, and drinks its milk for it.
+- **One cure, hand-written.** Only `milk_bucket`, and it is drunk for the mildest effect it
+  clears, which also strips any good effects. Honey for poison, and learning cures, are marked
+  `HOOK(learn-cures)`.
+- **`eat_to_heal` does not look for food.** With none in the inventory it stays silent; finding
+  food is left to instinct and the planner. It also keeps quiet with a hostile in contact, so a
+  bot in a long fight does not eat.
+- **`eat` with a level stops at the first bite that reaches it**, so it can overshoot by one food's worth.
+- **Holding back is all or nothing.** A goal that names `need_air` damps it to 0.3 for as long as
+  the goal lasts; the planner cannot say "until air 8".
+- **The pain signal is from health lost**, so absorption hearts hide pain, and a bot at half
+  health reads the same pain from 2 points lost as a full one.
+- **A skill that cannot be stopped stops every reflex.** The brain does not tick again until a
+  stopped skill has ended. Opening a container is fixed; other waits on the game (crafting,
+  moving items in a window, sleeping in a bed) were not audited. **Fix later:** have the loop give
+  a stopped skill a short deadline, then carry on without it.
+- **`neuro-check drowning` now accepts either the urge or the hard reflex** as what starts
+  `surface`, since which one wins depends on what Jev proposes. In about one run in three Jev
+  picks `return_to_base` and swims the bot up before breath is short; the scene then passes and
+  says "NOT TESTED this run". `pnpm medulla-check dive` is the dependable test.
+- **The live scenes other than the dives run without instinct**, so they show that the urge fires
+  and its skill works, not that it wins against Jev. Only the dives test that, and the free dive
+  passes only with a goal that does not tell Jev to stay put.
+
 ## Live testing, 2026-11-16: the withdrawal and stretch reflexes
 
 *Found by running the real bot, with only its reflexes deciding, on the test server with

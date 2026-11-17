@@ -1,7 +1,7 @@
 import type { Vec3 } from "vec3";
-import { airOf, isBurning } from "../body.js";
+import { airOf, effectsOf, freezingOf, isBurning } from "../body.js";
 import type { Hurt } from "../pain.js";
-import { foodValue } from "../foods.js";
+import { foodValue, isBadFood, isFood } from "../foods.js";
 import { bestWeaponOf } from "../weapons.js";
 import type { EncodableBot, EncodableItem } from "./encodable-bot.js";
 import { isEnclosed } from "./scan-enclosure.js";
@@ -13,7 +13,7 @@ const INVENTORY_SLOTS = 36;
 const HURT_MEMORY_MS = 60_000;
 const BURNING = new Set(["fire", "soul_fire"]);
 
-export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHurt: Hurt | null = null, now = Date.now()): Omit<MinecraftStateData["self"], "locomotion" | "touching" | "inBlock" | "pushed" | "motion"> {
+export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHurt: Hurt | null = null, now = Date.now()): Omit<MinecraftStateData["self"], "locomotion" | "touching" | "inBlock" | "pushed" | "motion" | "sinceSleepMinutes" | "healing"> {
   const items = bot.inventory.items();
   const here = bot.blockAt(bot.entity.position.floored());
   const feet = bot.entity.position.floored();
@@ -29,6 +29,10 @@ export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHu
     bestWeapon: bestWeaponOf(items)?.name ?? null,
     inventoryFullPct: Math.round((items.length / INVENTORY_SLOTS) * 100),
     foodItems: count(items, (name) => foodValue(bot, name) !== null),
+    badFoodItems: count(items, (name) => isFood(bot, name) && isBadFood(bot, name)),
+    saturation: Math.round((bot.foodSaturation ?? 0) * 10) / 10,
+    effects: effectsOf(bot.entity, (id) => bot.registry.effects?.[id]?.name).sort(),
+    freezing: Math.round(freezingOf(bot.entity) * 100) / 100,
     inventory: countByName(items),
     distanceToBase: Math.round(bot.entity.position.distanceTo(base)),
     biome: (here?.biome && (bot.registry.biomes?.[here.biome.id]?.name || here.biome.name)) || null,

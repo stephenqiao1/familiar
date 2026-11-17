@@ -2,7 +2,7 @@
 // controller and skill executor.
 import type { SkillEvent } from "@familiar/contracts";
 import { createSkillExecutor } from "@familiar/core";
-import { connect, createLocomotion, createPain, INNATE_HURTS, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
+import { connect, createLocomotion, createGut, createPain, INNATE_BAD_FOODS, INNATE_HURTS, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
 import { rcon, sleep } from "../primitive-check/world.ts";
 
 export async function joinBody(name: string, onNote: (note: string) => void = () => {}) {
@@ -11,7 +11,7 @@ export async function joinBody(name: string, onNote: (note: string) => void = ()
   rcon(`gamemode survival ${name}`);
   await bot.waitForChunksToLoad();
   const locomotion = createLocomotion(bot, { log: onNote });
-  const ctx: MinecraftCtx = { bot, base: { chest: bot.entity.position.clone(), bed: bot.entity.position.clone() }, wants: () => [], locomotion, pain: createPain({ innate: INNATE_HURTS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
+  const ctx: MinecraftCtx = { bot, base: { chest: bot.entity.position.clone(), bed: bot.entity.position.clone() }, wants: () => [], locomotion, pain: createPain({ innate: INNATE_HURTS }), gut: createGut({ innate: INNATE_BAD_FOODS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
   const sideEvents: SkillEvent[] = [];
   const events: SkillEvent[] = [];
   const executor = createSkillExecutor({ skills: minecraftSkills, ctx, onEvent: (e) => void events.push(e), onSideEvent: (e) => void sideEvents.push(e) });

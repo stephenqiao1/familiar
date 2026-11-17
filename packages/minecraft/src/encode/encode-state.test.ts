@@ -74,7 +74,7 @@ describe("encodeState", () => {
     });
     const state = encodeState(bot, 7, { base, current: null, deaths: 2 });
 
-    expect(state).toMatchObject({ schemaVersion: 12, tick: 7 });
+    expect(state).toMatchObject({ schemaVersion: 13, tick: 7 });
     expect(state.data).toEqual({
       time: { isNight: false, lightLevel: 15 },
       self: {
@@ -86,6 +86,12 @@ describe("encodeState", () => {
         bestWeapon: "stone_sword",
         inventoryFullPct: 11,
         foodItems: 5,
+        badFoodItems: 3,
+        saturation: 0,
+        effects: [],
+        freezing: 0,
+        sinceSleepMinutes: 0,
+        healing: false,
         inventory: { stone_sword: 1, torch: 8, cooked_beef: 5, rotten_flesh: 3 },
         distanceToBase: 10,
         biome: "plains",
@@ -347,6 +353,21 @@ describe("encodeState", () => {
     it("lists blocks the bot knows hurt within 3 blocks among the hazards", () => {
       const data = encodeState(fakeBot({ blocks: { "2,63,0": "cactus", "6,63,0": "cactus" } }), 0, { base, current: null, deaths: 0 }).data as unknown as MinecraftStateData;
       expect(data.nearby.hazards).toEqual([{ id: "pos:2,63,0", type: "cactus", dist: 2 }]);
+    });
+
+    it("reports the food reserve, the status effects, freezing, time since sleep and healing", () => {
+      const ill = fakeBot();
+      ill.foodSaturation = 7.25;
+      ill.entity.effects = { 18: { id: 18 }, 16: { id: 16 } };
+      ill.registry.effects = { 18: { name: "Poison" }, 16: { name: "Hunger" }, 3: { name: "Mining Fatigue" } };
+      ill.entity.metadata = [0, 300, 0, 0, 0, 0, 0, 70];
+      expect(self(ill, { sinceSleepMinutes: 900, healing: true })).toMatchObject({ saturation: 7.3, effects: ["hunger", "poison"], freezing: 0.5, sinceSleepMinutes: 900, healing: true });
+      expect(self(fakeBot())).toMatchObject({ saturation: 0, effects: [], freezing: 0, sinceSleepMinutes: 0, healing: false });
+    });
+
+    it("counts food known to be bad apart from the rest", () => {
+      const bot = fakeBot({ items: [item("cooked_beef", 5, 2), item("rotten_flesh", 3, 3)] });
+      expect(self(bot)).toMatchObject({ foodItems: 5, badFoodItems: 3 });
     });
 
     it("marks a hostile unreachable when a wall is in the way or it is far above or below", () => {

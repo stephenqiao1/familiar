@@ -94,10 +94,15 @@ export const threatContact = rule("threat_contact", "soft", (data) => {
   return { action: { skill: fight ? "attack" : "flee", target: mob.id }, urgency: 0.9, reason: `${mob.type} in contact, ${mob.dist} blocks away, health ${health}${why}` };
 });
 
-/** Very hungry and carrying food: eat. */
-export const eatWhenStarving = rule("eat_when_starving", "soft", ({ self }) =>
-  self.food > STARVING_FOOD || self.foodItems === 0 ? null : { action: { skill: "eat" }, urgency: 0.9, reason: `food ${self.food}/20` },
-);
+/**
+ * Very hungry and carrying food: eat. With nothing else to hand it will eat food it knows to be
+ * bad. It does not stop to eat with a hostile on top of it.
+ */
+export const eatWhenStarving = rule("eat_when_starving", "soft", (data) => {
+  const { self } = data;
+  if (self.food > STARVING_FOOD || (self.foodItems === 0 && self.badFoodItems === 0) || closestIn(data, "contact")) return null;
+  return { action: { skill: "eat" }, urgency: 0.9, reason: `food ${self.food}/20${self.foodItems === 0 ? ", with only bad food to eat" : ""}` };
+});
 
 /**
  * Every reflex for a bot with these settings, checked every tick: the hard ones (the three that

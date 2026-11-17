@@ -10,14 +10,17 @@ Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
 (layer 0, every tick)      Jev, every tick       LLM, every 15 s in the background
  Reflex: hard and soft     │ proposals           │ goals only, never proposals;
    rules                   │                     │ a goal can load responses (ifThen)
- Brainstem: reflex gains,  │                     │ and hold reflexes back (holdBack)
-   startle, orienting,     │                     │
-   loaded responses,       │   ◄── paused while asleep and undisturbed ──►
-   arousal gate, body
+ Medulla: vital signs and  │                     │ and hold reflexes back (holdBack)
+   the urges of upkeep     │                     │
+ Brainstem: reflex gains,  │                     │
+   startle, orienting,     │   ◄── paused while asleep and undisturbed ──►
+   loaded responses,
+   arousal gate
    │ proposals             │
    ▼                       ▼
 Arbiter: urgency + 0.2 × learned value wins (value from the scorebook, weighed by DA),
          plus a stay bonus for the running skill and a brake on risky skills (both from patience);
+         the stay bonus shrinks while the body has an urge (the medulla's `urge` signal);
          a full-urgency proposal (a hard reflex, a startle) always wins; ties go to the faster layer
    ▼
 Skill executor → skills → primitives (every movement) and locomotion (all travel) → Minecraft
@@ -55,7 +58,7 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `core` | The brain loop (runs regions, asks the arbiter, acts, logs), workspace, skill executor. |
 | `arbiter` | The pickers: `value-weighted` (used) and `highest-urgency`. |
 | `region-reflex` | Runs a list of rules, hard and soft, and logs each fired rule's kind, base urgency, gain and final urgency. |
-| `region-brainstem` | Supplies the reflex gains, and a `brainstem` region: startle, orienting, loaded responses, the arousal gate and body signals. |
+| `region-brainstem` | Supplies the reflex gains, a `brainstem` region (startle, orienting, loaded responses, the arousal gate) and a `medulla` region (vital signs and the graded urges of upkeep). |
 | `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
 | `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
 | `neuromodulators` | Chemical dials, each a region that shares signals (see below). |
@@ -81,7 +84,8 @@ life-saving ones cannot be overruled. Each bot's settings are the `brainstem` bl
   - approaching (4 to 8 blocks): `flee`, base urgency 0.7;
   - contact (3 blocks or less): `attack` if armed and health is 10 or more, else `flee`; base 0.9.
     Creepers and ranged mobs are always fled from.
-- Soft: `eat_when_starving`, base 0.9.
+- Soft: `eat_when_starving`, base 0.9 (food 6 or less; not with a hostile in contact; a food
+  known to be bad is eaten only now, and only when there is nothing else).
 
 **Withdrawal and stretch reflexes** (the body's fastest protections; rules in
 `packages/minecraft/src/brain/protective-reflexes.ts`, switched per bot in `bots.json` under `reflexes`):
@@ -145,8 +149,71 @@ blocks known to hurt within 3 blocks.
   asleep and undisturbed it shares `upper_paused`: instinct and the prefrontal cortex make no
   calls. A startle, damage, a hard reflex or alarm ends the pause on the same tick. Reflexes, the
   neuromodulators and memory never pause.
-- **Body signals.** Shares `air` (how short of breath), `pain` (recent damage, fading over about
-  10 seconds) and `hunger`, for a later drives region.
+- It also shares `stuck` and `sore`. The body's vital signs are the medulla's job (below).
+
+## The medulla: body upkeep
+
+The medulla (`medulla` region, `packages/region-brainstem/src/medulla-region.ts`; Minecraft
+settings in `packages/minecraft/src/brain/medulla.ts`; per bot in `bots.json` under `medulla`)
+keeps the body breathing, fed and well without anyone having to think about it, and reports the
+body's condition upward. It runs every tick, never calls a model, and keeps running while the bot
+sleeps. It is listed right after `reflex`, so every later region sees its signals in the same tick.
+
+**Vital signs.** Shared as signals each tick (`medulla.vitals` in `bots.json` turns this off):
+
+| Signal | 0 means | 1 means | Read from |
+|---|---|---|---|
+| `air` | full breath | none left | the air bar |
+| `hunger` | full | starving | the food bar |
+| `reserve` | no reserve | full reserve | saturation (the hidden store that drains before the food bar) |
+| `hurt` | full health | dead | health |
+| `pain` | none | a third of health lost at once | recent damage, fading over about 10 seconds; a new body starts at 0 |
+| `sick` | well | poison or wither | the worst harmful effect (`SICKNESS` table: hunger 0.5, nausea and blindness 0.4, ...) |
+| `cold` | warm | frozen through | the freezing meter (powder snow) |
+| `tired` | just slept | 3 game days awake | time since the bot last woke from a bed (kept across restarts) |
+| `vitals` | (1 is all well) | | one overall number: 1 − (0.8 × the worst sign + 0.2 × their average), over air, hunger, hurt, sick, cold and tired |
+
+A later drives region will read these (`HOOK(drives)` in the region file). Nothing acts on
+`cold`, `tired`, `reserve` or `vitals` yet.
+
+**Upkeep, by urgency.** The hard limit stays a hard reflex in the `reflex` region; before it,
+the medulla's urges are soft and graded, so the layers above can outvote them:
+
+| Need | Soft urge (medulla) | Hard or last-resort reflex |
+|---|---|---|
+| Air | `need_air` → `surface`: under water, from 0.3 at air 12 rising to 0.9 at air 7 | `drowning` at air 6 or less (hard, urgency 1) |
+| Food | `eat_to_heal` → `eat level:18`, base 0.5: hurt, food under 18 (the level at which the body heals itself), safe food to hand, no hostile in contact. It eats only up to 18, then stops. | `eat_when_starving` at food 6 or less (soft, base 0.9) |
+| Sickness | `cure` → `consume item:milk_bucket`, base 0.7: has an effect that a carried cure clears (`CURES` table; `HOOK(learn-cures)`) | none |
+
+- The urges take only one part of the brainstem's gain: a goal's `holdBack`. Naming `need_air`
+  (or `surface`) in a goal damps it to 0.3 of its strength, which is holding the breath on
+  purpose; `drowning` cannot be held back and takes over at 6. Alarm and bravery do not change
+  them: being calm should not make the bot slower to breathe.
+- The strongest urge fired is shared as the `urge` signal. The arbiter shrinks the stay bonus of
+  the running skill by it (bonus × (1 − urge)): a pressing bodily need is not outvoted by habit.
+- An urge that fires while the bot sleeps competes as usual and may wake it (logged as
+  `urgeWhileAsleep`).
+- No urge fires while a protective reflex's skill is running.
+
+**Foods that are bad to eat** (`packages/minecraft/src/gut.ts`). The bot is born knowing only
+what `medulla.innateBadFoods` lists (by default rotten_flesh, spider_eye, poisonous_potato,
+pufferfish, chorus_fruit, suspicious_stew). It learns the rest: when a harmful effect starts
+within 5 seconds of a meal, that food is blamed; blamed on two separate occasions (30 seconds
+apart) it becomes *known bad*, a "danger" memory is recorded, and the list is saved in
+`data/<name>/bad-foods.json`. An effect that starts with a hostile within 8 blocks is blamed on
+the mob, not the meal, and the only food the bot has ever eaten needs three occasions. `eat`
+never picks a known bad food unless the bot is starving with nothing else. The state counts safe
+food as `self.foodItems` and bad food as `self.badFoodItems`.
+
+**What the body feels** (state schema 13, added for the medulla): `self.saturation`,
+`self.effects` (names of its status effects), `self.freezing` (0 to 1), `self.sinceSleepMinutes`,
+`self.healing` (health rose in the last few seconds) and `self.badFoodItems`.
+
+**In the trace** (`medulla`): `vitals` (every sign), `urges` (each fired urge with its base, gain,
+urgency and reason), `urgeWhileAsleep`, `errors`. `pnpm brain-report` has a MEDULLA section:
+lowest air, food and health, time spent hurt but too hungry to heal, each upkeep reflex and how
+often it won, was outvoted or was held back, foods learned as bad, and the vital signs in the 10
+seconds before each death.
 
 ## The spinal motor layer: primitives
 
@@ -319,6 +386,11 @@ in `data/<name>/`.
 | Add a withdrawal (a protective reflex) | `packages/minecraft/src/brain/protective-reflexes.ts` (write the rule, add it to `protectiveReflexes`, give it a strength in `ReflexSettings`); its skill, if new, goes in `packages/minecraft/src/skills/` as `reflexOnly` and into `REFLEX_SKILLS` |
 | Change how many incidents it takes to learn that something hurts | `INCIDENTS_TO_LEARN` in `packages/minecraft/src/pain.ts` |
 | Change which kinds of damage call for pulling away | `NOT_A_PLACE` in `protective-reflexes.ts` |
+| Change what the bot is born knowing is bad to eat | `bots.json`: `medulla.innateBadFoods` (an empty list makes it learn every one by falling ill) |
+| Add an upkeep urge | `packages/minecraft/src/brain/medulla.ts` (write the rule with `urge(...)`, add it to `medullaUrges` and `MEDULLA_URGES`, give it a strength in `MedullaSettings`) |
+| Add a vital sign | `Vitals` and a signal name in `packages/region-brainstem/src/` (`medulla-region.ts`, `signals.ts`), and its reading in `playerVitals` in `packages/minecraft/src/brain/medulla.ts` |
+| Add a cure, or change how sick an effect makes the bot | `CURES` and `SICKNESS` in `packages/minecraft/src/brain/medulla.ts` |
+| Change how many meals it takes to learn a food is bad | `MEALS_TO_LEARN` in `packages/minecraft/src/gut.ts` |
 | Add a hard reflex | `packages/minecraft/src/brain/reflexes.ts` (write a rule with `"hard"`, add it to `playerReflexes`). Keep these to what saves the bot's life: nothing can overrule them. |
 | Add a soft reflex | Same file, with `"soft"` and a base urgency. If it defends the bot, add its name to `DEFENCE_REFLEXES`; if its skill moves toward or away from a threat, add the skill to `LEANINGS` in `brainstem.ts`. |
 | Add a startle detector | `packages/minecraft/src/brain/brainstem.ts` (write a detector, add it to `playerStartles`) |

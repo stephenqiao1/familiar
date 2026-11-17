@@ -12,11 +12,28 @@ export function isOpenable(name: string): boolean {
   return OPENABLE.has(name) || name.endsWith("shulker_box");
 }
 
-/** Opens a container block and returns it, left open. Close it with `doClose`. */
-export async function doOpen(bot: Bot, block: Block): Promise<OpenContainer> {
-  const container = await bot.openContainer(block);
-  rememberOpen(bot, container);
-  return container;
+/**
+ * Opens a container block and returns it, left open. Close it with `doClose`.
+ * Returns null if stopped first: a container that never opens (too far, blocked) would otherwise
+ * hold the caller for Mineflayer's 20 seconds, and nothing else, not even a reflex, could act.
+ */
+export async function doOpen(bot: Bot, block: Block, signal?: AbortSignal): Promise<OpenContainer | null> {
+  if (signal?.aborted) return null;
+  const opening = bot.openContainer(block);
+  let stop = () => {};
+  const stopped = new Promise<null>((resolve) => {
+    stop = () => resolve(null);
+    signal?.addEventListener("abort", stop, { once: true });
+  });
+  try {
+    const container = await Promise.race([opening, stopped]);
+    if (container) rememberOpen(bot, container);
+    // Stopped: if it opens late after all, shut it again; if it never does, that is not an error.
+    else opening.then((late) => bot.closeWindow(late), () => {});
+    return container;
+  } finally {
+    signal?.removeEventListener("abort", stop);
+  }
 }
 
 /**
@@ -35,11 +52,10 @@ export const open = primitive({
     return container(ctx.bot, target) !== null && ctx.bot.currentWindow === null;
   },
 
-  async run(ctx, target) {
+  async run(ctx, target, signal) {
     const block = container(ctx.bot, target);
     if (!block) return { status: "failed", reason: "no container within reach there" };
-    await doOpen(ctx.bot, block);
-    return { status: "done" };
+    return (await doOpen(ctx.bot, block, signal)) ? { status: "done" } : { status: "interrupted" };
   },
 });
 

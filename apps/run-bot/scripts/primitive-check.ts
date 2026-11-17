@@ -4,7 +4,7 @@
 //   pnpm skill-check [primitive ...]
 import type { Changes, SkillEvent } from "@familiar/contracts";
 import { createSkillExecutor } from "@familiar/core";
-import { connect, createLocomotion, createPain, INNATE_HURTS, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
+import { connect, createLocomotion, createGut, createPain, INNATE_BAD_FOODS, INNATE_HURTS, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
 import { doorwayViolations, moduleRuleViolations, travelViolations } from "./skill-check/module-rule.ts";
 import { scenes, type Scene } from "./primitive-check/scenes.ts";
 import { walkAndLook } from "./primitive-check/walk-and-look.ts";
@@ -21,7 +21,7 @@ await reset();
 const observer = await startObserver();
 
 let ended: (event: SkillEvent) => void = () => {};
-const ctx: MinecraftCtx = { bot, base: { chest: bot.entity.position.clone(), bed: bot.entity.position.clone() }, wants: () => [], locomotion: createLocomotion(bot), pain: createPain({ innate: INNATE_HURTS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
+const ctx: MinecraftCtx = { bot, base: { chest: bot.entity.position.clone(), bed: bot.entity.position.clone() }, wants: () => [], locomotion: createLocomotion(bot), pain: createPain({ innate: INNATE_HURTS }), gut: createGut({ innate: INNATE_BAD_FOODS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
 const sideEvents: SkillEvent[] = [];
 const executor = createSkillExecutor({ skills: minecraftSkills, ctx, onEvent: (event) => void (event.type !== "started" && ended(event)), onSideEvent: (event) => void sideEvents.push(event) });
 

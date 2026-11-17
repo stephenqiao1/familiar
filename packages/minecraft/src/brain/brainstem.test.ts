@@ -71,8 +71,8 @@ describe("playerBrainstem", () => {
     expect(settings.responseProblem("fly")).toBe("unknown skill");
   });
 
-  it("reads the body: health, breath and hunger as 0 to 1", () => {
-    expect(settings.body(fakeState({ self: { health: 10, air: 5, food: 15 } }))).toEqual({ health: 0.5, air: 0.75, hunger: 0.25, stuck: false, sore: 0 });
+  it("reads what the brainstem needs of the body: health, and whether it is stuck or sore", () => {
+    expect(settings.body(fakeState({ self: { health: 10, air: 5, food: 15 } }))).toEqual({ health: 0.5, stuck: false, sore: 0 });
     expect(settings.body({ schemaVersion: 0, tick: 0, timestamp: 0, data: {} })).toBeNull();
   });
 
@@ -90,7 +90,7 @@ describe("playerBrainstem", () => {
 
   it("knows which way each reflex skill leans, and what a goal may hold back", () => {
     expect([leaningOf("flee"), leaningOf("attack"), leaningOf("eat")]).toEqual(["away", "toward", null]);
-    expect(HOLDABLE).toEqual(["threat_contact", "threat_approaching", "hold_ground", "edge_guard", "eat_when_starving", "flee", "attack", "eat", "steady"]);
+    expect(HOLDABLE).toEqual(["threat_contact", "threat_approaching", "hold_ground", "edge_guard", "eat_when_starving", "need_air", "eat_to_heal", "cure", "flee", "attack", "eat", "steady"]);
     expect(REFLEX_NOTE).toContain("in_lava_or_fire, drowning, last_stand");
   });
 

@@ -322,6 +322,9 @@ importers:
       '@familiar/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@familiar/region-reflex':
+        specifier: workspace:*
+        version: link:../region-reflex
     devDependencies:
       '@familiar/core':
         specifier: workspace:*

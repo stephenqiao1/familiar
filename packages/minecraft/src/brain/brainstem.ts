@@ -3,13 +3,14 @@ import type { BrainstemOptions, Leaning, StartleDetector, Thing } from "@familia
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { thingsInView } from "./cues.js";
 import { asleep } from "./focus.js";
+import { MEDULLA_URGES } from "./medulla.js";
 import { minecraftDataOf } from "./read-state.js";
 import { CONTACT_DISTANCE, FAR_DISTANCE, playerReflexes } from "./reflexes.js";
 
 // The player's brainstem settings: what startles it, what draws its eye, how its body feels.
 // Add a startle detector: write one here and add it to playerStartles.
 
-const MAX = { health: 20, air: 20, food: 20 };
+const MAX = { health: 20 };
 /** A loud event this close startles. */
 const LOUD_WITHIN = 16;
 /** The skills a soft reflex may propose, and which way each takes the bot. */
@@ -95,7 +96,7 @@ export function drowsy(ws: Workspace): boolean {
 }
 
 /** The names a goal may hold back: every soft reflex, and the skills they propose. */
-export const HOLDABLE = [...playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name), ...Object.keys(LEANINGS)];
+export const HOLDABLE = [...playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name), ...MEDULLA_URGES, ...Object.keys(LEANINGS)];
 
 /** Whether a skill leaves the head free (a skill that declares no parts uses the whole body). */
 export function headFree(skill: { parts?: string[] } | undefined): boolean {
@@ -136,7 +137,7 @@ export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, sameTime = 
     drowsy,
     body(state) {
       const self = minecraftDataOf(state)?.self;
-      return self ? { health: self.health / MAX.health, air: 1 - self.air / MAX.air, hunger: 1 - self.food / MAX.food, stuck: self.locomotion.stuck, sore: sore() } : null;
+      return self ? { health: self.health / MAX.health, stuck: self.locomotion.stuck, sore: sore() } : null;
     },
     skills: { brace: "brace", lookAt: "look_at" },
     orientUrgency: LOOK_URGENCY,

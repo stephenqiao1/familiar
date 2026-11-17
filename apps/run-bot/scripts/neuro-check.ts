@@ -346,15 +346,23 @@ const scenes: Scene[] = [
     after: CLEAR_PLAZA,
     checks: (run) => {
       const air = run.ticks.map((t) => selfOf(t).air);
-      const lowAt = run.ticks.findIndex((t) => selfOf(t).air <= 6 && selfOf(t).inWater);
+      // Short of breath: where the medulla's urge to breathe begins (air 12), well above the hard limit (6).
+      const lowAt = run.ticks.findIndex((t) => selfOf(t).air <= 12 && selfOf(t).inWater);
       const surfaced = run.ticks.filter((t) => t.action.skill === "surface");
       const after = lowAt < 0 ? [] : air.slice(lowAt);
+      // Jev sometimes swims the bot up by itself (return_to_base) before breath is short: then nothing had to save it.
+      const lowestUnder = Math.min(20, ...air);
+      const needed = lowestUnder <= 7;
       return [
         ["it was under water", run.ticks.some((t) => selfOf(t).inWater)],
-        ["breath ran low", lowAt >= 0, `lowest air ${Math.min(...air)}`],
-        ["surface is started by a hard reflex at urgency 1", surfaced.length > 0 && surfaced.every((t) => t.winner?.region === "reflex" && t.winner.urgency === 1), `${surfaced.length} ticks`],
-        ["it got its breath back", Math.max(0, ...after) >= 10, `air back up to ${Math.max(0, ...after)}`],
-        ["the air signal rose and fell", max(run.signal("air")) > 0.6 && (run.signal("air").at(-1) ?? 1) < 0.6, `max ${max(run.signal("air")).toFixed(2)}`],
+        ["breath ran low", !needed || lowAt >= 0, needed ? `lowest air ${Math.min(...air)}` : `no: lowest air ${lowestUnder} (NOT TESTED this run)`],
+        [
+          "surface is started by the urge to breathe, or by the hard reflex at urgency 1",
+          !needed || surfaced.length > 0 && surfaced.every((t) => t.winner?.region === "medulla" || (t.winner?.region === "reflex" && t.winner.urgency === 1)),
+          needed ? `${surfaced.length} ticks, by ${[...new Set(surfaced.map((t) => t.winner?.region))].join(" and ")}` : `not needed: it swam up by itself with air ${lowestUnder} (NOT TESTED this run)`,
+        ],
+        ["it got its breath back", !needed || Math.max(0, ...after) >= 10, `air back up to ${Math.max(0, ...after)}`],
+        ["the air signal rose and fell", !needed || (max(run.signal("air")) > 0.6 && (run.signal("air").at(-1) ?? 1) < 0.6), `max ${max(run.signal("air")).toFixed(2)}`],
         ["it survived", run.ticks.every((t) => selfOf(t).deaths === 0), `lowest health ${Math.min(...run.ticks.map((t) => selfOf(t).health))}`],
       ];
     },

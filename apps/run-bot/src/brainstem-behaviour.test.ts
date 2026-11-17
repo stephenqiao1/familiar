@@ -40,6 +40,12 @@ function state(p: Patch, ms: number): State {
       bestWeapon: null,
       inventoryFullPct: 0,
       foodItems: 0,
+      badFoodItems: 0,
+      saturation: 5,
+      effects: [],
+      freezing: 0,
+      sinceSleepMinutes: 0,
+      healing: false,
       inventory: {},
       distanceToBase: 0,
       biome: "plains",
@@ -69,7 +75,7 @@ function state(p: Patch, ms: number): State {
 
 const skill = (name: string, flags: Partial<Skill<null>> = {}): Skill<null> => ({ name, description: name, canRun: () => true, run: async () => ({ status: "done" }), ...flags });
 const skills = [
-  ...["go_to", "idle", "flee", "sleep"].map((name) => skill(name)),
+  ...["go_to", "idle", "flee", "sleep", "consume"].map((name) => skill(name)),
   skill("eat", { parts: ["hands"] }),
   skill("attack", { risky: true }),
   skill("escape_hazard", { reflexOnly: true }),
@@ -408,7 +414,7 @@ describe("the decision menu", () => {
   it("never offers reflex-only skills, and primitives only when asked", async () => {
     const { tick, calls } = bot();
     await tick();
-    expect(calls.menus.at(-1)).toEqual(["go_to", "idle", "flee", "sleep", "eat", "attack"]);
+    expect(calls.menus.at(-1)).toEqual(["go_to", "idle", "flee", "sleep", "consume", "eat", "attack"]);
   });
 });
 
@@ -451,5 +457,96 @@ describe("looking while walking (the same-time flag)", () => {
     } finally {
       skills.pop();
     }
+  });
+});
+
+describe("the medulla through the real brain", () => {
+  const VITAL_SIGNS = ["air", "hunger", "pain", "hurt", "sick", "cold", "tired", "reserve", "vitals"];
+  const WITHOUT_MEDULLA = ["reflex", "brainstem", "acetylcholine", "dopamine", "noradrenaline", "hippocampus", "instinct", "serotonin", "prefrontal"];
+  const diving = (air: number) => ({ self: { inWater: true, air } });
+
+  it("shares the vital signs every tick", async () => {
+    const { tick, value } = bot();
+    await tick({ self: { health: 10, food: 5, air: 14, effects: ["poison"], sinceSleepMinutes: 2160, saturation: 0 } });
+    expect([value("hurt"), value("hunger"), value("air"), value("sick"), value("tired"), value("reserve")]).toEqual([0.5, 0.75, expect.closeTo(0.3), 1, 0.5, 0]);
+    expect(value("vitals")).toBeLessThan(0.15); // poisoned: the worst reading decides it
+  });
+
+  it("the urge to breathe grows with the need, and surfaces the bot before the hard limit", async () => {
+    const { tick } = bot();
+    await tick(diving(20));
+    expect((await tick(diving(13))).candidates.some((c) => c.region === "medulla")).toBe(false);
+    // The engine here is very sure of itself (0.72), so the urge has to grow before it wins: it is soft.
+    const early = await tick(diving(11));
+    expect(early.candidates).toContainEqual(expect.objectContaining({ region: "medulla", action: { skill: "surface" }, urgency: expect.closeTo(0.42) }));
+    expect(early.won).toBe("idle");
+    const out = await tick(diving(8));
+    expect(out.winner).toMatchObject({ region: "medulla", action: { skill: "surface" } });
+    expect(out.winner!.urgency).toBeLessThan(1);
+  });
+
+  it("an upkeep urge is no weaker for being calm: alarm does not scale it", async () => {
+    const { tick, value } = bot();
+    await tick(diving(20));
+    const out = await tick(diving(10));
+    expect(value("alarm")).toBe(0);
+    expect(out.traces.medulla?.urges).toMatchObject([{ rule: "need_air", base: expect.closeTo(0.54), gain: 1 }]);
+  });
+
+  it("you can hold your breath, but not forever: a goal holds the urge back, then drowning takes over at 6", async () => {
+    // The planner's goal holds the urge back (and asks for the hard reflex too, which is ignored).
+    const { tick } = bot({ plan: { goal: "Dive to the bottom and stay there", steps: [], reason: "", holdBack: ["need_air", "drowning"] } });
+    await tick(diving(20), "go_to");
+    for (const air of [12, 10, 8, 7]) {
+      const out = await tick(diving(air), "go_to");
+      const urge = out.candidates.find((c) => c.region === "medulla");
+      expect(urge!.urgency, `air ${air}`).toBeLessThan(0.3); // held back to 0.3 of its gain
+      expect(out.won, `air ${air}`).toBe("go_to"); // it stays down
+    }
+    const limit = await tick(diving(6), "go_to");
+    expect(limit.winner).toMatchObject({ region: "reflex", urgency: 1, action: { skill: "surface" } });
+  });
+
+  it("eats to heal: hurt, below healing level, with safe food; and only up to that level", async () => {
+    const { tick } = bot({ engineFails: true });
+    await tick();
+    const out = await tick({ self: { health: 10, food: 14, foodItems: 3 } });
+    expect(out.winner).toMatchObject({ region: "medulla", action: { skill: "eat", target: "level:18" } });
+    expect((await tick({ self: { health: 10, food: 18, foodItems: 3 } })).candidates.some((c) => c.region === "medulla")).toBe(false);
+  });
+
+  it("drinks the cure when poisoned and carrying it", async () => {
+    const { tick } = bot({ engineFails: true });
+    await tick();
+    expect((await tick({ self: { effects: ["poison"], inventory: { milk_bucket: 1 } } })).winner).toMatchObject({ region: "medulla", action: { skill: "consume", target: "item:milk_bucket" } });
+  });
+
+  it("keeps running while the bot sleeps: a need that crosses its threshold competes, and starving wakes it", async () => {
+    const inBed = { night: true, self: { asleep: true } };
+    const { tick, value } = bot();
+    await tick(inBed, "sleep");
+    const calm = await tick(inBed, "sleep");
+    expect(value("upper_paused")).toBe(1);
+    expect(Object.keys(calm.traces)).toContain("medulla");
+    expect(calm.won).toBe("sleep");
+    // Hurt and a little hungry: the urge fires and is noted, but sleep outweighs it.
+    const peckish = await tick({ night: true, self: { asleep: true, health: 19, food: 15, foodItems: 3 } }, "sleep", 60_000);
+    expect(peckish.traces.medulla?.urgeWhileAsleep).toEqual(["eat_to_heal"]);
+    expect(peckish.won).toBe("sleep");
+    // Starving: the reflex outweighs staying asleep.
+    const starving = await tick({ night: true, self: { asleep: true, health: 19, food: 5, foodItems: 3 } }, "sleep", 60_000);
+    expect(starving.won).toBe("eat");
+  });
+
+  it("with the medulla left out, no vital signs are shared and the urges do not fire, but the hard reflexes still do", async () => {
+    const { tick, store } = bot({ only: WITHOUT_MEDULLA });
+    await tick();
+    const short = await tick(diving(9));
+    expect(short.candidates.some((c) => "skill" in c.action && c.action.skill === "surface")).toBe(false);
+    expect((await tick({ self: { health: 10, food: 14, foodItems: 3 } })).candidates.some((c) => "skill" in c.action && c.action.skill === "eat")).toBe(false);
+    expect(Object.keys(store.signals()).filter((name) => VITAL_SIGNS.includes(name))).toEqual([]);
+    // The hard limit is not the medulla's to switch off.
+    expect((await tick(diving(6))).winner).toMatchObject({ region: "reflex", urgency: 1, action: { skill: "surface" } });
+    expect((await tick({ self: { inLava: true } })).winner).toMatchObject({ region: "reflex", action: { skill: "escape_hazard" } });
   });
 });

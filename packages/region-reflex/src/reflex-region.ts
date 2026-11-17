@@ -40,6 +40,30 @@ export interface ReflexOptions {
 }
 
 /**
+ * Checks each rule once and scales what fires: a hard rule to urgency 1, a soft rule to its base
+ * urgency times its gain, capped below 1. A rule that throws is skipped and named in `errors`.
+ * Any region that runs reflex-like rules uses this, so they all behave the same.
+ */
+export function fireRules(rules: readonly ReflexRule[], ws: Workspace, gainOf: NonNullable<ReflexOptions["gainOf"]> = () => 1): { proposals: Proposal[]; fired: FiredReflex[]; errors: Record<string, string> } {
+  const proposals: Proposal[] = [];
+  const fired: FiredReflex[] = [];
+  const errors: Record<string, string> = {};
+  for (const rule of rules) {
+    try {
+      const proposal = rule.check(ws);
+      if (!proposal) continue;
+      const gain = rule.kind === "hard" ? 1 : gainOf(rule, ws, proposal);
+      const urgency = rule.kind === "hard" ? 1 : Math.min(SOFT_CAP, Math.max(0, proposal.urgency * gain));
+      proposals.push({ ...proposal, urgency });
+      fired.push({ rule: rule.name, kind: rule.kind, skill: "skill" in proposal.action ? proposal.action.skill : null, base: proposal.urgency, gain, urgency });
+    } catch (error) {
+      errors[rule.name] = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return { proposals, fired, errors };
+}
+
+/**
  * The fastest region: plain rules checked every tick, no model involved. Each rule that fires
  * adds one proposal. A rule that throws is skipped and named in the trace.
  */
@@ -49,21 +73,7 @@ export function createReflexRegion({ rules, gainOf = () => 1, name = "reflex", l
     layer,
     everyMs: 0,
     run(ws) {
-      const proposals: Proposal[] = [];
-      const fired: FiredReflex[] = [];
-      const errors: Record<string, string> = {};
-      for (const rule of rules) {
-        try {
-          const proposal = rule.check(ws);
-          if (!proposal) continue;
-          const gain = rule.kind === "hard" ? 1 : gainOf(rule, ws, proposal);
-          const urgency = rule.kind === "hard" ? 1 : Math.min(SOFT_CAP, Math.max(0, proposal.urgency * gain));
-          proposals.push({ ...proposal, urgency });
-          fired.push({ rule: rule.name, kind: rule.kind, skill: "skill" in proposal.action ? proposal.action.skill : null, base: proposal.urgency, gain, urgency });
-        } catch (error) {
-          errors[rule.name] = error instanceof Error ? error.message : String(error);
-        }
-      }
+      const { proposals, fired, errors } = fireRules(rules, ws, gainOf);
       ws.setSignal(REFLEX_SIGNAL, Math.max(0, ...fired.map((f) => f.urgency)));
       return { proposals, trace: { fired: fired.map((f) => f.rule), rules: fired, ...(Object.keys(errors).length ? { errors } : {}) } };
     },

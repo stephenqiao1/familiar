@@ -37,6 +37,12 @@ function state(p: Patch, seconds: number): State {
       bestWeapon: null,
       inventoryFullPct: 0,
       foodItems: 8,
+      badFoodItems: 0,
+      saturation: 5,
+      effects: [],
+      freezing: 0,
+      sinceSleepMinutes: 0,
+      healing: false,
       inventory: {},
       distanceToBase: 40,
       biome: "plains",
@@ -167,6 +173,21 @@ describe("search behaviour", () => {
   it("makes switching easier when search is high: the margin is smaller at 0.9 than at 0.1", () => {
     expect(pick(0.1)).toMatchObject({ action: { skill: "go_to" }, reason: expect.stringContaining("bonus +0.18") });
     expect(pick(0.9)?.action).toEqual({ skill: "idle" });
+  });
+
+  it("a bodily urge loosens the hold of the running skill: the bonus shrinks as the urge grows", () => {
+    const withUrge = (urge: number) => {
+      const persistence = createPersistence({ patience: () => 0.5, chanceOf: () => 0.5, strength: DEFAULT_PATIENCE.persistence });
+      persistence.observe({ skill: "go_to", type: "started", timestamp: Date.now() });
+      const arbiter = createArbiter({ scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, persistence, skills });
+      const store = createWorkspace();
+      store.update(state({}, 0), null);
+      store.viewFor("medulla").setSignal("urge", urge);
+      return arbiter.pick([candidate("go_to", 0.5), candidate("idle", 0.6)], store.viewFor("arbiter"));
+    };
+    expect(withUrge(0)?.reason).toContain("bonus +0.15");
+    expect(withUrge(0.2)?.reason).toContain("bonus +0.12");
+    expect(withUrge(0.9)?.action).toEqual({ skill: "idle" });
   });
 
   it("leaves the margin alone at rest, and when the noradrenaline region is off", () => {

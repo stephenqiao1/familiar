@@ -4,17 +4,22 @@ import { createBrainLoop, createChainSkill, createLogger, createSkillExecutor, c
 import { feelingNear, type Place } from "@familiar/memory";
 import {
   createFirstSeenTracker,
+  createGut,
   createLocomotion,
   createPain,
+  createSleepClock,
   DEFENCE_REFLEXES,
   driveFrom,
   encodeState,
   headFree,
+  isHarmful,
   isSignificantChange,
   minecraftSkills,
   primitives,
   REFLEX_SKILLS,
+  setKnownBadFoods,
   setKnownHurts,
+  trackGut,
   tidyBody,
   posId,
   situationOf,
@@ -45,9 +50,12 @@ import { cutShortReason } from "./cut-short.js";
 import { createEngine, createPlanner } from "./create-engine.js";
 import {
   chestsFile,
+  badFoodsFile,
+  bodyFile,
   hurtsFile,
   learnedSkillsFile,
   loadChests,
+  loadBody,
   loadHurts,
   loadLearnedSkills,
   loadMemories,
@@ -56,6 +64,7 @@ import {
   memoriesFile,
   noveltyFile,
   saveChests,
+  saveBody,
   saveHurts,
   saveMemories,
   saveNovelty,
@@ -84,7 +93,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -141,12 +150,19 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     sensitise: reflexes.sensitise,
   });
   setKnownHurts(bot, pain.knows);
+  // What the bot knows about food (born knowing some of it, learning the rest from falling ill),
+  // and how long it has been awake, on the world's own clock.
+  const gut = createGut({ innate: medulla.innateBadFoods, learned: await loadHurts(badFoodsFile(server.name)), learnBadFoods: medulla.learnBadFoods });
+  setKnownBadFoods(bot, gut.knowsBad);
+  trackGut(bot, gut, isHarmful, (msg) => console.log(`    medulla: ${msg}`));
+  const sleepClock = createSleepClock(bot, (await loadBody(bodyFile(server.name))).sleptAtAge);
   const bodyEvents = trackBodyEvents(bot, () => locomotion.status().moving);
   const ctx: MinecraftCtx = {
     bot,
     base,
     locomotion,
     pain,
+    gut,
     lastHurt: () => bodyEvents.lastHurt(),
     wants: () => workspace.goal()?.wants ?? [],
     chests: believedChests,
@@ -170,6 +186,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       focus: focusSettings,
       brainstem,
       reflexes,
+      medulla,
+      justLearnedBadFoods: () => gut.justLearned(),
       sore: () => pain.sore(Date.now()),
       justLearnedHurts: () => pain.justLearned(),
       showPrimitives: brainArgs.primitives ?? false,
@@ -302,6 +320,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         current: executor.current(),
         deaths,
         lastHurt: bodyEvents.lastHurt(),
+        sinceSleepMinutes: sleepClock.sinceSleepMinutes(),
+        healing: bodyEvents.healing(),
         pushed: bodyEvents.pushed(),
         motion: bodyEvents.motion(),
         locomotion: (({ moving, pattern, gait, stuck }) => ({ moving, pattern, gait, stuck }))(locomotion.status()),
@@ -345,6 +365,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       saveNovelty(novelty, noveltyFile(server.name)),
       saveChests(chests, chestsFile(server.name)),
       saveHurts(pain.entries(), hurtsFile(server.name)),
+      saveHurts(gut.entries(), badFoodsFile(server.name)),
+      saveBody({ sleptAtAge: sleepClock.sleptAtAge() }, bodyFile(server.name)),
       saveMemories(memory, memoriesFile(server.name)),
     ]).catch((error) => console.error(`Could not save what the bot learned: ${error}`));
   };

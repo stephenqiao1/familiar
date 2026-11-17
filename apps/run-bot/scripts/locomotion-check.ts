@@ -4,7 +4,7 @@
 //   pnpm locomotion-check [scene ...]
 import type { SkillEvent, SkillResult } from "@familiar/contracts";
 import { createSkillExecutor } from "@familiar/core";
-import { connect, createLocomotion, createPain, INNATE_HURTS, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
+import { connect, createLocomotion, createGut, createPain, INNATE_BAD_FOODS, INNATE_HURTS, minecraftSkills, type MinecraftCtx } from "@familiar/minecraft";
 import { walkAndLook } from "./primitive-check/walk-and-look.ts";
 import { BOT, buildPlaza, rcon, reset, sleep, startObserver, tearDown } from "./primitive-check/world.ts";
 
@@ -20,7 +20,7 @@ await reset();
 const observer = await startObserver();
 const notes: string[] = [];
 const locomotion = createLocomotion(bot, { log: (msg) => notes.push(msg) });
-const ctx: MinecraftCtx = { bot, base: { chest: bot.entity.position.clone(), bed: bot.entity.position.clone() }, wants: () => [], locomotion, pain: createPain({ innate: INNATE_HURTS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
+const ctx: MinecraftCtx = { bot, base: { chest: bot.entity.position.clone(), bed: bot.entity.position.clone() }, wants: () => [], locomotion, pain: createPain({ innate: INNATE_HURTS }), gut: createGut({ innate: INNATE_BAD_FOODS }), lastHurt: () => null, chests: {} as MinecraftCtx["chests"], log: () => {} };
 
 /** Puts the bot at a spot on the plaza floor, facing east, with everything else reset. */
 async function start(x: number, z = 40, y = 151): Promise<void> {

@@ -3,6 +3,7 @@ import type { MinecraftCtx } from "../skill-context.js";
 import { attack } from "./attack.js";
 import { primitives } from "../primitives/index.js";
 import { doClose } from "../primitives/windows.js";
+import { consume } from "./consume.js";
 import { digOut } from "./dig-out.js";
 import { depositItems } from "./deposit-items.js";
 import { eat } from "./eat.js";
@@ -21,7 +22,7 @@ import { takeItems } from "./take-items.js";
  * Every Minecraft skill, for registering with a skill executor: the learned-style skills, the
  * reflex-only ones, and the primitives. Use `menuSkills` for what the deciding layers may choose.
  */
-export const minecraftSkills: Skill<MinecraftCtx>[] = [goTo, returnToBase, idle, eat, flee, attack, sleep, depositItems, takeItems, escapeHazard, surface, withdraw, digOut, recoil, steady, ...primitives];
+export const minecraftSkills: Skill<MinecraftCtx>[] = [goTo, returnToBase, idle, eat, consume, flee, attack, sleep, depositItems, takeItems, escapeHazard, surface, withdraw, digOut, recoil, steady, ...primitives];
 
 /** Leaves the body tidy after a chain of primitives: closes any open container and lets go of every key. */
 export async function tidyBody(ctx: MinecraftCtx): Promise<void> {

@@ -6,7 +6,9 @@ export interface EncodableBot {
   food: number;
   heldItem: { name: string } | null;
   /** `metadata`: the bot's own flags as the server sent them (burning, air left); see body.ts. */
-  entity: { id: number; position: Vec3; onGround?: boolean; metadata?: unknown[] };
+  entity: { id: number; position: Vec3; onGround?: boolean; metadata?: unknown[]; effects?: unknown };
+  /** The hidden reserve behind the food bar. */
+  foodSaturation?: number;
   time: { isDay: boolean };
   game: { dimension: string };
   isSleeping: boolean;
@@ -17,6 +19,8 @@ export interface EncodableBot {
     foodsByName: Record<string, { foodPoints: number; saturation: number } | undefined>;
     /** Biomes by id. A block's own biome name is empty on newer versions, so names are looked up here. */
     biomes?: Record<number, { name: string } | undefined>;
+    /** Status effects by id. */
+    effects?: Record<number, { name: string } | undefined>;
   };
   blockAt(pos: Vec3): EncodableBlock | null;
   world: {

@@ -33,7 +33,7 @@ function bot(settings: Partial<BrainstemSettings> = {}, over: Partial<BrainstemO
     holdable: ["flee", "defend"],
     asleep: (ws) => world(ws.state).asleep ?? false,
     drowsy: (ws) => world(ws.state).night ?? false,
-    body: (state) => ({ health: world(state).health ?? 1, air: world(state).air ?? 0, hunger: world(state).hunger ?? 0 }),
+    body: (state) => ({ health: world(state).health ?? 1 }),
     skills: { brace: "brace", lookAt: "look_at" },
     ...over,
   });
@@ -182,20 +182,17 @@ describe("createBrainstemRegion", () => {
   });
 
   describe("body signals", () => {
-    it("shares air and hunger, and pain that fades over about 10 seconds", async () => {
+    it("shares stuck and sore, and leaves the vital signs to the medulla", async () => {
       const { tick, value } = bot();
-      await tick({ air: 0.4, hunger: 0.7 });
-      expect([value("air"), value("hunger"), value("pain"), value("stuck")]).toEqual([0.4, 0.7, 0, 0]);
       await tick({ health: 0.8 });
-      expect(value("pain")).toBeCloseTo(0.6);
-      await tick({ health: 0.8 }, null, 10_000);
-      expect(value("pain")).toBeLessThan(0.05);
+      expect([value("stuck"), value("sore")]).toEqual([0, 0]);
+      expect([value("air"), value("hunger"), value("pain")]).toEqual([undefined, undefined, undefined]);
     });
   });
 
   it("shares stuck: 1 while the legs are stuck, then fading over about 5 seconds", async () => {
     const stuck = { current: false };
-    const { tick, value } = bot({}, { body: () => ({ health: 1, air: 0, hunger: 0, stuck: stuck.current }) });
+    const { tick, value } = bot({}, { body: () => ({ health: 1, stuck: stuck.current }) });
     await tick();
     expect(value("stuck")).toBe(0);
     stuck.current = true;

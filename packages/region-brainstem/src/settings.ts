@@ -14,7 +14,7 @@ export interface BrainstemSettings {
   holdBack: number;
   /** e: while asleep and undisturbed, the deciding layers above are paused. On above 0. */
   arousalGate: number;
-  /** f: share air, pain and hunger as signals. On above 0. */
+  /** f: share stuck and sore as signals. On above 0. */
   bodySignals: number;
 }
 

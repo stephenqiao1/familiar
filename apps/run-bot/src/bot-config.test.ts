@@ -2,12 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FOCUS, DEFAULT_NORADRENALINE, DEFAULT_PATIENCE, DEFAULT_PERSONALITY } from "@familiar/neuromodulators";
-import { DEFAULT_LOCOMOTION, DEFAULT_REFLEXES } from "@familiar/minecraft";
+import { DEFAULT_LOCOMOTION, DEFAULT_MEDULLA, DEFAULT_REFLEXES } from "@familiar/minecraft";
 import { DEFAULT_BRAINSTEM } from "@familiar/region-brainstem";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, memory: DEFAULT_MEMORY };
 
 let dir: string;
 let file: string;
@@ -71,6 +71,13 @@ describe("loadBotConfig", () => {
     // A hard reflex is on or off: nothing in between.
     await expect(loadBotConfig("Half", file)).rejects.toThrow(/reflexes.painWithdrawal must be 0 or 1/);
     await expect(loadBotConfig("List", file)).rejects.toThrow(/reflexes.innateHurts must be a list/);
+  });
+
+  it("reads the medulla block: what the bot is born knowing about food, and each urge's strength", async () => {
+    await writeFile(file, JSON.stringify({ Newborn: { medulla: { innateBadFoods: [], needAir: 0.5 } }, Bad: { medulla: { cure: 2 } }, List: { medulla: { innateBadFoods: "rotten_flesh" } } }));
+    expect((await loadBotConfig("Newborn", file)).medulla).toEqual({ ...DEFAULT_MEDULLA, innateBadFoods: [], needAir: 0.5 });
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow(/medulla.cure must be 0 to 1/);
+    await expect(loadBotConfig("List", file)).rejects.toThrow(/medulla.innateBadFoods must be a list/);
   });
 
   it("reads locomotion strengths and rejects a bad one", async () => {

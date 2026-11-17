@@ -13,7 +13,17 @@ import {
   type NoradrenalineSettings,
   type PatienceSettings,
 } from "@familiar/neuromodulators";
-import { DEFAULT_LOCOMOTION, DEFAULT_REFLEXES, locomotionProblem, reflexesProblem, type LocomotionSettings, type ReflexSettings } from "@familiar/minecraft";
+import {
+  DEFAULT_LOCOMOTION,
+  DEFAULT_MEDULLA,
+  DEFAULT_REFLEXES,
+  locomotionProblem,
+  medullaProblem,
+  reflexesProblem,
+  type LocomotionSettings,
+  type MedullaSettings,
+  type ReflexSettings,
+} from "@familiar/minecraft";
 import { brainstemProblem, DEFAULT_BRAINSTEM, type BrainstemSettings } from "@familiar/region-brainstem";
 
 // Every bot's settings live in one file, keyed by bot name. A bot with no entry, or a setting
@@ -36,6 +46,8 @@ export interface BotConfig {
   locomotion: LocomotionSettings;
   /** The protective reflexes: what the bot is born knowing hurts, and which reflexes are on. */
   reflexes: ReflexSettings;
+  /** The medulla: what the bot is born knowing about food, and the strength of each upkeep urge. */
+  medulla: MedullaSettings;
   memory: MemorySettings;
 }
 
@@ -49,7 +61,7 @@ export const DEFAULT_MEMORY: MemorySettings = { halfLifeDays: 2 };
 export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Promise<BotConfig> {
   const bots = await readBots(file);
   const entry = bots[name] as
-    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings>; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; memory?: Partial<MemorySettings> }
+    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings>; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; memory?: Partial<MemorySettings> }
     | undefined;
   const personality = { ...DEFAULT_PERSONALITY, ...entry?.personality };
   const patience = { ...DEFAULT_PATIENCE, ...entry?.patience };
@@ -58,11 +70,12 @@ export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Pro
   const brainstem = { ...DEFAULT_BRAINSTEM, ...entry?.brainstem };
   const locomotion = { ...DEFAULT_LOCOMOTION, ...entry?.locomotion };
   const reflexes = { ...DEFAULT_REFLEXES, ...entry?.reflexes };
+  const medulla = { ...DEFAULT_MEDULLA, ...entry?.medulla };
   const memory = { ...DEFAULT_MEMORY, ...entry?.memory };
   const memoryProblem = memory.halfLifeDays > 0 ? null : `memory.halfLifeDays must be above 0, got ${memory.halfLifeDays}`;
-  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? memoryProblem;
+  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? memoryProblem;
   if (problem) throw new Error(`${file}: bot "${name}": ${problem}`);
-  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, memory };
+  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, memory };
 }
 
 /** The file's bots by name; none if the file is missing. Throws if it exists but is not valid. */

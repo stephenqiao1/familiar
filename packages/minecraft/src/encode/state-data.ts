@@ -1,4 +1,4 @@
-/** What a schemaVersion 12 Minecraft State carries in `data`. Distances are whole blocks. */
+/** What a schemaVersion 13 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
   time: { isNight: boolean; lightLevel: number };
   self: {
@@ -11,7 +11,20 @@ export interface MinecraftStateData {
     /** Best weapon carried (sword > axe > pickaxe), or null for bare hands. */
     bestWeapon: string | null;
     inventoryFullPct: number;
+    /** Food carried that is not known to be bad. */
     foodItems: number;
+    /** Food carried that the bot knows to be bad for it. */
+    badFoodItems: number;
+    /** The hidden reserve behind the food bar, 0 to 20: the food bar only falls once this is used up. */
+    saturation: number;
+    /** The status effects on the body, by the game's names in lower case ("poison", "hunger", "regeneration"). */
+    effects: string[];
+    /** How frozen, 0 to 1 (it climbs while standing in powder snow). */
+    freezing: number;
+    /** Game minutes since the bot last slept. */
+    sinceSleepMinutes: number;
+    /** Health has gone up in the last few seconds. */
+    healing: boolean;
     /** Item name → total count carried. */
     inventory: Record<string, number>;
     distanceToBase: number;

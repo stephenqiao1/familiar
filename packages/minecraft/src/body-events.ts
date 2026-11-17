@@ -6,6 +6,8 @@ import { touchingOf } from "./encode/touching.js";
 import type { Hurt } from "./pain.js";
 
 const KEEP_LOUD_MS = 5000;
+/** Health comes back a point at a time, up to 4 seconds apart: a rise this recent means it is still healing. */
+const HEALING_SHOWN_MS = 4500;
 /** A push faster than this (blocks per tick) is not in blocks per tick: leave it to Mineflayer. */
 const MAX_KNOCK = 10;
 const MOVE_KEYS = ["forward", "back", "left", "right"] as const;
@@ -32,6 +34,8 @@ export interface BodyEvents {
   pushed(): { blocks: number; toward: Heading } | null;
   /** Which way the body is moving across the ground right now, or null if it is still. */
   motion(): Heading | null;
+  /** Health has gone up in the last few seconds: the body is healing. */
+  healing(): boolean;
 }
 
 /** The game's names for kinds of damage, as each bot's server sent them at login (index = the id damage events carry). */
@@ -62,6 +66,12 @@ export function trackBodyEvents(bot: Bot, travelling: () => boolean = () => fals
   let moves: { at: number; dx: number; dz: number; meant: boolean }[] = [];
   let before: Vec3 | null = null;
   let lastMeant = -Infinity;
+  let health = bot.health;
+  let healedAt = -Infinity;
+  bot.on("health", () => {
+    if (bot.health > health) healedAt = Date.now();
+    health = bot.health;
+  });
 
   bot._client.on("damage_event", (packet: { entityId: number; sourceTypeId: number; sourceCauseId: number }) => {
     if (packet.entityId !== bot.entity?.id) return;
@@ -121,6 +131,7 @@ export function trackBodyEvents(bot: Bot, travelling: () => boolean = () => fals
       const unmeant = sum(moves.filter((m) => !m.meant && Date.now() - m.at <= PUSH.windowMs));
       return unmeant.blocks >= PUSH.blocks ? { blocks: Math.round(unmeant.blocks * 10) / 10, toward: unmeant.toward } : null;
     },
+    healing: () => Date.now() - healedAt <= HEALING_SHOWN_MS,
     motion() {
       const recent = sum(moves.filter((m) => Date.now() - m.at <= MOTION.windowMs));
       return recent.blocks >= MOTION.blocks ? recent.toward : null;

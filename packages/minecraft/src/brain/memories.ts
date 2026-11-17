@@ -188,10 +188,28 @@ export function learnedWhatHurts(justLearned: () => string[]): MemoryTrigger {
   };
 }
 
+/** A food has just become known to be bad (illness followed eating it on separate occasions). */
+export function learnedBadFood(justLearned: () => string[]): MemoryTrigger {
+  return {
+    name: "learned_bad_food",
+    check({ after }) {
+      const names = justLearned();
+      const d = minecraftDataOf(after);
+      if (!names.length || !d) return null;
+      return { kind: "danger", summary: `Learned that ${names.join(" and ")} is bad to eat`, involved: names, outcome: { feeling: "bad", value: -0.3 }, context: context(d) };
+    },
+  };
+}
+
 /**
  * A fresh set of every moment the player remembers (some triggers keep their own state).
- * `justLearned`: the block types just learned to hurt, if the bot learns them.
+ * `justLearned`: the block types just learned to hurt, and the foods just learned to be bad, if
+ * the bot learns them.
  */
-export function playerMemories(justLearned?: () => string[]): MemoryTrigger[] {
-  return [tookDamage, closeCall(), died, notableReward, firstSight, skillFailed, goalDone(), ...(justLearned ? [learnedWhatHurts(justLearned)] : [])];
+export function playerMemories(justLearned?: () => string[], justLearnedFood?: () => string[]): MemoryTrigger[] {
+  return [
+    tookDamage, closeCall(), died, notableReward, firstSight, skillFailed, goalDone(),
+    ...(justLearned ? [learnedWhatHurts(justLearned)] : []),
+    ...(justLearnedFood ? [learnedBadFood(justLearnedFood)] : []),
+  ];
 }

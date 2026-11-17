@@ -1,6 +1,6 @@
 import type { ItemWant, SkillEvent } from "@familiar/contracts";
 import { createChainSkill, createSkillExecutor } from "@familiar/core";
-import { createLocomotion, createPain, INNATE_HURTS, minecraftSkills, primitives, setKnownHurts, tidyBody, trackBodyEvents } from "@familiar/minecraft";
+import { createGut, createLocomotion, createPain, INNATE_BAD_FOODS, INNATE_HURTS, minecraftSkills, primitives, setKnownHurts, tidyBody, trackBodyEvents } from "@familiar/minecraft";
 import type { ServerArgs } from "./args.js";
 import { formatChanges, formatSkillEvent } from "./format-skill-event.js";
 import { joinWithBase } from "./join.js";
@@ -35,7 +35,7 @@ export async function runSkill({ server, skill, target, interruptAfterMs, linger
   const finished = new Promise<SkillEvent>((resolve) => (finish = resolve));
   const executor = createSkillExecutor({
     skills,
-    ctx: { bot, base, wants: () => wants, chests, pain, lastHurt: () => bodyEvents.lastHurt(), locomotion: createLocomotion(bot, { home: base.chest, log: (msg) => console.log(`  ${msg}`) }), log: (msg) => console.log(`  ${msg}`) },
+    ctx: { bot, base, wants: () => wants, chests, pain, gut: createGut({ innate: INNATE_BAD_FOODS }), lastHurt: () => bodyEvents.lastHurt(), locomotion: createLocomotion(bot, { home: base.chest, log: (msg) => console.log(`  ${msg}`) }), log: (msg) => console.log(`  ${msg}`) },
     onEvent(event) {
       console.log(formatSkillEvent(event));
       const changes = formatChanges(event);

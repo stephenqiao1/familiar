@@ -3,6 +3,7 @@ import type { Bot } from "mineflayer";
 import type { Base } from "./base.js";
 import type { ChestMemory } from "./chest-memory.js";
 import type { Locomotion } from "./locomotion/index.js";
+import type { Gut } from "./gut.js";
 import type { Hurt, Pain } from "./pain.js";
 
 /** What every Minecraft skill gets to act with. */
@@ -13,6 +14,8 @@ export interface MinecraftCtx {
   wants(): readonly ItemWant[];
   /** The locomotion controller: everything that travels goes through it. */
   locomotion: Locomotion;
+  /** What the bot has learned about food: which foods make it ill. */
+  gut: Gut;
   /** What the bot knows hurts, and how sore it is. */
   pain: Pain;
   /** The last time the bot was hurt, as its body felt it (null if never). */

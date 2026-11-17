@@ -8,6 +8,22 @@ export const ORIENTING_SIGNAL = "orienting";
 export const AROUSAL_SIGNAL = "arousal";
 /** 1 while the deciding layers above (instinct, planner) are paused because the bot sleeps undisturbed. */
 export const UPPER_PAUSED_SIGNAL = "upper_paused";
+// The vital signs below are shared by the medulla; `stuck` and `sore` by the brainstem.
+
+/** How far below full health: 0 at full health, 1 at none. A standing level (pain is the recent sting). */
+export const HURT_SIGNAL = "hurt";
+/** How sick: 1 while poisoned or withering, lower for milder effects, 0 when well. */
+export const SICK_SIGNAL = "sick";
+/** How cold: 0 warm, 1 frozen through. */
+export const COLD_SIGNAL = "cold";
+/** How tired: rising with time since sleep, 1 after about three days awake. */
+export const TIRED_SIGNAL = "tired";
+/** The hidden food reserve behind the food bar, as a share of its maximum. */
+export const RESERVE_SIGNAL = "reserve";
+/** One overall number: 1 when everything is fine, pulled down mostly by the single worst reading. */
+export const VITALS_SIGNAL = "vitals";
+/** How strongly the body is asking for upkeep right now: the strongest urge the medulla fired this tick, 0 when none. */
+export const URGE_SIGNAL = "urge";
 /** How short of breath: 0 with full air, 1 with none. */
 export const AIR_SIGNAL = "air";
 /** Recent damage, fading over about 10 seconds. */

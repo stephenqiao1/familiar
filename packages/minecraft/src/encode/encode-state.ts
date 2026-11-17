@@ -11,7 +11,7 @@ import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export interface EncodeContext {
   base: Base;
@@ -27,6 +27,10 @@ export interface EncodeContext {
   pushed?: { blocks: number; toward: Heading } | null;
   /** Which way the body is moving. Default: still. */
   motion?: Heading | null;
+  /** Game minutes since the bot last slept. Default: 0. */
+  sinceSleepMinutes?: number;
+  /** Health has gone up in the last few seconds. Default: false. */
+  healing?: boolean;
   /** What the locomotion controller reports. Default: standing still. */
   locomotion?: MinecraftStateData["self"]["locomotion"];
   /** Loud events heard lately (explosions, thunder). Default: none. */
@@ -64,6 +68,8 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
       inBlock: headInBlock(bot),
       pushed: ctx.pushed ? { ...ctx.pushed, danger: dangerAlong(bot, ctx.pushed.toward) } : null,
       motion: ctx.motion ? { toward: ctx.motion, danger: dangerAlong(bot, ctx.motion) } : null,
+      sinceSleepMinutes: ctx.sinceSleepMinutes ?? 0,
+      healing: ctx.healing ?? false,
     },
     nearby: {
       hazards: scanHazards(bot, limit),

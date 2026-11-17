@@ -1,5 +1,5 @@
 // Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
-// surprises, reflexes and the brainstem, memories, interrupts, warnings and region errors.
+// surprises, reflexes and the brainstem, the medulla, memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -174,7 +174,34 @@ const woken = count(stem("woken"), (t) => String(trace(t, "brainstem").woken));
 console.log(`WOKEN BY: ${list(woken)}`);
 const overruled = ticks.filter((t) => (t as Tick & { defenceOverruledBeforeDeath?: unknown }).defenceOverruledBeforeDeath);
 for (const t of overruled) console.log(`!! DIED WITH DEFENCE OVERRULED at tick ${t.tick}: ${JSON.stringify((t as Tick & { defenceOverruledBeforeDeath?: unknown }).defenceOverruledBeforeDeath)}`);
-console.log(`BODY (max): air ${Math.max(0, ...ticks.map((t) => t.signals.air?.value ?? 0)).toFixed(2)}, pain ${Math.max(0, ...ticks.map((t) => t.signals.pain?.value ?? 0)).toFixed(2)}, hunger ${Math.max(0, ...ticks.map((t) => t.signals.hunger?.value ?? 0)).toFixed(2)}`);
+
+// The medulla: body upkeep.
+type Signs = Record<string, number>;
+type Upkeep = { food?: number; health?: number; air?: number; healing?: boolean };
+const upkeepOf = (t: Tick) => bodyOf(t) as (Upkeep & Body) | null;
+const lowest = (key: "air" | "food" | "health") => Math.min(20, ...ticks.map((t) => upkeepOf(t)?.[key] ?? 20));
+const HEALING_FOOD = 18;
+const hurtUnfedMs = ticks.reduce((sum, t, i) => { const b = upkeepOf(t); return sum + (b && (b.health ?? 20) < 20 && (b.food ?? 20) < HEALING_FOOD ? span(t, i) : 0); }, 0);
+const hurtMs = ticks.reduce((sum, t, i) => sum + ((upkeepOf(t)?.health ?? 20) < 20 ? span(t, i) : 0), 0);
+console.log(`\nMEDULLA: lowest air ${lowest("air")}/20, lowest food ${lowest("food")}/20, lowest health ${lowest("health").toFixed(1)}/20; lowest overall vitals ${Math.min(1, ...ticks.map((t) => t.signals.vitals?.value ?? 1)).toFixed(2)}`);
+console.log(`HURT AND TOO HUNGRY TO HEAL (food under ${HEALING_FOOD}): ${(hurtUnfedMs / 1000).toFixed(0)} s of ${(hurtMs / 1000).toFixed(0)} s hurt`);
+const urgeTicks = ticks.flatMap((t) => ((trace(t, "medulla").urges as Fired[] | undefined) ?? []).map((u) => ({ u, won: t.winner?.region === "medulla" && t.winner.action.skill === u.skill })));
+const UPKEEP_REFLEXES = ["drowning", "eat_when_starving"];
+const hardUpkeep = ticks.flatMap((t) => ((trace(t, "reflex").rules as Fired[] | undefined) ?? []).filter((f) => UPKEEP_REFLEXES.includes(f.rule)).map((u) => ({ u, won: t.winner?.region === "reflex" && t.winner.action.skill === u.skill })));
+for (const rule of [...new Set([...urgeTicks, ...hardUpkeep].map((x) => x.u.rule))]) {
+  const of = [...urgeTicks, ...hardUpkeep].filter((x) => x.u.rule === rule);
+  const held = of.filter((x) => x.u.kind === "soft" && x.u.gain < 1).length;
+  console.log(`  ${rule} (${of[0]!.u.kind}): fired ${of.length} ticks, won ${of.filter((x) => x.won).length}, outvoted ${of.filter((x) => !x.won).length}, held back by a goal ${held}; urgency ${Math.min(...of.map((x) => x.u.urgency)).toFixed(2)} to ${Math.max(...of.map((x) => x.u.urgency)).toFixed(2)}`);
+}
+if (urgeTicks.length + hardUpkeep.length === 0) console.log("  no upkeep reflex or urge fired");
+console.log(`URGES WHILE ASLEEP: ${list(count(ticks.flatMap((t) => (trace(t, "medulla").urgeWhileAsleep as string[] | undefined) ?? []), (r) => r))}`);
+const badFoodLessons = ticks.flatMap((t) => ((trace(t, "hippocampus").recorded as { trigger: string; summary: string }[] | undefined) ?? []).filter((r) => r.trigger === "learned_bad_food").map((r) => r.summary));
+console.log(`FOODS LEARNED AS BAD: ${badFoodLessons.join("; ") || "none"}`);
+for (const d of died) {
+  const lastTen = ticks.filter((t) => d.timestamp - t.timestamp > 0 && d.timestamp - t.timestamp <= 10_000).map((t) => trace(t, "medulla").vitals as Signs | undefined).filter((v): v is Signs => v !== undefined);
+  const worst = (key: string, low = false) => (lastTen.length ? (low ? Math.min : Math.max)(...lastTen.map((v) => v[key] ?? (low ? 1 : 0))).toFixed(2) : "?");
+  console.log(`DEATH at tick ${d.tick}, the 10 s before: air ${worst("air")}, hunger ${worst("hunger")}, pain ${worst("pain")}, hurt ${worst("hurt")}, sick ${worst("sick")}, cold ${worst("cold")}, tired ${worst("tired")}; overall vitals down to ${worst("vitals", true)}`);
+}
 
 // Memory.
 type Recorded = { trigger: string; summary: string; strength: number; merged: boolean };

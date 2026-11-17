@@ -1,7 +1,7 @@
 import type { Proposal, Region, State, Workspace } from "@familiar/contracts";
 import { createLoadedResponses, LOADED_URGENCY, type Thing } from "./loaded.js";
 import type { BrainstemSettings } from "./settings.js";
-import { AIR_SIGNAL, AROUSAL_SIGNAL, HUNGER_SIGNAL, ORIENTING_SIGNAL, PAIN_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+import { AROUSAL_SIGNAL, ORIENTING_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
 
 /** What a detector looks at: the last tick's state, this tick's, and the workspace. */
 export interface BrainstemMoment {
@@ -16,14 +16,10 @@ export interface StartleDetector {
   check(moment: BrainstemMoment): { source: Thing | null } | null;
 }
 
-/** The body's levels right now, each 0 to 1. */
+/** What the brainstem needs to know of the body right now. (Its vital signs are the medulla's to report.) */
 export interface Body {
-  /** Health as a share of full health. */
+  /** Health as a share of full health: a drop in it is a hurt, which wakes a sleeping body. */
   health: number;
-  /** How short of breath (0 = full air). */
-  air: number;
-  /** How hungry (0 = full). */
-  hunger: number;
   /** The legs are stuck right now (trying to get free, or just gave up). Default: false. */
   stuck?: boolean;
   /** How sore: 1 just after pulling away from pain, fading to 0. Default: 0. */
@@ -95,7 +91,7 @@ const STAY_ASLEEP_URGENCY = 0.5;
  *      reports loaded responses and hold-backs it had to ignore;
  *   e) arousal gate: shares `arousal`; while asleep and undisturbed, shares `upper_paused` so the
  *      deciding layers above make no calls. A startle, damage, a hard reflex or alarm ends it at once;
- *   f) body signals: shares `air`, `pain`, `hunger`, `stuck` and `sore`.
+ *   f) body signals: shares `stuck` and `sore` (the vital signs are the medulla's).
  * Everything it does is in the trace.
  */
 export function createBrainstemRegion(options: BrainstemOptions): Region {
@@ -118,21 +114,18 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
       const proposals: Proposal[] = [];
       const trace: Record<string, unknown> = {};
 
-      // f) Body. Pain is tracked even with the signals off: the arousal gate reads it.
+      // f) Body. Recent pain is tracked here only for the arousal gate; the medulla shares the vital signs.
       const body = options.body(after);
       const was = before ? options.body(before) : null;
       const dt = before ? Math.max(0, now - before.timestamp) / 1000 : 0;
       const hurt = body && was ? Math.max(0, was.health - body.health) : 0;
       pain = Math.min(1, pain * Math.exp(-dt / PAIN_TAU_SECONDS) + hurt / FULL_PAIN);
       if (settings.bodySignals > 0 && body) {
-        ws.setSignal(AIR_SIGNAL, body.air);
-        ws.setSignal(PAIN_SIGNAL, pain);
-        ws.setSignal(HUNGER_SIGNAL, body.hunger);
         // 1 while the legs are stuck, then fading.
         stuck = body.stuck ? 1 : stuck * Math.exp(-dt / STUCK_TAU_SECONDS);
         ws.setSignal(STUCK_SIGNAL, stuck);
         ws.setSignal(SORE_SIGNAL, body.sore ?? 0);
-        trace.body = { air: body.air, pain, hunger: body.hunger, stuck, sore: body.sore ?? 0 };
+        trace.body = { stuck, sore: body.sore ?? 0 };
       }
 
       // b) Startle.

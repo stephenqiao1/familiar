@@ -41,7 +41,8 @@ export const takeItems: Skill<MinecraftCtx> = {
 
     const block = bot.blockAt(chest.position);
     if (!block || block.name !== chest.name) return { status: "failed", reason: `no chest at ${chest.position}` };
-    const window = await doOpen(bot, block);
+    const window = await doOpen(bot, block, signal);
+    if (!window) return { status: "interrupted" };
     const taken: ItemWant[] = [];
     try {
       if (!("withdraw" in window)) return { status: "failed", reason: "container cannot be taken from" };
