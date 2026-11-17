@@ -4,7 +4,7 @@ import { createReflexRegion, type FiredReflex, type ReflexRule } from "@familiar
 import { describe, expect, it } from "vitest";
 import { fakeState, type StatePatch } from "../encode/state.test-helper.js";
 import { leaningOf } from "./brainstem.js";
-import { aboutToTouch, buried, DEFAULT_REFLEXES, edgeGuard, holdGround, painWithdrawal, protectiveReflexes, reflexesProblem } from "./protective-reflexes.js";
+import { aboutToTouch, buried, DEFAULT_REFLEXES, edgeGuard, fallingRight, holdGround, painWithdrawal, protectiveReflexes, reflexesProblem } from "./protective-reflexes.js";
 import { createPlayerReflexes } from "./reflexes.js";
 
 const signal = new AbortController().signal;
@@ -96,6 +96,10 @@ describe("hold_ground (the stretch reflex)", () => {
     expect(check(rule, pushed("drop", 2))?.action).toEqual({ skill: "steady", target: "pos:0.5,63,2.5" });
   });
 
+  it("does not fire when the bot was moved somewhere else all at once (a teleport is not a push)", () => {
+    expect(check(rule, { ...pushed("drop"), displaced: true })).toBeNull();
+  });
+
   it("does nothing when pushed in the open, or when not pushed", () => {
     expect(check(rule, pushed(null))).toBeNull();
     expect(check(rule, {})).toBeNull();
@@ -147,17 +151,38 @@ describe("edge_guard", () => {
   });
 });
 
+describe("falling_right (the righting reflex)", () => {
+  const falling = (steer: string | null, hurts = true) => ({ landing: { blocks: 8, onto: "stone", hurts, steer } });
+
+  it("fires only when the landing would hurt and a better one is within reach", () => {
+    expect(check(fallingRight, falling("pos:1,64,0"))).toEqual({ action: { skill: "air_steer", target: "pos:1,64,0" }, urgency: 1, reason: "falling 8 blocks onto stone: a better landing is in reach" });
+    // Nothing better in reach: there is nothing a body can do.
+    expect(check(fallingRight, falling(null))).toBeNull();
+    // A landing that will not hurt needs no steering, and neither does standing on the ground.
+    expect(check(fallingRight, falling(null, false))).toBeNull();
+    expect(check(fallingRight, {})).toBeNull();
+  });
+
+  it("is hard, and keeps to the landing it chose until the body lands", () => {
+    expect(fallingRight.kind).toBe("hard");
+    const store = createWorkspace();
+    store.update(fakeState({ self: falling("pos:2,64,0"), current: { skill: "air_steer", target: "pos:1,64,0", secondsRunning: 0 } }), null);
+    expect(fallingRight.check(store.viewFor("reflex"))?.action).toEqual({ skill: "air_steer", target: "pos:1,64,0" });
+    expect(check(fallingRight, {}, "air_steer")).toBeNull();
+  });
+});
+
 describe("the protective reflexes as a set", () => {
-  it("has three hard ones and two soft ones, each switched off by its setting", () => {
+  it("has four hard ones and two soft ones, each switched off by its setting", () => {
     const all = protectiveReflexes(DEFAULT_REFLEXES);
-    expect([all.hard.map((r) => r.name), all.soft.map((r) => r.name)]).toEqual([["pain_withdrawal", "buried", "about_to_touch"], ["hold_ground", "edge_guard"]]);
+    expect([all.hard.map((r) => r.name), all.soft.map((r) => r.name)]).toEqual([["pain_withdrawal", "buried", "about_to_touch", "falling_right"], ["hold_ground", "edge_guard"]]);
     expect(all.hard.every((r) => r.kind === "hard") && all.soft.every((r) => r.kind === "soft")).toBe(true);
-    const off = protectiveReflexes({ ...DEFAULT_REFLEXES, painWithdrawal: 0, buried: 0, aboutToTouch: 0, holdGround: 0, edgeGuard: 0 });
+    const off = protectiveReflexes({ ...DEFAULT_REFLEXES, painWithdrawal: 0, buried: 0, aboutToTouch: 0, holdGround: 0, edgeGuard: 0 }, 0);
     expect([off.hard, off.soft]).toEqual([[], []]);
   });
 
   it("keeps in_lava_or_fire, drowning and last_stand first, exactly as they were", () => {
-    expect(createPlayerReflexes().map((r) => r.name)).toEqual(["in_lava_or_fire", "drowning", "last_stand", "pain_withdrawal", "buried", "about_to_touch", "threat_contact", "threat_approaching", "hold_ground", "edge_guard", "eat_when_starving"]);
+    expect(createPlayerReflexes().map((r) => r.name)).toEqual(["in_lava_or_fire", "drowning", "last_stand", "pain_withdrawal", "buried", "about_to_touch", "falling_right", "threat_contact", "threat_approaching", "hold_ground", "edge_guard", "eat_when_starving"]);
   });
 
   it("in_lava_or_fire reads the body, not the list: with nothing innate, lava still triggers it", () => {

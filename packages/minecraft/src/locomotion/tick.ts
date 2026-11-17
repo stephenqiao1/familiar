@@ -56,8 +56,12 @@ export function installTick(bot: Bot, walk: Walk, view: TickView): void {
 
   bot.on("physicsTick", () => {
     const walking = view.walking();
-    const sneak = walking && view.careful() && nearDrop(bot);
-    if (sneak !== sneaking) bot.setControlState("sneak", sneak);
+    // Only with the feet on the ground: sneaking on a ladder or in water holds the body where it is.
+    const sneak = walking && view.careful() && bot.entity.onGround && nearDrop(bot);
+    // Pressed again every tick it is wanted: the walking rhythm lets go of every key whenever it
+    // plans again, which used to leave the bot walking a ledge upright. Only let go of a sneak this held.
+    if (sneak && !bot.getControlState("sneak")) bot.setControlState("sneak", true);
+    if (!sneak && sneaking) bot.setControlState("sneak", false);
     sneaking = sneak;
     if (walking && !wasWalking) stretch.restart();
     wasWalking = walking;

@@ -1,4 +1,4 @@
-/** What a schemaVersion 13 Minecraft State carries in `data`. Distances are whole blocks. */
+/** What a schemaVersion 14 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
   time: { isNight: boolean; lightLevel: number };
   self: {
@@ -48,6 +48,25 @@ export interface MinecraftStateData {
     inWater: boolean;
     /** Off the ground with a drop of 3 or more blocks below. */
     falling: boolean;
+    /**
+     * What holds the bot up: the block (`on`), how it behaves (`kind`: solid; loose, a block that
+     * falls when unsupported; slippery; slow; liquid; climbing; riding; none, in the air), how many
+     * of the four sides open onto a drop of 3 or more (`edges`), and the open space above the head
+     * (`headroom`, up to 3).
+     */
+    support: { on: string; kind: "solid" | "loose" | "slippery" | "slow" | "liquid" | "climbing" | "riding" | "none"; edges: number; headroom: number };
+    /** How the body is moving, in blocks per second, and whether it is on the ground. */
+    velocity: { x: number; y: number; z: number; onGround: boolean };
+    /**
+     * Only while in the air: how far down the fall ends, onto what (a block name or "void"),
+     * whether it would cost health, and a better place to land within 2 blocks sideways if there
+     * is one (`steer`, a target).
+     */
+    landing: { blocks: number; onto: string; hurts: boolean; steer: string | null } | null;
+    /** True for one tick when the bot's position jumped more than 8 blocks without it travelling there (teleport, respawn, portal). */
+    displaced: boolean;
+    /** How steady the body is, 0 to 1: 1 on flat solid ground with room around, 0 in the air over a landing that would hurt. */
+    balance: number;
     /** What the locomotion controller is doing: travelling or not, the pattern and gait, and whether it is stuck. */
     locomotion: { moving: boolean; pattern: "walk" | "swim" | "dash" | null; gait: "walk" | "jog" | "sprint"; stuck: boolean };
     /**

@@ -36,6 +36,8 @@ export interface NoradrenalineOptions {
   settings: NoradrenalineSettings;
   /** What moves search. Default: reward trend, failed predictions and goal progress. */
   searchInputs?: SearchInput[];
+  /** Something else that calls for planning again this tick (the body was moved somewhere else, say). Default: nothing. */
+  replanWhen?(ws: Workspace): boolean;
   /** The goal set when alarm stays very high for too long. */
   retreatGoal?: { text: string; steps: string[] };
   /** Default: "noradrenaline". */
@@ -210,7 +212,9 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
       ws.setSignal(PLANNER_OFFLINE_SIGNAL, plannerOffline ? 1 : 0);
       ws.setSignal(ALARM_JUMP_SIGNAL, jumped ? 1 : 0);
       ws.setSignal(INTERRUPT_SIGNAL, interrupt ? 1 : 0);
-      ws.setSignal(REPLAN_SIGNAL, (pendingReplan && level < CALM_BELOW) || rethinking ? 1 : 0);
+      const asked = options.replanWhen?.(ws) ?? false;
+      if (asked) notes.replanAsked = true;
+      ws.setSignal(REPLAN_SIGNAL, (pendingReplan && level < CALM_BELOW) || rethinking || asked ? 1 : 0);
       ws.setSignal(RETHINK_SIGNAL, rethinking ? 1 : 0);
       ws.setSignal(SWITCHING_SIGNAL, NEUTRAL_SEARCH + (searching - NEUTRAL_SEARCH) * switching);
 

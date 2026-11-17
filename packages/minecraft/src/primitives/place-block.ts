@@ -2,6 +2,7 @@ import type { Bot } from "mineflayer";
 import { Vec3 } from "vec3";
 import type { Block } from "../mc-types.js";
 import { findPlacementSpot } from "../placement.js";
+import { postureCheck } from "../posture/check.js";
 import { blockPosOf, reasonOf, withinReach } from "./aim.js";
 import { doEquip } from "./equip.js";
 import { doLookAt } from "./look-at.js";
@@ -53,6 +54,8 @@ export const placeBlock = primitive({
       } else {
         const on = support(bot, target);
         if (!on) return { status: "failed", reason: `nothing to place against at "${target}"` };
+        const unsteady = postureCheck(bot, "place_block", { kind: "place", at: on.block.position.plus(on.face), item: held.name });
+        if (unsteady) return { status: "failed", reason: unsteady };
         await doPlace(bot, on.block, on.face);
       }
       return { status: "done" };

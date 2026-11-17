@@ -34,3 +34,5 @@ export const STUCK_SIGNAL = "stuck";
 export const SORE_SIGNAL = "sore";
 /** How hungry: 0 when full, 1 when starving. */
 export const HUNGER_SIGNAL = "hunger";
+/** How unsteady the body is, 0 (firm on its feet) to 1 (in the air over a fall that would hurt). */
+export const UNSTEADY_SIGNAL = "unsteady";

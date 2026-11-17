@@ -19,6 +19,9 @@ import {
   DEFAULT_REFLEXES,
   locomotionProblem,
   medullaProblem,
+  DEFAULT_POSTURE,
+  postureProblem,
+  type PostureSettings,
   reflexesProblem,
   type LocomotionSettings,
   type MedullaSettings,
@@ -48,6 +51,8 @@ export interface BotConfig {
   reflexes: ReflexSettings;
   /** The medulla: what the bot is born knowing about food, and the strength of each upkeep urge. */
   medulla: MedullaSettings;
+  /** Posture: what the bot is born knowing about loose blocks, and the strength of each part that keeps it steady. */
+  posture: PostureSettings;
   memory: MemorySettings;
 }
 
@@ -61,7 +66,7 @@ export const DEFAULT_MEMORY: MemorySettings = { halfLifeDays: 2 };
 export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Promise<BotConfig> {
   const bots = await readBots(file);
   const entry = bots[name] as
-    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings>; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; memory?: Partial<MemorySettings> }
+    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings>; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; posture?: Partial<PostureSettings>; memory?: Partial<MemorySettings> }
     | undefined;
   const personality = { ...DEFAULT_PERSONALITY, ...entry?.personality };
   const patience = { ...DEFAULT_PATIENCE, ...entry?.patience };
@@ -71,11 +76,12 @@ export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Pro
   const locomotion = { ...DEFAULT_LOCOMOTION, ...entry?.locomotion };
   const reflexes = { ...DEFAULT_REFLEXES, ...entry?.reflexes };
   const medulla = { ...DEFAULT_MEDULLA, ...entry?.medulla };
+  const posture = { ...DEFAULT_POSTURE, ...entry?.posture };
   const memory = { ...DEFAULT_MEMORY, ...entry?.memory };
   const memoryProblem = memory.halfLifeDays > 0 ? null : `memory.halfLifeDays must be above 0, got ${memory.halfLifeDays}`;
-  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? memoryProblem;
+  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? memoryProblem;
   if (problem) throw new Error(`${file}: bot "${name}": ${problem}`);
-  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, memory };
+  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, memory };
 }
 
 /** The file's bots by name; none if the file is missing. Throws if it exists but is not valid. */

@@ -19,6 +19,7 @@ import {
   REFLEX_SKILLS,
   setKnownBadFoods,
   setKnownHurts,
+  setUpPosture,
   trackGut,
   tidyBody,
   posId,
@@ -66,6 +67,9 @@ import {
   saveChests,
   saveBody,
   saveHurts,
+  saveSurfaces,
+  loadSurfaces,
+  surfacesFile,
   saveMemories,
   saveNovelty,
   saveScorebook,
@@ -93,7 +97,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -157,6 +161,15 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   trackGut(bot, gut, isHarmful, (msg) => console.log(`    medulla: ${msg}`));
   const sleepClock = createSleepClock(bot, (await loadBody(bodyFile(server.name))).sleptAtAge);
   const bodyEvents = trackBodyEvents(bot, () => locomotion.status().moving);
+  // Balance and posture: what the bot knows about surfaces (born knowing some loose blocks,
+  // learning the rest), the check before acting, and the senses for falling and being moved.
+  const posture = setUpPosture(bot, {
+    settings: postureSettings,
+    learned: await loadSurfaces(surfacesFile(server.name)),
+    locomotion,
+    lastBang: () => bodyEvents.loud().at(-1)?.at ?? null,
+    log: (msg) => console.log(`    ${msg}`),
+  });
   const ctx: MinecraftCtx = {
     bot,
     base,
@@ -187,6 +200,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       brainstem,
       reflexes,
       medulla,
+      posture: postureSettings,
+      postureNotes: () => posture.notes(),
       justLearnedBadFoods: () => gut.justLearned(),
       sore: () => pain.sore(Date.now()),
       justLearnedHurts: () => pain.justLearned(),
@@ -324,6 +339,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         healing: bodyEvents.healing(),
         pushed: bodyEvents.pushed(),
         motion: bodyEvents.motion(),
+        fallen: posture.fallen(),
+        displaced: posture.displaced(),
         locomotion: (({ moving, pattern, gait, stuck }) => ({ moving, pattern, gait, stuck }))(locomotion.status()),
         loud: bodyEvents.loud(),
         memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
@@ -366,6 +383,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       saveChests(chests, chestsFile(server.name)),
       saveHurts(pain.entries(), hurtsFile(server.name)),
       saveHurts(gut.entries(), badFoodsFile(server.name)),
+      saveSurfaces(posture.surfaces.entries(), surfacesFile(server.name)),
       saveBody({ sleptAtAge: sleepClock.sleptAtAge() }, bodyFile(server.name)),
       saveMemories(memory, memoriesFile(server.name)),
     ]).catch((error) => console.error(`Could not save what the bot learned: ${error}`));

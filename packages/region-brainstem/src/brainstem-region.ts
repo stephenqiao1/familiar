@@ -1,7 +1,7 @@
 import type { Proposal, Region, State, Workspace } from "@familiar/contracts";
 import { createLoadedResponses, LOADED_URGENCY, type Thing } from "./loaded.js";
 import type { BrainstemSettings } from "./settings.js";
-import { AROUSAL_SIGNAL, ORIENTING_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+import { AROUSAL_SIGNAL, ORIENTING_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
 
 /** What a detector looks at: the last tick's state, this tick's, and the workspace. */
 export interface BrainstemMoment {
@@ -24,6 +24,8 @@ export interface Body {
   stuck?: boolean;
   /** How sore: 1 just after pulling away from pain, fading to 0. Default: 0. */
   sore?: number;
+  /** How unsteady: 0 firm on its feet, 1 about to be hurt by a fall. Default: not shared. */
+  unsteady?: number;
 }
 
 export interface BrainstemOptions {
@@ -56,6 +58,8 @@ export interface BrainstemOptions {
   drowsy(ws: Workspace): boolean;
   /** f: the body's levels, or null before the first state. */
   body(state: State): Body | null;
+  /** f: what the body's balance and posture did this tick, for the trace. Asked once a tick. Default: nothing. */
+  postureNotes?(state: State): Record<string, unknown> | null;
   /** The skills proposed for a startle and for a look. */
   skills: { brace: string; lookAt: string };
   /** The urgency of a look. Default: 0.35. */
@@ -91,7 +95,7 @@ const STAY_ASLEEP_URGENCY = 0.5;
  *      reports loaded responses and hold-backs it had to ignore;
  *   e) arousal gate: shares `arousal`; while asleep and undisturbed, shares `upper_paused` so the
  *      deciding layers above make no calls. A startle, damage, a hard reflex or alarm ends it at once;
- *   f) body signals: shares `stuck` and `sore` (the vital signs are the medulla's).
+ *   f) body signals: shares `stuck`, `sore` and `unsteady` (the vital signs are the medulla's).
  * Everything it does is in the trace.
  */
 export function createBrainstemRegion(options: BrainstemOptions): Region {
@@ -125,8 +129,11 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
         stuck = body.stuck ? 1 : stuck * Math.exp(-dt / STUCK_TAU_SECONDS);
         ws.setSignal(STUCK_SIGNAL, stuck);
         ws.setSignal(SORE_SIGNAL, body.sore ?? 0);
-        trace.body = { stuck, sore: body.sore ?? 0 };
+        if (body.unsteady !== undefined) ws.setSignal(UNSTEADY_SIGNAL, body.unsteady);
+        trace.body = { stuck, sore: body.sore ?? 0, ...(body.unsteady === undefined ? {} : { unsteady: body.unsteady }) };
       }
+      const posture = options.postureNotes?.(after);
+      if (posture) trace.posture = posture;
 
       // b) Startle.
       let startled: { by: string; source: Thing | null } | null = null;

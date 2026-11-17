@@ -3,7 +3,9 @@ import type { BrainstemOptions, Leaning, StartleDetector, Thing } from "@familia
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { thingsInView } from "./cues.js";
 import { asleep } from "./focus.js";
+import type { PostureNotes } from "../posture/runtime.js";
 import { MEDULLA_URGES } from "./medulla.js";
+import { postureTrace, unsteadyOf } from "./posture.js";
 import { minecraftDataOf } from "./read-state.js";
 import { CONTACT_DISTANCE, FAR_DISTANCE, playerReflexes } from "./reflexes.js";
 
@@ -83,7 +85,8 @@ export function somethingNew(before: MinecraftStateData, after: MinecraftStateDa
   const by = hurtBy(before, after);
   const attacker = by === null ? null : thingFor(after, by);
   if (attacker) return attacker;
-  const known = new Set([...before.nearby.mobs, ...before.nearby.players].map((t) => t.id));
+  // Moved somewhere else all at once: nothing here has been seen before.
+  const known = new Set(after.self.displaced ? [] : [...before.nearby.mobs, ...before.nearby.players].map((t) => t.id));
   const fresh = [...hostilesInView(after), ...after.nearby.players].filter((t) => !known.has(t.id)).sort((x, y) => x.dist - y.dist)[0];
   return fresh ? { id: fresh.id, kind: fresh.type } : null;
 }
@@ -109,9 +112,16 @@ export const REFLEX_NOTE =
   `Life-saving reflexes (${playerReflexes.filter((r) => r.kind === "hard").map((r) => r.name).join(", ")}) cannot be held back.`;
 
 /** What the brainstem region needs from the player (everything but the bot's own settings and alarm). */
-export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, sameTime = false, sore: () => number = () => 0): Pick<
+export function playerBrainstem<Ctx>(
+  skills: Skill<Ctx>[],
+  ctx: Ctx,
+  sameTime = false,
+  sore: () => number = () => 0,
+  /** How strongly unsteadiness is shared (0: not at all), and what the posture system did since last asked. */
+  posture: { unsteady: number; notes?: () => PostureNotes } = { unsteady: 0 },
+): Pick<
   BrainstemOptions,
-  "startle" | "novel" | "mayOrient" | "thingsOf" | "responseProblem" | "acceptsTarget" | "holdable" | "asleep" | "drowsy" | "body" | "skills" | "orientUrgency" | "looksAlongside"
+  "startle" | "novel" | "mayOrient" | "thingsOf" | "responseProblem" | "acceptsTarget" | "holdable" | "asleep" | "drowsy" | "body" | "postureNotes" | "skills" | "orientUrgency" | "looksAlongside"
 > {
   const find = (name: string) => skills.find((s) => s.name === name);
   return {
@@ -137,8 +147,9 @@ export function playerBrainstem<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, sameTime = 
     drowsy,
     body(state) {
       const self = minecraftDataOf(state)?.self;
-      return self ? { health: self.health / MAX.health, stuck: self.locomotion.stuck, sore: sore() } : null;
+      return self ? { health: self.health / MAX.health, stuck: self.locomotion.stuck, sore: sore(), ...(posture.unsteady > 0 ? { unsteady: unsteadyOf(state, posture.unsteady) } : {}) } : null;
     },
+    postureNotes: (state) => postureTrace(state, posture.notes?.() ?? {}),
     skills: { brace: "brace", lookAt: "look_at" },
     orientUrgency: LOOK_URGENCY,
   };

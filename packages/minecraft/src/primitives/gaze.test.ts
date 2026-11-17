@@ -93,6 +93,56 @@ describe("holdGaze, through the locomotion controller", () => {
     expect(t.keysDown()).toEqual(["forward"]);
   });
 
+  describe("stays on a fixed target", () => {
+    const TARGET = new Vec3(-20.5, 64.8, -10.5);
+    /** How far the head is from pointing at the target, in radians. */
+    const off = (t: { state: { entity: { position: Vec3; yaw: number } } }) => {
+      const to = TARGET.minus(t.state.entity.position.offset(0, 1.8, 0));
+      const want = Math.atan2(-to.x, -to.z);
+      return Math.abs(Math.atan2(Math.sin(t.state.entity.yaw - want), Math.cos(t.state.entity.yaw - want)));
+    };
+
+    it("when the bot is pushed sideways mid-walk", async () => {
+      const t = await walker();
+      holdGaze(t.locomotion, t.eye, () => TARGET);
+      await t.run(300);
+      expect(off(t)).toBeLessThan(0.01);
+      // A shove: three blocks east in one tick.
+      t.state.entity.position = t.state.entity.position.offset(3, 0, 0);
+      await t.run(100);
+      expect(off(t)).toBeLessThan(0.01);
+      const z = t.state.entity.position.z;
+      await t.run(500);
+      expect(off(t)).toBeLessThan(0.01);
+      expect(t.state.entity.position.z).toBeLessThan(z - 1.5); // and it is still walking its route
+    });
+
+    it("when the route turns a corner", async () => {
+      const t = await walker();
+      holdGaze(t.locomotion, t.eye, () => TARGET);
+      await t.run(300);
+      // The journey now heads east instead of north.
+      void t.locomotion.goTo(t.at(200, Math.floor(t.state.entity.position.z)), {}, never);
+      await t.run(600);
+      const x = t.state.entity.position.x;
+      await t.run(500);
+      expect(off(t)).toBeLessThan(0.01);
+      expect(t.state.entity.position.x).toBeGreaterThan(x + 1.5);
+    });
+
+    it("when the gait changes from a walk to a sprint and back", async () => {
+      const t = await walker(0.2);
+      holdGaze(t.locomotion, t.eye, () => TARGET);
+      await t.run(300);
+      for (const speed of [1, 0.2, 0.5]) {
+        t.locomotion.setDrive({ speed });
+        await t.run(400);
+        expect(off(t), `speed ${speed}`).toBeLessThan(0.01);
+      }
+      expect(t.state.entity.position.z).toBeLessThan(-5);
+    });
+  });
+
   it("follows a point that moves", async () => {
     const t = await walker();
     let east = false;

@@ -16,6 +16,8 @@ export interface StuckSpots {
   failedAt(pos: Vec3, now: number): boolean;
   /** Whether a position is on a spot being avoided. */
   avoid(pos: { x: number; y: number; z: number }, now: number): boolean;
+  /** Forgets every mark and failure. */
+  clear(): void;
 }
 
 export function createStuckSpots(): StuckSpots {
@@ -36,6 +38,10 @@ export function createStuckSpots(): StuckSpots {
     avoid(pos, now) {
       marked = marked.filter((m) => m.until > now);
       return marked.some((m) => near(pos, m.pos, AVOID_RADIUS));
+    },
+    clear() {
+      failures = [];
+      marked = [];
     },
   };
 }

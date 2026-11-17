@@ -80,6 +80,8 @@ export interface Locomotion {
   status(): LocomotionStatus;
   /** Keeps routes away from a spot for 5 minutes (somewhere that hurt). */
   avoid(spot: { x: number; y: number; z: number }): void;
+  /** Forgets the stuck and avoid marks: they were for a place the bot is no longer in. */
+  forget(): void;
   /** Lets something else (a held look) take the head during a plain walk; null gives it back. */
   setHeadOverride(override: HeadOverride | null): void;
 }

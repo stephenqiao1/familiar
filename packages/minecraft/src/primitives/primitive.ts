@@ -1,7 +1,9 @@
-import type { BodyPart, Skill, SkillResult } from "@familiar/contracts";
+import type { BodyPart, Changes, Skill, SkillResult } from "@familiar/contracts";
 import { sleepFor } from "../abort.js";
 import type { Entity } from "../mc-types.js";
 import { resolveTarget } from "../resolve-target.js";
+import { sawComeDown } from "../posture/learn.js";
+import { holdStance } from "../posture/stance.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { parseTarget } from "../target.js";
 import { doClose } from "./windows.js";
@@ -21,6 +23,8 @@ export interface PrimitiveSpec {
   risky?: boolean;
   /** Works with an open container, so one is left open before and after it. Default: any open one is closed. */
   usesWindow?: boolean;
+  /** Sneaking changes what it does (a block used while sneaking is not opened), so no stance is held for it. */
+  standing?: boolean;
   /** What it acts on when given no target (e.g. "ahead"), so the changes to that thing are watched too. */
   defaultTarget?(ctx: MinecraftCtx): string | undefined;
   /** How long to wait after it ends for the world to catch up (drops, hurt, block updates). Default: 100 ms. */
@@ -35,6 +39,8 @@ const SETTLE_MS = 100;
  * Turns a description into a primitive skill, and wraps every run the same way:
  *   - a container left open by an earlier movement is closed first (unless this one uses it);
  *   - a snapshot is taken before and after, and what changed is reported in `changes`;
+ *   - stance: if it leaves the legs free and the bot is at an edge or beside something that
+ *     hurts, sneak is held for as long as it runs (`changes.stance`), and let go the moment it is stopped;
  *   - `changes.asExpected` says whether the run did what the primitive says it does when it works;
  *   - an error becomes a clean failure with a reason, never a throw.
  */
@@ -59,6 +65,7 @@ export function primitive(spec: PrimitiveSpec): Skill<MinecraftCtx> {
       };
       bot.on("entityHurt", onHurt);
       const before = takeSnapshot(bot, focus, hurts);
+      const stance = holdStance(bot, spec, ctx.locomotion.status().moving, signal);
       let result: SkillResult;
       try {
         result = await spec.run(ctx, target, signal);
@@ -66,11 +73,14 @@ export function primitive(spec: PrimitiveSpec): Skill<MinecraftCtx> {
       } catch (error) {
         result = signal.aborted ? { status: "interrupted" } : { status: "failed", reason: error instanceof Error ? error.message : String(error) };
       } finally {
+        stance.release();
         bot.off("entityHurt", onHurt);
       }
       // A window opened in passing (a crafting table that was used, say) is not left open.
       if (!spec.usesWindow) await doClose(bot).catch(() => {});
-      const changes = { ...changesBetween(before, takeSnapshot(bot, focus, hurts)), ...result.changes };
+      const changes: Changes = { ...changesBetween(before, takeSnapshot(bot, focus, hurts)), ...(stance.held ? { stance: true } : {}), ...result.changes };
+      // A block the bot dug under came down: that is how it learns which blocks are loose.
+      if (typeof changes.cameDown === "string" && focus.block) sawComeDown(bot, changes.cameDown, focus.block);
       // HOOK(prediction-checker): `asExpected` is only recorded here. A later region will read it
       // from the skill event and react when a movement did not do what it was expected to.
       changes.asExpected = result.status === "done" && asExpected(spec.expects, changes);

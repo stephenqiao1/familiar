@@ -1,4 +1,5 @@
 import type { Skill } from "@familiar/contracts";
+import { installPosture } from "../posture/runtime.js";
 import { describe, expect, it } from "vitest";
 import type { MinecraftCtx } from "../skill-context.js";
 import { entity, fakeBot, item, type FakeOptions } from "./fake-bot.test-helper.js";
@@ -50,14 +51,94 @@ describe("the primitives", () => {
     }
   });
 
-  it("step refuses to walk into lava or off a drop, and break_block refuses a protected block", () => {
-    const lava = fakeBot({ blocks: { "0,63,-1": "lava" } });
-    expect(named("step").canRun(lava.ctx, "dir:forward")).toBe(false);
-    const cliff = fakeBot({ blocks: { "0,62,-1": "air", "0,61,-1": "air", "0,60,-1": "air" } });
-    expect(named("step").canRun(cliff.ctx, "dir:forward")).toBe(false);
-    expect(named("step").canRun(cliff.ctx, "dir:back")).toBe(true);
+  it("break_block refuses a protected block", () => {
     const chest = fakeBot({ blocks: { "0,63,-1": "chest" } });
     expect(named("break_block").canRun(chest.ctx, "dir:forward")).toBe(false);
+  });
+
+  describe("the check before acting", () => {
+    const run = (bot: ReturnType<typeof fakeBot>, name: string, target?: string) => named(name).run(bot.ctx, target, new AbortController().signal);
+
+    it("step fails with the reason when it would walk into lava or off a drop, and holds no key", async () => {
+      const lava = fakeBot({ blocks: { "0,63,-1": "lava" } });
+      expect(await run(lava, "step", "dir:forward")).toMatchObject({ status: "failed", reason: "nowhere safe to stand there" });
+      const cliff = fakeBot({ blocks: { "0,62,-1": "air", "0,61,-1": "air", "0,60,-1": "air" } });
+      expect(await run(cliff, "step", "dir:forward")).toMatchObject({ status: "failed", reason: "nothing to stand on there", changes: { asExpected: false } });
+      expect(cliff.keysDown()).toEqual([]);
+      expect(cliff.state.entity.position.z).toBe(0.5);
+    });
+
+    it("break_block fails with the reason when the dig would drop the bot, and digs nothing", async () => {
+      const pillar = fakeBot({ blocks: { "0,61,0": "air", "0,60,0": "air", "0,59,0": "air" } });
+      const result = await run(pillar, "break_block", "pos:0,62,0");
+      expect(result).toMatchObject({ status: "failed", reason: "unsafe from here (would drop me 3 blocks or more): stand to the side" });
+      expect(pillar.blockName(0, 62, 0)).toBe("stone");
+    });
+
+    it("break_block fails with the reason under a gravel column at head height, and goes ahead under stone", async () => {
+      const gravel = fakeBot({ blocks: { "0,64,-1": "stone", "0,65,-1": "gravel", "0,66,-1": "gravel" } });
+      expect(await run(gravel, "break_block", "pos:0,64,-1")).toMatchObject({ status: "failed", reason: "unsafe from here (would bring the gravel down beside my head): stand to the side" });
+      const stone = fakeBot({ blocks: { "0,64,-1": "stone", "0,65,-1": "stone" } });
+      expect(await run(stone, "break_block", "pos:0,64,-1")).toMatchObject({ status: "done" });
+    });
+
+    describe("stance", () => {
+      /** A drop of 5 just in front (north) of where the bot stands. */
+      const edge = () => fakeBot({ blocks: { "0,62,-1": "air", "0,61,-1": "air", "0,60,-1": "air", "0,59,-1": "air", "0,64,1": "stone" }, digMs: 60 });
+
+      it("holds sneak during a hands-only action at an edge, and lets go after", async () => {
+        const bot = edge();
+        const running = run(bot, "break_block", "pos:0,64,1");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(bot.keysDown()).toEqual(["sneak"]);
+        const result = await running;
+        expect(result).toMatchObject({ status: "done", changes: { stance: true } });
+        expect(result.changes?.sneaking).toBeUndefined();
+        expect(bot.keysDown()).toEqual([]);
+      });
+
+      it("lets go at once when the action is stopped (a hard reflex taking over)", async () => {
+        const bot = edge();
+        const stop = new AbortController();
+        const running = named("break_block").run(bot.ctx, "pos:0,64,1", stop.signal);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(bot.keysDown()).toEqual(["sneak"]);
+        stop.abort();
+        expect(bot.keysDown()).toEqual([]);
+        expect((await running).status).toBe("interrupted");
+      });
+
+      it("is not held on open ground, for an action that uses the legs, or when sneaking would change the action", async () => {
+        const open = fakeBot({ blocks: { "0,64,1": "stone" }, digMs: 60 });
+        const digging = run(open, "break_block", "pos:0,64,1");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(open.keysDown()).toEqual([]);
+        expect((await digging).changes?.stance).toBeUndefined();
+
+        const bot = fakeBot({ blocks: { "0,62,-1": "air", "0,61,-1": "air", "0,60,-1": "air" } });
+        const stepping = run(bot, "step", "dir:back");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(bot.keysDown()).toEqual(["back"]);
+        bot.state.entity.position.z += 1;
+        await stepping;
+
+        const chest = fakeBot({ blocks: { "0,62,-1": "air", "0,61,-1": "air", "0,60,-1": "air", "0,63,1": "chest" } });
+        expect((await run(chest, "open", "pos:0,63,1")).changes?.stance).toBeUndefined();
+      });
+
+      it("is not held with the stance switched off", async () => {
+        const bot = edge();
+        installPosture(bot.bot, { check: 1, stance: 0 }, () => {});
+        expect((await run(bot, "break_block", "pos:0,64,1")).changes?.stance).toBeUndefined();
+      });
+    });
+
+    it("a moving jump that would come down over a drop fails with the reason; a standing jump goes ahead", async () => {
+      const cliff = fakeBot({ blocks: { "0,62,-1": "air", "0,61,-1": "air", "0,60,-1": "air" } });
+      expect(await run(cliff, "jump")).toMatchObject({ status: "done" });
+      cliff.state.entity.velocity.set(0, 0, -0.1);
+      expect(await run(cliff, "jump")).toMatchObject({ status: "failed", reason: "nothing to stand on there" });
+    });
   });
 
   describe("when they work", () => {

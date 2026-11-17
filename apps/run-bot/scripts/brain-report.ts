@@ -1,5 +1,5 @@
 // Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
-// surprises, reflexes and the brainstem, the medulla, memories, interrupts, warnings and region errors.
+// surprises, reflexes and the brainstem, the medulla, balance and posture, memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -202,6 +202,34 @@ for (const d of died) {
   const worst = (key: string, low = false) => (lastTen.length ? (low ? Math.min : Math.max)(...lastTen.map((v) => v[key] ?? (low ? 1 : 0))).toFixed(2) : "?");
   console.log(`DEATH at tick ${d.tick}, the 10 s before: air ${worst("air")}, hunger ${worst("hunger")}, pain ${worst("pain")}, hurt ${worst("hurt")}, sick ${worst("sick")}, cold ${worst("cold")}, tired ${worst("tired")}; overall vitals down to ${worst("vitals", true)}`);
 }
+
+// Balance and posture.
+type PostureTrace = {
+  balance?: number;
+  refusals?: { action: string; at: string; reason: string }[];
+  repeated?: { action: string; at: string; reason: string }[];
+  stance?: string[];
+  falls?: { blocks: number; damage: number; steered: boolean; onto: string; note?: string }[];
+  learned?: string[];
+  displaced?: string[];
+  worstCheckMs?: number;
+};
+const postures = ticks.map((t) => (trace(t, "brainstem").posture as PostureTrace | undefined) ?? {});
+const refusals = postures.flatMap((p) => p.refusals ?? []);
+console.log(`\nPOSTURE: ${refusals.length} action(s) refused: ${list(count(refusals, (r) => `${r.action}: ${r.reason}`), 8)}`);
+for (const r of postures.flatMap((p) => p.repeated ?? [])) console.log(`!! REFUSED THREE TIMES IN A MINUTE: ${r.action} at ${r.at} (${r.reason}): the layer above is not learning from the failure`);
+const UNSTEADY_ABOVE = 0.3;
+const unsteadyMs = ticks.reduce((sum, t, i) => sum + ((t.signals.unsteady?.value ?? 0) > UNSTEADY_ABOVE ? span(t, i) : 0), 0);
+console.log(`UNSTEADY (above ${UNSTEADY_ABOVE}): ${(unsteadyMs / 1000).toFixed(0)} s of ${seconds.toFixed(0)} s; lowest balance ${Math.min(1, ...postures.map((p) => p.balance ?? 1)).toFixed(2)}`);
+console.log(`STANCE HOLDS: ${list(count(postures.flatMap((p) => p.stance ?? []), (a) => a))}`);
+const falls = postures.flatMap((p) => p.falls ?? []);
+console.log(`FALLS: ${falls.length}${falls.length ? `: ${falls.map((f) => `${f.blocks} blocks onto ${f.onto}, damage ${f.damage}, ${f.steered ? "steered" : "not steered"}`).join("; ")}` : ""}`);
+const steered = falls.filter((f) => f.steered);
+if (steered.length) console.log(`  steering: ${steered.filter((f) => f.damage === 0).length} of ${steered.length} steered falls ended unhurt`);
+console.log(`DISPLACEMENTS: ${postures.flatMap((p) => p.displaced ?? []).join("; ") || "none"}`);
+console.log(`SURFACES LEARNED: ${postures.flatMap((p) => p.learned ?? []).join("; ") || "none"}`);
+const worstCheck = Math.max(0, ...postures.map((p) => p.worstCheckMs ?? 0));
+console.log(`SLOWEST POSTURE CHECK: ${worstCheck.toFixed(3)} ms${worstCheck > 2 ? " (!! over the 2 ms limit)" : ""}`);
 
 // Memory.
 type Recorded = { trigger: string; summary: string; strength: number; merged: boolean };

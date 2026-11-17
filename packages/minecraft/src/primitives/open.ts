@@ -44,6 +44,7 @@ export const open = primitive({
   name: "open",
   description: "Open a container within reach (pos:x,y,z, dir:<direction> or ahead; default: ahead).",
   parts: ["hands", "head"],
+  standing: true,
   expects: ["opened"],
   usesWindow: true,
   defaultTarget: () => AHEAD,

@@ -97,9 +97,12 @@ life-saving ones cannot be overruled. Each bot's settings are the `brainstem` bl
 | `about_to_touch` | hard | Moving (a single step, a push; not a planned route) and the next block that way is lava, fire or a block known to hurt | `recoil`: stop at once and step back |
 | `hold_ground` | soft, base 0.8 | Pushed, and the push is carrying it toward a big drop, lava, fire or a block known to hurt within 2 blocks | `steady`: sneak and step back to where it stood |
 | `edge_guard` | soft, base 0.6 | Stepping (not on a planned route) toward a drop of 3 or more within 1 block | `steady`: stop and step back |
+| `falling_right` | hard | Falling toward a landing that would hurt, with a better one (water, or ground at least 3 blocks higher) within 2 blocks sideways | `air_steer`: face it and push toward it, letting go in time to come down on it |
 
-- The three older hard reflexes are unchanged and come first. There is no reflex for falling:
-  mid-air there is nothing a body can do (a slot is marked in the file).
+- The three older hard reflexes are unchanged and come first. `falling_right` is the righting
+  reflex (see Balance and posture below): with no better landing in reach it stays silent, since
+  mid-air there is then nothing a body can do. `hold_ground` never fires for a bot that was
+  moved somewhere else all at once (a teleport is not a push).
 - The soft two take the brainstem's gain (alarm raises them) and a goal's `holdBack` can name
   them, for example when the bot means to drop down. They never fire while a hard reflex's skill runs.
 - **The place moved to must itself hold.** `withdraw` only picks a spot that is safe to stand on,
@@ -149,7 +152,8 @@ blocks known to hurt within 3 blocks.
   asleep and undisturbed it shares `upper_paused`: instinct and the prefrontal cortex make no
   calls. A startle, damage, a hard reflex or alarm ends the pause on the same tick. Reflexes, the
   neuromodulators and memory never pause.
-- It also shares `stuck` and `sore`. The body's vital signs are the medulla's job (below).
+- It also shares `stuck`, `sore` and `unsteady` (1 − balance; see Balance and posture). The
+  body's vital signs are the medulla's job (below).
 
 ## The medulla: body upkeep
 
@@ -215,6 +219,104 @@ lowest air, food and health, time spent hurt but too hungry to heal, each upkeep
 often it won, was outvoted or was held back, foods learned as bad, and the vital signs in the 10
 seconds before each death.
 
+## Balance and posture
+
+The vestibular part of the brainstem: the bot's sense of balance, and the adjustments that keep
+it steady. It builds on `hold_ground`, `edge_guard` and the checks in `safety.ts`. The code is in
+`packages/minecraft/src/posture/` and `encode/balance.ts`; each bot's settings are the `posture`
+block in `bots.json` (`brain/posture.ts`).
+
+**The sense of balance** (state schema 14, read fresh every tick):
+
+| Field | What it says |
+|---|---|
+| `self.support` | What holds the bot up: `on` (the block), `kind`, `edges` (how many of the four sides open onto a drop of 3 or more) and `headroom` (open blocks above the head, up to 3) |
+| `kind` | `solid`; `loose` (falls when unsupported); `slippery`; `slow`; `liquid`; `climbing` (ladder, vine, scaffolding); `riding`; `none` (in the air) |
+| `self.velocity` | Blocks per second on each axis, and `onGround` |
+| `self.landing` | Only in the air: how far down the fall ends (`blocks`), onto what (`onto`, a block name or "void"), whether it would cost health (`hurts`), and a better landing within 2 blocks if there is one (`steer`) |
+| `self.displaced` | True for one tick when the position jumped more than 8 blocks in one tick, or the dimension changed |
+| `self.balance` | One number, 0 to 1 |
+
+Balance is 1 on flat solid ground. By kind: loose 0.7, slippery 0.6, slow 0.8, liquid 0.6 (0.4
+if it flows), climbing 0.5, riding 0.8; in the air 0.9 for a hop, 0.4 for a fall that will not
+hurt, 0 for one that will. Edges multiply it: one edge (a cliff top) × 0.85, two (a ledge, a
+one-wide bridge) × 0.5, three × 0.4, four × 0.3.
+
+**Check before acting** (`posture/check.ts`, rules in `posture/rules.ts`). One function,
+`postureCheck`, answers "would this leave me unsteady or hurt?" before every change to blocks or
+to where the bot stands: `break_block`, `place_block`, `step`, `jump`, `dig_out`, and the digging
+and placing in the pathing rules. It only reads the world. It refuses:
+
+| Change | Refused when | Reason given |
+|---|---|---|
+| Break | Lava or water touches the block | "would let lava in" |
+| Break | It is the block underfoot and the drop is 3 or more, or onto lava, water or something that hurts | "would drop me 3 blocks or more" |
+| Break | A loose block above it would come to rest in the body's space, or it is at head height right beside the bot | "would bring the gravel down on me" / "beside my head" |
+| Break | It is the ladder or vine being climbed, or the block that hangs from | "would break the ladder I am climbing" |
+| Break | The bot stands on a loose block and this is what that block rests on | "would take away what the sand under me rests on" |
+| Break (planning a route) | Liquid touches it, or anything loose sits above it | "would bring the gravel above it down" |
+| Place | A loose block set where it would fall onto the bot | "would bring the sand down on me" |
+| Step, moving jump | Nowhere safe to stand there, one block up or down included | "nothing to stand on there" / "not enough headroom there" |
+
+- The refusal is the primitive's failure reason, so the skill event carries it and the scorebook
+  learns the action cost something. For that reason `canRun` no longer hides an unsafe step or
+  dig: it can be tried, and fails with the reason.
+- **Adjust before refusing.** If the same change would be safe from one step to the side (still
+  within reach), the reason says so: "unsafe from here (...): stand to the side". The check never
+  moves the bot.
+- A solid pillar may be dug down one block at a time (each dig drops the bot one block); only a
+  drop of 3 or more is refused. Already buried, digging the block the head is in is allowed.
+- It is measured: the slowest check is in the trace (`worstCheckMs`, limit 2 ms). The same
+  refusal three times in a minute is logged loudly: the layer above is not learning from it.
+- `posture.check: 0` switches it off entirely. That is for experiments only.
+
+**Stance.** While a primitive that leaves the legs free runs (break, place, hit, use, eat, a
+look) and the bot is within one block of a drop of 3 or more or of something that hurts, sneak is
+held for the length of the action and let go after (`changes.stance`). It is done once, in the
+shared primitive wrapper, from each primitive's declared parts. It lets go the moment the action
+is stopped, so a hard reflex is never slowed by sneaking. Not held: while travelling, in the air
+or in water, or for `open`, `use_on` and `craft` (marked `standing`), because the game does not
+open a block for a sneaking player.
+
+**Unsteady.** The brainstem shares `unsteady` = (1 − balance) × `posture.unsteady`. Locomotion's
+caution adds 0.7 × unsteady, so on a ledge or a one-wide bridge the bot uses the careful rules
+and sneaks whatever its focus, and even when frightened. A hook for the focus dial to read it is
+marked `HOOK(focus-unsteady)` in `brain/posture.ts`; it is not wired.
+
+**Falling.** `falling_right` (above) runs `air_steer`. The air gives little push, and a landing
+can be one block wide, so it pushes only while the body would otherwise come down short. The
+balance sense never offers lava, fire, the void or anything known to hurt as a landing, nor one
+behind a wall. Every fall of 1.5 blocks or more is noted on landing (blocks, damage, whether it
+steered) in the trace and, when `air_steer` ran, in its skill event's `changes`. A fall that hurt
+marks the spot where the bot left the ground as one to avoid for 5 minutes, the same way a spot
+that hurt to touch is.
+
+**Learning how surfaces behave** (`posture/surfaces.ts`, `posture/learn.ts`; saved in
+`data/<name>/surfaces.json`):
+- *Loose.* The bot is born knowing only `posture.innateLoose` (by default sand, red sand, gravel
+  and the concrete powders). When it breaks a block and the snapshot shows the solid block above
+  it left its place (`changes.cameDown`), and that block is found where the dug block was or just
+  below a moment later, that block type's count goes up. Twice, in separate incidents, makes it
+  known loose. Nothing is learned with another player within 8 blocks or an explosion in the
+  last 3 seconds.
+- *Slippery and slow* have no starting list. On a straight, level stretch of a walked journey
+  the pace is compared with what the legs should manage (from `gait.ts`, weighed by how much of
+  the stretch was sprinted): under 0.7 of it is slow, over 1.3 slippery. Sliding more than a
+  block after the legs stop also counts as slippery. Three sightings make it known.
+- The balance sense and the check ask what is known through a per-bot lookup
+  (`setKnownSurfaces`), the way `pain.ts` feeds `safety.ts`. Each thing learned is logged.
+
+**Being moved somewhere else.** When `displaced` is set: the journey stops and the locomotion
+controller forgets its stuck and avoid marks (`locomotion.forget()`); noradrenaline raises
+`replan` so the planner looks again; everything in view counts as new, so orienting can fire;
+and `hold_ground` does not. A death and respawn far away goes the same way.
+
+**In the trace** (`brainstem.posture`): `support`, `balance`, `landing` while falling,
+`refusals` (action, place, reason), `repeated`, `stance`, `falls`, `learned`, `displaced` and
+`worstCheckMs`. `pnpm brain-report` has a POSTURE section: actions refused and why, time spent
+unsteady, stance holds, falls (height, damage, whether steering helped), displacements, surfaces
+learned and the slowest check.
+
 ## The spinal motor layer: primitives
 
 The primitives (`packages/minecraft/src/primitives/`) are the small set of movements everything
@@ -233,8 +335,8 @@ else is built from, and the **single doorway** to the bot's body.
   `primitives/` and `locomotion/` calls the bot's action methods, or if any file outside
   `locomotion/` touches the pathfinder or holds movement keys for travel.
 - **Safe to try at random.** A primitive that cannot run refuses, or fails with a reason. It
-  respects `safety.ts` and `protected.ts` (no stepping into lava or off a drop, no breaking the
-  base). It lets go of keys and items when it ends or is stopped. `break_block` is the one long
+  respects `protected.ts` (no breaking the base) and the posture check (no stepping into lava or
+  off a drop, no digging that would drop or bury the bot: see Balance and posture). It lets go of keys and items when it ends or is stopped. `break_block` is the one long
   primitive (`long: true`); stopped, it reports how far it got.
 - **Targets that need no names.** Besides `nearest:<name>`, `pos:x,y,z`, `entity:<id>` and
   `player:<name>`: `ahead` (what the bot is looking at, within reach), `dir:forward|back|left|right|up|down`
@@ -302,12 +404,14 @@ a new command replaces the current one.
 **Drive: faster, slower, careful.** `packages/minecraft/src/brain/locomotion.ts` maps the brain's
 signals to the drive once per tick:
 - speed = 0.4 + 0.5 × alarm + 0.3 × (dopamine − 0.5) − 0.3 × hunger
-- caution = 0.3 + 0.3 × focus, and 0 while alarm is above 0.6 (a frightened bot does not tiptoe)
+- caution = 0.3 + 0.3 × focus, and 0 while alarm is above 0.6 (a frightened bot does not tiptoe),
+  plus 0.7 × unsteady whatever the alarm (see Balance and posture)
 
 Speed sets the gait: below 0.3 a walk; up to 0.7 a jog (sprinting only once a stretch has proved
 straight); above 0.7 a sprint whenever the game allows. The bot never sprints at 6 food or less
 (the game's rule). Following something, it sprints to catch up when it falls behind. Caution above
-0.6 uses the careful rules and sneaks within one block of a drop of 3 or more. Each bot's
+0.6 uses the careful rules and sneaks within one block of a drop of 3 or more (only with its
+feet on the ground: sneaking on a ladder or in water would hold it in place). Each bot's
 strengths are in `bots.json` under `locomotion` (`speedFromAlarm`, `speedFromDopamine`,
 `cautionFromFocus`); with all three at 0 the drive is fixed at speed 0.4, caution 0.3.
 
@@ -391,6 +495,12 @@ in `data/<name>/`.
 | Add a vital sign | `Vitals` and a signal name in `packages/region-brainstem/src/` (`medulla-region.ts`, `signals.ts`), and its reading in `playerVitals` in `packages/minecraft/src/brain/medulla.ts` |
 | Add a cure, or change how sick an effect makes the bot | `CURES` and `SICKNESS` in `packages/minecraft/src/brain/medulla.ts` |
 | Change how many meals it takes to learn a food is bad | `MEALS_TO_LEARN` in `packages/minecraft/src/gut.ts` |
+| Add a reason to refuse an action | `packages/minecraft/src/posture/rules.ts` (`breakReason`, `placeReason` or `moveReason`: return a plain sentence, or null) |
+| Make something new ask the check | Call `postureCheck(bot, "<action>", { kind: "break" \| "place" \| "move", ... })` before acting, and return its reason as the failure |
+| Change what the bot is born knowing about surfaces | `bots.json`: `posture.innateLoose` (an empty list makes it learn every loose block by digging under it) |
+| Change how unsteady affects caution | `CAUTION_FROM_UNSTEADY` in `packages/minecraft/src/brain/locomotion.ts`; a bot's own strength is `posture.unsteady` |
+| Change how steady each kind of footing is | `STEADY` and `BY_EDGES` in `packages/minecraft/src/encode/balance.ts` |
+| Change how many sightings it takes to learn a surface | `SIGHTINGS_TO_LEARN` in `packages/minecraft/src/posture/surfaces.ts` |
 | Add a hard reflex | `packages/minecraft/src/brain/reflexes.ts` (write a rule with `"hard"`, add it to `playerReflexes`). Keep these to what saves the bot's life: nothing can overrule them. |
 | Add a soft reflex | Same file, with `"soft"` and a base urgency. If it defends the bot, add its name to `DEFENCE_REFLEXES`; if its skill moves toward or away from a threat, add the skill to `LEANINGS` in `brainstem.ts`. |
 | Add a startle detector | `packages/minecraft/src/brain/brainstem.ts` (write a detector, add it to `playerStartles`) |

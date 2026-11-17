@@ -28,7 +28,7 @@ export function fakeTraveller(options: { blocks?: Record<string, string>; food?:
   const world = { blocked: false, noPath: false, pathLength: null as number | null, failSetGoal: false };
 
   const state = {
-    entity: { id: 1, position: new Vec3(0.5, 63, 0.5), yaw: 0, pitch: 0, height: 1.8, isValid: true, isCollidedHorizontally: false, isInWater: false },
+    entity: { id: 1, position: new Vec3(0.5, 63, 0.5), yaw: 0, pitch: 0, height: 1.8, isValid: true, onGround: true, isCollidedHorizontally: false, isInWater: false },
     food: options.food ?? 20,
     targetDigBlock: null as unknown,
     entities: {} as Record<number, unknown>,
@@ -103,7 +103,14 @@ export function fakeTraveller(options: { blocks?: Record<string, string>; food?:
 
   const bot = state as unknown as Bot;
   const rules = { normal: { name: "normal" }, careful: { name: "careful" } } as unknown as RuleSets;
-  const locomotion = createLocomotion(bot, { log: (msg) => logged.push(msg), rules: () => rules });
+  let avoiding: (pos: { x: number; y: number; z: number }) => boolean = () => false;
+  const locomotion = createLocomotion(bot, {
+    log: (msg) => logged.push(msg),
+    rules(avoid) {
+      avoiding = avoid;
+      return rules;
+    },
+  });
   return {
     bot,
     state,
@@ -112,6 +119,8 @@ export function fakeTraveller(options: { blocks?: Record<string, string>; food?:
     calls,
     logged,
     keysDown: () => [...keys].sort(),
+    /** Whether routes are being kept away from a spot. */
+    avoided: (x: number, z: number, y = 63) => avoiding({ x, y, z }),
     /** Advances fake time, one game tick at a time. */
     async run(ms: number) {
       for (let t = 0; t < ms; t += TICK_MS) {

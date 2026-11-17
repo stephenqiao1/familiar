@@ -4,6 +4,7 @@ import type { EncodableBot } from "./encodable-bot.js";
 import type { Vec3 } from "vec3";
 import type { Heading } from "../body-events.js";
 import type { Hurt } from "../pain.js";
+import { balanceSense } from "./balance.js";
 import { encodeSelf } from "./encode-self.js";
 import { dangerAlong, headInBlock, touchingOf } from "./touching.js";
 import { scanHazards } from "./scan-hazards.js";
@@ -11,7 +12,7 @@ import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 export interface EncodeContext {
   base: Base;
@@ -31,6 +32,10 @@ export interface EncodeContext {
   sinceSleepMinutes?: number;
   /** Health has gone up in the last few seconds. Default: false. */
   healing?: boolean;
+  /** How far the bot has fallen so far in the fall under way. Default: 0. */
+  fallen?: number;
+  /** The bot's position has just jumped without it travelling there. Default: false. */
+  displaced?: boolean;
   /** What the locomotion controller reports. Default: standing still. */
   locomotion?: MinecraftStateData["self"]["locomotion"];
   /** Loud events heard lately (explosions, thunder). Default: none. */
@@ -66,10 +71,13 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
       locomotion: ctx.locomotion ?? STANDING,
       touching: touchingOf(bot),
       inBlock: headInBlock(bot),
-      pushed: ctx.pushed ? { ...ctx.pushed, danger: dangerAlong(bot, ctx.pushed.toward) } : null,
+      // Being moved somewhere else is not a push.
+      pushed: ctx.pushed && !ctx.displaced ? { ...ctx.pushed, danger: dangerAlong(bot, ctx.pushed.toward) } : null,
       motion: ctx.motion ? { toward: ctx.motion, danger: dangerAlong(bot, ctx.motion) } : null,
       sinceSleepMinutes: ctx.sinceSleepMinutes ?? 0,
       healing: ctx.healing ?? false,
+      ...balanceSense(bot, ctx.fallen ?? 0),
+      displaced: ctx.displaced ?? false,
     },
     nearby: {
       hazards: scanHazards(bot, limit),

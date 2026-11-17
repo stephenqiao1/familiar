@@ -6,11 +6,13 @@ export interface EncodableBot {
   food: number;
   heldItem: { name: string } | null;
   /** `metadata`: the bot's own flags as the server sent them (burning, air left); see body.ts. */
-  entity: { id: number; position: Vec3; onGround?: boolean; metadata?: unknown[]; effects?: unknown };
+  entity: { id: number; position: Vec3; onGround?: boolean; metadata?: unknown[]; effects?: unknown; velocity?: { x: number; y: number; z: number } };
+  /** What the bot is riding, if anything. */
+  vehicle?: { name?: string | undefined } | null;
   /** The hidden reserve behind the food bar. */
   foodSaturation?: number;
   time: { isDay: boolean };
-  game: { dimension: string };
+  game: { dimension: string; minY?: number };
   isSleeping: boolean;
   inventory: { items(): EncodableItem[] };
   entities: Record<string, EncodableEntity>;

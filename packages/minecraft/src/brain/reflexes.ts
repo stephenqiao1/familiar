@@ -108,8 +108,8 @@ export const eatWhenStarving = rule("eat_when_starving", "soft", (data) => {
  * Every reflex for a bot with these settings, checked every tick: the hard ones (the three that
  * were always there, then withdrawal, buried and about-to-touch), then the soft ones.
  */
-export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES): ReflexRule[] {
-  const protective = protectiveReflexes(settings);
+export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1): ReflexRule[] {
+  const protective = protectiveReflexes(settings, righting);
   return [inLavaOrFire, drowning, lastStand, ...protective.hard, threatContact, threatApproaching, ...protective.soft, eatWhenStarving];
 }
 

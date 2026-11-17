@@ -35,6 +35,7 @@ export const craft = primitive({
   name: "craft",
   description: "Make an item the bot has the ingredients for: item:<name>. Uses a crafting table within reach if the recipe needs one.",
   parts: ["hands"],
+  standing: true,
   expects: ["gained", "lost"],
 
   canRun(ctx, target) {

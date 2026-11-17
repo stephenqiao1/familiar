@@ -1,7 +1,7 @@
 import type { Bot } from "mineflayer";
 import { sleepFor } from "../abort.js";
 import { stepOf } from "../facing.js";
-import { isSafeToStand } from "../safety.js";
+import { postureCheck } from "../posture/check.js";
 import type { Direction } from "../target.js";
 import { directionOf, PRIMITIVE_MS } from "./aim.js";
 import { holdKey, releaseKeys, type Key } from "./keys.js";
@@ -29,12 +29,9 @@ export async function doStep(bot: Bot, dir: Direction, signal: AbortSignal): Pro
   }
 }
 
-/** Whether the block one step away is somewhere safe to stand (not a drop, lava, fire or a wall). */
-function safeStep(bot: Bot, dir: Direction): boolean {
-  const feet = bot.entity.position.floored();
-  const to = feet.plus(stepOf(bot.entity.yaw, dir));
-  // One block up or down is an ordinary step; anything else is a wall or a drop.
-  return [0, -1, 1].some((dy) => isSafeToStand(bot, to.offset(0, dy, 0)));
+/** Where one step that way would end. */
+function stepTo(bot: Bot, dir: Direction) {
+  return bot.entity.position.floored().plus(stepOf(bot.entity.yaw, dir));
 }
 
 /** Takes one step relative to where the bot faces. Needs no target to walk to. */
@@ -47,13 +44,15 @@ export const step = primitive({
 
   canRun(ctx, target) {
     const dir = target === undefined ? "forward" : directionOf(target);
-    return dir !== null && STEPS.includes(dir) && safeStep(ctx.bot, dir);
+    // Whether it is safe to stand there is asked when it runs, so a refusal comes back with its reason.
+    return dir !== null && STEPS.includes(dir);
   },
 
   async run(ctx, target, signal) {
     const dir = target === undefined ? "forward" : directionOf(target);
     if (!dir || !STEPS.includes(dir)) return { status: "failed", reason: `cannot step "${target}"` };
-    if (!safeStep(ctx.bot, dir)) return { status: "failed", reason: "nowhere safe to stand that way" };
+    const unsteady = postureCheck(ctx.bot, "step", { kind: "move", to: stepTo(ctx.bot, dir) });
+    if (unsteady) return { status: "failed", reason: unsteady };
     ctx.locomotion.stop();
     await doStep(ctx.bot, dir, signal);
     return { status: "done" };

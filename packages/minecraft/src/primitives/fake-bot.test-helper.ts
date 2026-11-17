@@ -74,7 +74,7 @@ export function fakeBot(options: FakeOptions = {}) {
 
   let walking = false;
   const state = {
-    entity: { id: 1, position: new Vec3(0.5, 63, 0.5), yaw: 0, pitch: 0, height: 1.8, isValid: true },
+    entity: { id: 1, position: new Vec3(0.5, 63, 0.5), velocity: new Vec3(0, 0, 0), onGround: true, yaw: 0, pitch: 0, height: 1.8, isValid: true },
     health: 20,
     food: 20,
     heldItem: null as FakeItem | null,

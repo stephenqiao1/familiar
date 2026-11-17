@@ -3,6 +3,7 @@ export { drowsy, headFree, HOLDABLE, leaningOf, playerBrainstem, playerStartles,
 export { asleep, moved, playerFocus, watchedThings } from "./focus.js";
 export { approachableThings, skillsToward, thingsInView } from "./cues.js";
 export { DEFAULT_LOCOMOTION, driveFrom, locomotionProblem, RESTING_DRIVE, type LocomotionSettings } from "./locomotion.js";
+export { DEFAULT_POSTURE, postureProblem, wasDisplaced, type PostureSettings } from "./posture.js";
 export { DEFAULT_MEDULLA, HEALING_FOOD, isHarmful, medullaProblem, medullaUrges, playerVitals, type MedullaSettings } from "./medulla.js";
 export { placeOf, playerMemories } from "./memories.js";
 export { playerInstinct } from "./instinct.js";

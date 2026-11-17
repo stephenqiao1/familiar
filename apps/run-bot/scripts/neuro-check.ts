@@ -321,7 +321,8 @@ const scenes: Scene[] = [
       const escapes = run.ticks.filter((t) => t.action.skill === "escape_hazard");
       const lastIn = inLava.at(-1);
       const burning = run.ticks.filter((t) => selfOf(t).onFire);
-      const instinctAsked = run.ticks.some((t) => JSON.stringify(run.trace(t, "instinct").questions ?? "").includes("escape_hazard"));
+      // Only the menu counts: the planner's goal text, which Jev is shown, may name the skill in its own words.
+      const instinctAsked = run.ticks.some((t) => ((run.trace(t, "instinct").questions as { options?: string[] }[] | undefined) ?? []).some((q) => q.options?.includes("escape_hazard")));
       return [
         ["the bot was in lava", first !== undefined, `${inLava.length} ticks`],
         ["burning is sensed", burning.length > 0, `${burning.length} ticks on fire`],

@@ -5,7 +5,8 @@ import { headInBlock } from "../encode/touching.js";
 import type { Block } from "../mc-types.js";
 import { doBreak } from "../primitives/break-block.js";
 import { isProtectedBlock } from "../protected.js";
-import { isSafeToDig, isSafeToStand, nearestSpot, touchesHurt } from "../safety.js";
+import { postureCheck } from "../posture/check.js";
+import { isSafeToStand, nearestSpot, touchesHurt } from "../safety.js";
 import type { MinecraftCtx } from "../skill-context.js";
 
 /** Open space is looked for this close; stepping there takes about this long per block. */
@@ -17,7 +18,7 @@ const GIVE_UP_MS = 6000;
 function headBlock(bot: Bot): Block | null {
   const block = bot.blockAt(bot.entity.position.offset(0, 1.62, 0));
   if (!block || block.boundingBox !== "block" || isProtectedBlock(block.name)) return null;
-  return bot.canDigBlock(block) && isSafeToDig(bot, block) ? block : null;
+  return bot.canDigBlock(block) && postureCheck(bot, "dig_out", { kind: "break", at: block.position }) === null ? block : null;
 }
 
 /** The nearest open, safe place to stand close by, or null. */

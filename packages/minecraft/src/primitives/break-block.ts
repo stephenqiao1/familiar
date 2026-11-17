@@ -1,7 +1,7 @@
 import type { Bot } from "mineflayer";
 import type { Block } from "../mc-types.js";
 import { isProtectedBlock } from "../protected.js";
-import { isSafeToDig } from "../safety.js";
+import { postureCheck } from "../posture/check.js";
 import { AHEAD, blockOf, reasonOf } from "./aim.js";
 import { primitive } from "./primitive.js";
 
@@ -49,6 +49,8 @@ export const breakBlock = primitive({
     const { bot } = ctx;
     const block = breakable(bot, target);
     if (!block) return { status: "failed", reason: `cannot break "${target ?? AHEAD}"` };
+    const unsteady = postureCheck(bot, "break_block", { kind: "break", at: block.position });
+    if (unsteady) return { status: "failed", reason: unsteady };
     ctx.log(`break_block: ${block.name}, about ${(bot.digTime(block) / 1000).toFixed(1)} s`);
     try {
       const progress = await doBreak(bot, block, signal);
@@ -59,9 +61,9 @@ export const breakBlock = primitive({
   },
 });
 
-/** The block at the target if it can be dug from here, is not protected, and is safe to remove. */
+/** The block at the target if it can be dug from here and is not protected. (Whether it is safe to remove is asked when it runs, so a refusal comes back with its reason.) */
 function breakable(bot: Bot, target: string | undefined): Block | null {
   const block = blockOf(bot, target ?? AHEAD);
   if (!block || block.boundingBox === "empty" || isProtectedBlock(block.name)) return null;
-  return bot.canDigBlock(block) && isSafeToDig(bot, block) ? block : null;
+  return bot.canDigBlock(block) ? block : null;
 }

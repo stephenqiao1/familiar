@@ -63,6 +63,11 @@ function state(p: Patch, ms: number): State {
       inBlock: false,
       pushed: null,
       motion: null,
+      support: { on: "stone", kind: "solid", edges: 0, headroom: 3 },
+      velocity: { x: 0, y: 0, z: 0, onGround: true },
+      landing: null,
+      displaced: false,
+      balance: 1,
       locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
       ...p.self,
     },
@@ -457,6 +462,54 @@ describe("looking while walking (the same-time flag)", () => {
     } finally {
       skills.pop();
     }
+  });
+});
+
+describe("balance and posture through the real brain", () => {
+  const ledge = { support: { on: "stone", kind: "solid" as const, edges: 2, headroom: 3 }, balance: 0.5 };
+  const pushedToDrop = { pushed: { blocks: 1, toward: { x: 0, z: -1 }, danger: { what: "drop", blocks: 1 } } };
+
+  it("shares unsteady (1 − balance) and traces what holds the bot up", async () => {
+    const { tick, value } = bot();
+    await tick();
+    expect(value("unsteady")).toBe(0);
+    const out = await tick({ self: ledge });
+    expect(value("unsteady")).toBe(0.5);
+    expect(out.traces.brainstem?.posture).toMatchObject({ support: { kind: "solid", edges: 2 }, balance: 0.5 });
+  });
+
+  it("falling toward a landing that would hurt, with a better one in reach: the righting reflex wins outright", async () => {
+    const { tick } = bot();
+    await tick();
+    const out = await tick({ self: { landing: { blocks: 8, onto: "stone", hurts: true, steer: "pos:1,64,0" }, balance: 0 } });
+    expect(out.winner).toMatchObject({ region: "reflex", action: { skill: "air_steer", target: "pos:1,64,0" }, urgency: 1 });
+    // With nothing better in reach nothing fires: there is nothing a body can do.
+    const none = await tick({ self: { landing: { blocks: 8, onto: "stone", hurts: true, steer: null }, balance: 0 } });
+    expect(none.reflexes.map((r) => r.rule)).not.toContain("falling_right");
+    expect(none.traces.brainstem?.posture).toMatchObject({ landing: { hurts: true, steer: null } });
+  });
+
+  it("moved somewhere else: the planner is asked to plan again, and it is not taken for a push", async () => {
+    const { tick, value } = bot();
+    await tick();
+    const pushed = await tick({ self: pushedToDrop });
+    expect(pushed.reflexes.map((r) => r.rule)).toContain("hold_ground");
+    expect(value("replan")).toBe(0);
+    const moved = await tick({ self: { ...pushedToDrop, displaced: true } });
+    expect(moved.reflexes.map((r) => r.rule)).not.toContain("hold_ground");
+    expect(value("replan")).toBe(1);
+    expect(moved.traces.brainstem?.posture).toMatchObject({ displaced: true });
+    await tick();
+    expect(value("replan")).toBe(0);
+  });
+
+  it("moved somewhere else: whatever is in view there is new, so a look is proposed", async () => {
+    const { tick } = bot();
+    await tick({ mobs: [mob("zombie", 12)] });
+    const same = await tick({ mobs: [mob("zombie", 12)] });
+    expect(same.traces.brainstem?.orienting).toBeUndefined();
+    const moved = await tick({ mobs: [mob("zombie", 12)], self: { displaced: true } });
+    expect(moved.traces.brainstem?.orienting).toMatchObject({ kind: "zombie" });
   });
 });
 

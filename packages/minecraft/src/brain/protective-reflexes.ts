@@ -53,7 +53,7 @@ const CLEAR_OF_IT = 2;
  */
 const NOT_A_PLACE = new Set(["fall", "fly_into_wall", "drown", "starve", "lava", "in_fire", "on_fire", "in_wall", "magic", "indirect_magic", "wither", "out_of_world", "generic_kill"]);
 /** The skills only reflexes run. While one of them is running, the soft protections keep quiet. */
-export const REFLEX_SKILLS = ["escape_hazard", "surface", "withdraw", "dig_out", "recoil"];
+export const REFLEX_SKILLS = ["escape_hazard", "surface", "withdraw", "dig_out", "recoil", "air_steer"];
 /** How far ahead about_to_touch looks: 1 block, or 2 while sore. */
 const LOOK = { normal: 1, sore: 2 };
 const HOLD_GROUND = { base: 0.8, sore: 0.9 };
@@ -114,17 +114,30 @@ export const aboutToTouch = rule("about_to_touch", "hard", (data, ws) => {
   return { action: { skill: "recoil", target: backFrom(self, moving.toward) }, urgency: 1, reason: `${danger.what} ${danger.blocks} block${danger.blocks > 1 ? "s" : ""} ahead` };
 });
 
-// SLOT(falling): no reflex. Once the body is in the air there is nothing it can do; the
-// protection is before the edge (edge_guard, hold_ground). A water-bucket landing or similar
-// would go here if the body ever learns one.
+/**
+ * The righting reflex. Falling toward a landing that would hurt, with a better one (water, or
+ * ground at least 3 blocks higher) within 2 blocks sideways: steer for it until landing. The
+ * balance sense never offers lava, fire or anything known to hurt. With no better landing in
+ * reach it stays silent: there is nothing a body can do, and the fall is only noted. (The
+ * protection before the edge is edge_guard and hold_ground.)
+ *
+ * SLOT(falling): a water-bucket landing or similar would go here if the body ever learns one.
+ */
+export const fallingRight = rule("falling_right", "hard", ({ self, current }) => {
+  const landing = self.landing;
+  // Once steering, keep to the landing chosen: changing course half way wastes the little push there is.
+  if (current?.skill === "air_steer" && landing) return { action: { skill: "air_steer", ...(current.target ? { target: current.target } : {}) }, urgency: 1, reason: "still falling" };
+  if (!landing?.hurts || !landing.steer) return null;
+  return { action: { skill: "air_steer", target: landing.steer }, urgency: 1, reason: `falling ${landing.blocks} blocks onto ${landing.onto}: a better landing is in reach` };
+});
 
 // Soft reflexes (the stretch reflex). The brainstem scales them, and a goal can hold them back.
 
-/** Pushed toward a big drop, lava, fire or a block known to hurt within 2 blocks: sneak and step back to where it stood. */
+/** Pushed (not moved somewhere else all at once) toward a big drop, lava, fire or a block known to hurt within 2 blocks: sneak and step back to where it stood. */
 export function holdGround(strength: number): ReflexRule {
   return rule("hold_ground", "soft", (data, ws) => {
     const pushed = data.self.pushed;
-    if (!pushed?.danger || reflexRunning(data)) return null;
+    if (!pushed?.danger || data.self.displaced || reflexRunning(data)) return null;
     const base = sore(ws) ? HOLD_GROUND.sore : HOLD_GROUND.base;
     return {
       action: { skill: "steady", target: backFrom(data.self, pushed.toward, Math.max(1, pushed.blocks)) },
@@ -145,9 +158,9 @@ export function edgeGuard(strength: number): ReflexRule {
 }
 
 /** The protective reflexes this bot has switched on: the hard ones, then the soft ones. */
-export function protectiveReflexes(settings: ReflexSettings): { hard: ReflexRule[]; soft: ReflexRule[] } {
+export function protectiveReflexes(settings: ReflexSettings, righting = 1): { hard: ReflexRule[]; soft: ReflexRule[] } {
   return {
-    hard: [...(settings.painWithdrawal ? [painWithdrawal] : []), ...(settings.buried ? [buried] : []), ...(settings.aboutToTouch ? [aboutToTouch] : [])],
+    hard: [...(settings.painWithdrawal ? [painWithdrawal] : []), ...(settings.buried ? [buried] : []), ...(settings.aboutToTouch ? [aboutToTouch] : []), ...(righting > 0 ? [fallingRight] : [])],
     soft: [...(settings.holdGround > 0 ? [holdGround(settings.holdGround)] : []), ...(settings.edgeGuard > 0 ? [edgeGuard(settings.edgeGuard)] : [])],
   };
 }

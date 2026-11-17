@@ -27,41 +27,13 @@ export function setKnownHurts(bot: object, knows: (name: string) => boolean): vo
 }
 const LIQUIDS = new Set(["lava", "water"]);
 const SAFE_DROP = 3;
-const NEIGHBOURS: [number, number, number][] = [
-  [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
-];
+const SIDES: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+// Whether a dig, a placement or a step is safe is asked in one place: posture/check.ts.
 
 /** Whether a block hurts to touch or stand in, as far as this bot knows (a bot never told otherwise knows the innate five). */
 export function isDangerousBlock(name: string, bot?: object): boolean {
   const knows = bot && known.get(bot);
   return knows ? knows(name) : BORN_KNOWING.has(name);
-}
-
-/**
- * False if lava or water touches the block (it would flow in), or if the bot stands on it and
- * removing it would drop the bot 3 or more blocks.
- */
-export function isSafeToDig(bot: WorldView, block: { position: Vec3 }): boolean {
-  const pos = block.position;
-  const touchesLiquid = NEIGHBOURS.some(([x, y, z]) => {
-    const n = bot.blockAt(pos.offset(x, y, z));
-    return n !== null && LIQUIDS.has(n.name);
-  });
-  if (touchesLiquid) return false;
-
-  const underFeet = bot.entity.position.floored().offset(0, -1, 0);
-  return !pos.equals(underFeet) || fallDepth(bot, pos) < SAFE_DROP;
-}
-
-/** How far the bot falls if `pos` and everything passable below it is empty. Unknown blocks count as a fall. */
-function fallDepth(bot: WorldView, pos: Vec3): number {
-  let depth = 1;
-  while (depth < SAFE_DROP) {
-    const below = bot.blockAt(pos.offset(0, -depth, 0));
-    if (below && below.boundingBox === "block") break;
-    depth++;
-  }
-  return depth;
 }
 
 const HOT = new Set(["lava", "fire", "soul_fire"]);
@@ -118,7 +90,7 @@ export function isDropAt(bot: WorldView, pos: Vec3): boolean {
 
 /** `feet` is at the edge of a big drop: one of the four blocks beside it falls away. */
 export function atEdge(bot: WorldView, feet: Vec3): boolean {
-  return NEIGHBOURS.some(([x, y, z]) => y === 0 && isDropAt(bot, feet.offset(x, 0, z)));
+  return SIDES.some(([x, z]) => isDropAt(bot, feet.offset(x, 0, z)));
 }
 
 /**

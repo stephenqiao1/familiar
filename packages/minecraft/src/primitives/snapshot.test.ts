@@ -31,6 +31,19 @@ describe("changesBetween", () => {
     expect(changesBetween(after({ targetBlock: "dirt" }), after({ targetBlock: "dirt" }))).toEqual({});
   });
 
+  it("notices the block above the target coming down when the target is broken", () => {
+    // Landed already: it sits where the target was.
+    const before = after({ targetBlock: "stone", above: ["gravel", "air", "air"] });
+    expect(changesBetween(before, after({ targetBlock: "gravel", above: ["air", "air", "air"] }))).toEqual({ targetBlockWas: "stone", targetBlock: "gravel", cameDown: "gravel" });
+    // Still falling: the target is air and the block above has left its place.
+    expect(changesBetween(before, after({ targetBlock: "air", above: ["air", "air", "air"] }))).toMatchObject({ targetBlock: "air", cameDown: "gravel" });
+    // Sand under sand: the target looks unchanged, but the column above it has moved down.
+    expect(changesBetween(after({ targetBlock: "sand", above: ["sand", "sand", "air"] }), after({ targetBlock: "sand", above: ["sand", "air", "air"] }))).toEqual({ cameDown: "sand" });
+    // An ordinary dig, and a dig that failed under a block that stayed put.
+    expect(changesBetween(after({ targetBlock: "stone", above: ["stone", "air", "air"] }), after({ targetBlock: "air", above: ["stone", "air", "air"] })).cameDown).toBeUndefined();
+    expect(changesBetween(after({ targetBlock: "sand", above: ["sand", "air", "air"] }), after({ targetBlock: "sand", above: ["sand", "air", "air"] }))).toEqual({});
+  });
+
   it("reports health and food changes, and what happened to the target entity", () => {
     expect(changesBetween(still, after({ health: 17, food: 20 }))).toEqual({ health: -3, food: 5 });
     const zombie = (present: boolean, hurts: number) => after({ targetEntity: { present, hurts } });

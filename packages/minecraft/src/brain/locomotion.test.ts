@@ -34,6 +34,18 @@ describe("driveFrom", () => {
     expect(at({ focus: 1, alarm: 0.61 })).toBe(0);
   });
 
+  it("unsteadiness raises caution: careful on a ledge even when focus is low, and even when frightened", () => {
+    const at = (levels: Record<string, number>) => driveFrom(signals(levels), DEFAULT_LOCOMOTION).caution;
+    expect(at({ focus: 0.5, unsteady: 0 })).toBeCloseTo(0.45);
+    // A one-wide bridge (balance 0.5): past the 0.6 where the bot goes carefully, at any focus.
+    expect(at({ focus: 0, unsteady: 0.5 })).toBeCloseTo(0.65);
+    expect(at({ focus: 0.5, unsteady: 0.5 })).toBeCloseTo(0.8);
+    // One edge (a cliff top, balance 0.85) is not enough to change how it walks.
+    expect(at({ focus: 0.5, unsteady: 0.15 })).toBeLessThan(0.6);
+    expect(at({ focus: 1, alarm: 1, unsteady: 0.5 })).toBeCloseTo(0.35);
+    expect(at({ focus: 1, unsteady: 1 })).toBe(1);
+  });
+
   it("stays within 0 to 1", () => {
     expect(driveFrom(signals({ alarm: 1, dopamine: 1 }), DEFAULT_LOCOMOTION).speed).toBe(1);
     expect(driveFrom(signals({ hunger: 1, dopamine: 0 }), DEFAULT_LOCOMOTION).speed).toBe(0);

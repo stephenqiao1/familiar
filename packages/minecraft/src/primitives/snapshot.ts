@@ -28,6 +28,8 @@ export interface Snapshot {
   drops?: number;
   /** The target block's type (undefined if the movement has no target block). */
   targetBlock?: string | null;
+  /** The solid blocks straight above the target block, nearest first, "air" for anything else (so a block coming down can be noticed). */
+  above?: string[];
   /** Whether the target entity is still there, and how many times it has been seen hurt. */
   targetEntity?: { present: boolean; hurts: number };
 }
@@ -48,11 +50,19 @@ export function takeSnapshot(bot: Bot, focus: Focus, hurts = 0): Snapshot {
     window: bot.currentWindow ? String(bot.currentWindow.type) : null,
     drops: Object.values(bot.entities).filter((e) => e.name === "item" && e.position.distanceTo(bot.entity.position) <= DROPS_WITHIN).length,
   };
-  if (focus.block) snapshot.targetBlock = bot.blockAt(focus.block)?.name ?? null;
+  if (focus.block) {
+    snapshot.targetBlock = bot.blockAt(focus.block)?.name ?? null;
+    snapshot.above = ABOVE.map((dy) => {
+      const block = bot.blockAt(focus.block!.offset(0, dy, 0));
+      return block?.boundingBox === "block" ? block.name : "air";
+    });
+  }
   if (focus.entity) snapshot.targetEntity = { present: focus.entity.isValid && bot.entities[focus.entity.id] === focus.entity, hurts };
   return snapshot;
 }
 
+/** How far above the target block is watched. */
+const ABOVE = [1, 2, 3];
 /** Dropped items are counted this close to the bot. */
 const DROPS_WITHIN = 5;
 /** Smaller differences than these are noise, not change. */
@@ -82,6 +92,10 @@ export function changesBetween(before: Snapshot, after: Snapshot): Changes {
     changes.targetBlockWas = before.targetBlock ?? "unknown";
     changes.targetBlock = after.targetBlock ?? "unknown";
   }
+  // The target went and the solid block above it left its place: it came down (it may still be in the air).
+  const was = before.above?.[0];
+  const targetWent = after.targetBlock !== before.targetBlock || after.targetBlock === was;
+  if (was !== undefined && was !== "air" && targetWent && before.above!.join() !== after.above?.join()) changes.cameDown = was;
   if (after.health !== before.health) changes.health = round(after.health - before.health);
   if (after.food !== before.food) changes.food = round(after.food - before.food);
   if (before.targetEntity && after.targetEntity) {

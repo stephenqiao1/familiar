@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { parseLearnedSkills, type LearnedSkill } from "@familiar/core";
 import { createMemory, type Fact, type KnownPlace, type Memory, type MemoryOptions, type MemoryStore } from "@familiar/memory";
-import { createChestMemory, type ChestMemory, type ChestRecord } from "@familiar/minecraft";
+import { createChestMemory, type ChestMemory, type ChestRecord, type SurfaceCounts } from "@familiar/minecraft";
 import { createNoveltyMemory, createScorebook, type NoveltyMemory, type SavedScore, type Scorebook } from "@familiar/neuromodulators";
 
 // What each bot has learned and remembers, kept between runs, one folder per bot. A missing or
@@ -15,6 +15,7 @@ export const memoriesFile = (bot: string) => `data/${bot}/memories.json`;
 export const hurtsFile = (bot: string) => `data/${bot}/hurts.json`;
 export const badFoodsFile = (bot: string) => `data/${bot}/bad-foods.json`;
 export const bodyFile = (bot: string) => `data/${bot}/body.json`;
+export const surfacesFile = (bot: string) => `data/${bot}/surfaces.json`;
 export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
 
 /** What the bot's body carries between runs: the world's age (in ticks) when it last woke from sleep. */
@@ -25,6 +26,18 @@ export async function loadBody(file: string): Promise<{ sleptAtAge?: number }> {
 
 export async function saveBody(body: { sleptAtAge: number }, file: string): Promise<void> {
   await writeJson(file, body);
+}
+
+/** What the bot has learned about surfaces: for loose, slippery and slow, block type → times it showed. A missing file means nothing yet. */
+export async function loadSurfaces(file: string): Promise<Partial<SurfaceCounts>> {
+  const raw = await readJson(file);
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const counts = (kind: string) => Object.fromEntries(Object.entries((raw as Record<string, unknown>)[kind] ?? {}).filter(([, n]) => Number.isInteger(n) && (n as number) > 0)) as Record<string, number>;
+  return { loose: counts("loose"), slippery: counts("slippery"), slow: counts("slow") };
+}
+
+export async function saveSurfaces(surfaces: SurfaceCounts, file: string): Promise<void> {
+  await writeJson(file, surfaces);
 }
 
 /**

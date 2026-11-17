@@ -20,6 +20,10 @@ import {
   createPlayerReflexes,
   DEFAULT_MEDULLA,
   medullaUrges,
+  DEFAULT_POSTURE,
+  wasDisplaced,
+  type PostureNotes,
+  type PostureSettings,
   playerVitals,
   type MedullaSettings,
   type ReflexSettings,
@@ -103,6 +107,10 @@ export interface BrainParts<Ctx> {
   reflexes?: ReflexSettings;
   /** This bot's medulla: its upkeep urges and vital signs (from bots.json). Default: all on. */
   medulla?: MedullaSettings;
+  /** This bot's posture: its balance, righting reflex and reaction to being moved (from bots.json). Default: all on. */
+  posture?: PostureSettings;
+  /** What the posture system did since last asked (refusals, stance holds, falls, things learned), for the trace. Default: nothing. */
+  postureNotes?: () => PostureNotes;
   /** The foods the bot has just learned are bad, for remembering. Default: it learns none. */
   justLearnedBadFoods?: () => string[];
   /** How sore the bot is right now (1 just after pulling away from pain, fading to 0). Default: never. */
@@ -141,6 +149,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const hasBrainstem = !only || only.includes("brainstem");
   const alarmOf = (ws: Workspace) => ws.signals[ALARM_SIGNAL]?.value ?? 0;
   const medulla = parts.medulla ?? DEFAULT_MEDULLA;
+  const posture = parts.posture ?? DEFAULT_POSTURE;
   // The brainstem sets how strongly each soft reflex and each upkeep urge fires (alarm, bravery, the goal's hold-backs).
   // The upkeep urges take a goal's hold-backs, but not alarm or bravery: needing air is no weaker for being calm.
   const upkeepGain = hasBrainstem && brainstem.holdBack > 0 ? createReflexGain({ settings: brainstem, alarmOf: () => NEUTRAL_ALARM, leaningOf: () => null }) : undefined;
@@ -149,13 +158,13 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
   const all: Region[] = [
     createReflexRegion({
-      rules: createPlayerReflexes(parts.reflexes),
+      rules: createPlayerReflexes(parts.reflexes, posture.righting),
       ...(gainOf ? { gainOf } : {}),
     }), //                                                                                  layer 0, every tick
     // The medulla: vital signs, and the graded urges of upkeep. Left out (--regions), the hard reflexes above still fire.
     createMedullaRegion({ vitals: playerVitals, share: medulla.vitals, urges: medullaUrges(medulla), asleep, ...(upkeepGain ? { gainOf: upkeepGain } : {}) }), // layer 0, every tick
     createBrainstemRegion({
-      ...playerBrainstem(skills, ctx, parts.sameTime, parts.sore),
+      ...playerBrainstem(skills, ctx, parts.sameTime, parts.sore, { unsteady: posture.unsteady, ...(parts.postureNotes ? { notes: parts.postureNotes } : {}) }),
       settings: brainstem,
       alarmOf,
       reflexFired: (ws) => up(ws, REFLEX_SIGNAL),
@@ -177,7 +186,13 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       // A learning window opens on a notable reward, an alarm jump or a cue.
       ...(focus.learningWindow > 0 ? { learningWindow: { ms: LEARNING_WINDOW_MS, notable: (ws: Workspace) => up(ws, ALARM_JUMP_SIGNAL) || up(ws, CUE_SIGNAL) } } : {}),
     }), //                                                                                  layer 0, every tick
-    createNoradrenalineRegion({ triggers: playerAlarms(focus.noisyOrChanged > 0), threatPresent, settings: noradrenaline }), // layer 0, every tick
+    createNoradrenalineRegion({
+      triggers: playerAlarms(focus.noisyOrChanged > 0),
+      threatPresent,
+      settings: noradrenaline,
+      // Moved somewhere else all at once: whatever the plan was, the planner should look again.
+      ...(posture.displaced > 0 ? { replanWhen: (ws: Workspace) => wasDisplaced(ws.state) } : {}),
+    }), //                                                                                  layer 0, every tick
     createMemoryRegion({
       memory,
       triggers: playerMemories(parts.justLearnedHurts, parts.justLearnedBadFoods),

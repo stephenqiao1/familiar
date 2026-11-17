@@ -3,6 +3,109 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-17: balance and posture
+
+*Found by running the real bot on the test server with `pnpm posture-check`. No Jev and no
+planner calls: the scenes tell the bot what to try and drop, move and perch it.*
+
+| Scene | Result |
+|---|---|
+| Dig the block underfoot, 6 high with nothing below | Refused: "would drop me 3 blocks or more". On a 1-high step: allowed |
+| Dig into a wall under a gravel column, at head height | Refused: "unsafe from here (would bring the gravel down beside my head): stand to the side". From the side: done, the gravel came down, never buried |
+| Break a block at a cliff edge | Sneak held during the dig and let go after; not held for the same dig on open ground; did not fall |
+| Walk a one-wide bridge over a 6-block drop | Unsteady 0.50; crossed at 0.9 blocks a second (sneaking); did not fall |
+| Fall 8 blocks, a one-block pool one block to the side | Steered into the water unhurt, 3 of 3 |
+| Fall 8 blocks, nothing in reach | Did nothing; 3 falls recorded (8 blocks, damage 5), each noted "no better landing in reach" |
+| Teleported 53 blocks mid-journey | Noticed once; journey ended; `replan` raised; did not walk back; `hold_ground` silent |
+| Born knowing nothing loose: dig under sand twice | Learned "sand is loose" on the second dig; a third dig under sand at head height was then refused; saved in `surfaces.json` |
+| Walk on ice, soul sand and honey | Nothing learned (see below) |
+
+The slowest check in any scene took about 0.4 ms (limit 2).
+
+**Found and fixed.**
+
+- **The bot walked ledges upright.** Sneaking near a drop when careful already existed, but the
+  walking rhythm lets go of every key whenever it plans again, and the controller only pressed
+  sneak when its own wish changed. So after the first replan the bot crossed the bridge at 3.1
+  blocks a second, standing. Sneak is now pressed again on every tick it is wanted
+  (`locomotion/tick.ts`). This predates the posture work; the bridge scene caught it.
+- **Steering for water landed on the rim.** The first `air_steer` pushed until it landed. The
+  air keeps carrying a body after the keys are let go, so it overshot or straddled the edge of a
+  one-block pool and took the full 5 damage every time. It now pushes only while the body would
+  otherwise come down short.
+- **A falling block has not landed when the dig is reported.** 300 ms after the dig the sand was
+  still in the air, so "the block above now sits where the target was" never held and nothing was
+  learned. The snapshot now notices the block above leaving its place, and the learner confirms
+  700 ms later that it landed (so a cactus or plant that merely broke off teaches nothing).
+- **"Slow" was nearly learned falsely.** A jog that keeps starting and stopping its sprint covers
+  ground at about 0.85 of what `gait.ts` expects on plain stone, and 0.78 on ice (it gets going
+  slowly there). With the threshold at 0.8, ice was learned as *slow* in one run. It is back at
+  0.7, and the expected pace is weighed by how much of the stretch was sprinted.
+
+**Seen, left as it is.**
+
+- **Slippery and slow cannot be learned on this body.** Three things, each measured: a steady
+  walk on ice is no faster than on stone (ice changes how fast the body gets going and stops, not
+  its top pace); the pathfinder sets the bot's sideways speed to zero the moment it stops, so
+  there is never a slide to measure; and soul sand and honey do not slow this client at all (30
+  blocks took 5.3 s on each, the same as on stone). The learning is unit-tested but has shown
+  nothing live. **Fix later:** measure how long the body takes to get up to speed, which ice
+  does change; soul sand needs Mineflayer's physics fixed first.
+- **Two regression failures that were not regressions.** One `skill-check` run lost its
+  connection to the server half way ("client timed out after 30000 milliseconds") and every
+  later scene failed as "cannot run"; the rerun passed all 20. `neuro-check lava` failed "Jev is
+  never offered escape_hazard" because the planner had written the skill's name into a goal
+  step, which Jev is shown; the check now looks only at the menu.
+- **The water landing was steered 2 times of 3 in the last full run.** The third fall landed in
+  the water unhurt too, but the reflex had not started in time: it was luck, not steering.
+- **A solid pillar can be dug down.** The spec's "dig down on a pillar 6 high: refused" holds
+  only when there is nothing under the block the bot stands on. On a solid pillar each dig drops
+  the bot one block, which is safe, and is allowed. The live scene uses a single floating block.
+- **The righting reflex needs a brain tick to start.** The fall is noticed on the next tick (up
+  to half a second), which leaves about 0.7 s of an 8-block fall to steer in. From 4 or 5 blocks
+  there is no time to do anything.
+
+## Balance and posture: limits of this first version
+
+- **An unsafe step or dig can now be chosen, and fails.** `canRun` used to hide them. With
+  `--primitives`, Jev may pick one, fail, and pick it again; the scorebook is what should stop
+  it, and the "refused three times in a minute" log shows when it does not.
+- **Only primitives get stance.** It is held in the primitive wrapper, so a skill that calls a
+  movement directly (`eat`, `attack`, the chest skills) is not steadied. `open`, `use_on` and
+  `craft` never are: the game will not open a block for a sneaking player.
+- **Planning a route, any block with something loose above it is refused**, wherever the bot
+  will stand, because that is not known while planning. A route that would have to dig through
+  sand or gravel is not found. (The pathfinder had the same rule with its own fixed list; this
+  uses what the bot knows, so a bot that has not learned sand is loose will dig under it on a route.)
+- **Loose blocks are learned only from `break_block`.** The pathfinder's own digging and
+  `dig_out` are not watched. The block must land within 4 blocks below within 0.7 s. A column
+  taller than 3 of the same block shows no change to the snapshot and is missed.
+- **The loose-block rules look one column and 4 blocks.** A loose block that would slide in from
+  a neighbouring column once something else falls is not foreseen. "What the block under me
+  rests on" looks one block down only.
+- **Climbing blocks are a short fixed list** (ladder, vines, scaffolding), and what a vine hangs
+  from is a guess from its sides. No live scene ran on a ladder, in a boat or in flowing water;
+  those kinds are unit-tested only.
+- **`landing.hurts` knows only height, water, lava, the void and blocks known to hurt.** Slime,
+  hay, beds, powder snow, boots and effects are not allowed for, so some harmless landings are
+  called harmful (and steered away from).
+- **A jump is checked only if the body is already moving.** A standing jump is always allowed,
+  and where a moving one comes down is a straight-line guess from its speed.
+- **Being moved 8 blocks or less is not noticed** (a short ender pearl throw), and a teleport
+  into the same spot is not either. Anything over 8 blocks in one tick counts, including the test
+  scenes' own teleports.
+- **Unsteady makes the bot careful in more places than ledges.** Standing in water (0.6) or on a
+  ladder (0.5) also lifts caution over the line, so no digging or placing on routes there. One
+  cliff edge beside the bot does not.
+- **The balance numbers are hand-set**, as are the edge factors. `headroom` is reported but
+  nothing reads it yet.
+- **The fall's "edge" is where the bot last stood.** For a bot knocked off a ledge that is right.
+  For one that jumped a gap and fell short, the take-off spot is marked, not the gap.
+- **The posture trace rides in the brainstem's.** With the brainstem lesioned (`--regions`) there
+  is no `unsteady` signal and no posture trace, though the check, stance and learning still work.
+- **`posture.check: 0` removes every protection the check gives**, including the ones that
+  existed before it (lava, water, the drop underfoot). It is for experiments.
+
 ## Live testing, 2026-11-17: the medulla (body upkeep)
 
 *Found by running the real bot on the test server with `pnpm medulla-check`. The two dive scenes

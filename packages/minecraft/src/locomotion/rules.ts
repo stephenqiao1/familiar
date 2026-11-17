@@ -2,7 +2,8 @@ import type { Bot } from "mineflayer";
 import type { Vec3 } from "vec3";
 import pathfinderPkg from "mineflayer-pathfinder";
 import { isProtectedBlock } from "../protected.js";
-import { isDangerousBlock, isSafeToDig, touchesHurt } from "../safety.js";
+import { postureCheck } from "../posture/check.js";
+import { isDangerousBlock, touchesHurt } from "../safety.js";
 
 const { Movements } = pathfinderPkg;
 type Rules = InstanceType<typeof Movements>;
@@ -28,8 +29,8 @@ export interface RuleSets {
 }
 
 /**
- * Builds both rule sets. Neither ever digs a door (the controller opens those) or a protected
- * block, steps on or into a block the bot knows hurts, and both steer round spots `avoid` marks.
+ * Builds both rule sets. Neither ever digs a door (the controller opens those), a protected
+ * block or anything the posture check refuses, steps on or into a block the bot knows hurts, and both steer round spots `avoid` marks.
  * (The pathfinder by itself only keeps out of fire, lava and cobwebs.)
  */
 export function createRules(bot: Bot, avoid: (pos: { x: number; y: number; z: number }) => boolean): RuleSets {
@@ -41,7 +42,10 @@ export function createRules(bot: Bot, avoid: (pos: { x: number; y: number; z: nu
       rules.allow1by1towers = false;
       rules.scafoldingBlocks = [];
     }
-    rules.exclusionAreasBreak = [(block) => (isSafeToDig(bot, block) ? 0 : Infinity)];
+    // The same check the primitives ask before breaking or placing a block. Planning ahead, where
+    // the body will stand is not known, so only what holds wherever it stands is asked.
+    rules.exclusionAreasBreak = [(block) => (block.position && postureCheck(bot, "route", { kind: "break", at: block.position, planned: true }) ? Infinity : 0)];
+    rules.exclusionAreasPlace = [(block) => (block.position && postureCheck(bot, "route", { kind: "place", at: block.position, item: null }) ? Infinity : 0)];
     // The pathfinder hands over a block with no position when it looks past the loaded world: nothing is known there.
     rules.exclusionAreasStep = [(block) => (block.position ? (avoid(block.position) ? AVOID_COST : 0) + hurtCost(bot, block.position) : 0)];
     for (const block of bot.registry.blocksArray) {

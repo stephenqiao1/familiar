@@ -30,6 +30,7 @@ export const useOn = primitive({
   name: "use_on",
   description: "Use the held item (or an empty hand) on a block or entity within reach: a door, button, bed, animal (default: ahead).",
   parts: ["hands", "head"],
+  standing: true,
   expects: [],
   settleMs: 300,
   defaultTarget: () => AHEAD,
