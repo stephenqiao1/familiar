@@ -79,6 +79,7 @@ import {
   createMedullaRegion,
   createReflexGain,
   DEFAULT_COLLICULUS,
+  FULL,
   LOADED_SIGNAL,
   STARTLE_SIGNAL,
   UPPER_PAUSED_SIGNAL,
@@ -199,7 +200,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       settings: colliculus,
       alarmOf,
       arousalOf: (ws) => level(ws, AROUSAL_SIGNAL, 0.5),
-      spoken: (ws) => up(ws, REFLEX_SIGNAL) || up(ws, STARTLE_SIGNAL) || up(ws, LOADED_SIGNAL),
+      // A flinch does not count: it runs beside whatever is under way, so a look may still take over.
+      spoken: (ws) => up(ws, REFLEX_SIGNAL) || level(ws, STARTLE_SIGNAL) > FULL || up(ws, LOADED_SIGNAL),
     }), //                                                                                  layer 0, every tick
     createFocusRegion({
       inputs: playerFocus(memory, skills),

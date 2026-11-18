@@ -1,11 +1,11 @@
+import { holdMsOf } from "@familiar/region-brainstem";
 import { sleepFor } from "../abort.js";
 import { pointOf } from "./aim.js";
 import { doLookAt } from "./look-at.js";
 import { primitive } from "./primitive.js";
 
-const HOLD_MS = 250;
 
-/** Stops moving and faces a point for a moment: the body's answer to being startled. */
+/** Stops moving and faces a point for a moment: the body's answer to a full startle. The bigger the startle, the longer the hold (250 to 500 ms). */
 export const brace = primitive({
   name: "brace",
   description: "Stop moving and face a target (or just stop) for a moment.",
@@ -23,7 +23,7 @@ export const brace = primitive({
     ctx.locomotion.stop();
     const point = pointOf(bot, target);
     if (point) await doLookAt(bot, point);
-    await sleepFor(HOLD_MS, signal);
+    await sleepFor(holdMsOf(ctx.level?.("startle") ?? 0), signal);
     return { status: "done" };
   },
 });

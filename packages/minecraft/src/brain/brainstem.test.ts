@@ -4,49 +4,35 @@ import { describe, expect, it } from "vitest";
 import { fakeData, fakeState, type StatePatch } from "../encode/state.test-helper.js";
 import { menuSkills } from "../skills/index.js";
 import { startled } from "./alarm.js";
-import { drowsy, HOLDABLE, hostileUpClose, hurtUnseen, leaningOf, loudNearby, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
+import { drowsy, HOLDABLE, leaningOf, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
 
 const ws = createWorkspace().viewFor("brainstem");
 const zombie = (dist: number, id = 1) => ({ id: `entity:${id}`, type: "zombie", dist, hostile: true, reachable: true });
 const moment = (before: StatePatch, after: StatePatch) => ({ before: fakeState(before), after: fakeState(after), ws });
 
-describe("player startle detectors", () => {
-  it("hostile up close: a hostile first seen within 3 blocks", () => {
-    expect(hostileUpClose.check(moment({}, { nearby: { mobs: [zombie(2)] } }))).toEqual({ source: { id: "entity:1", kind: "zombie" } });
-    expect(hostileUpClose.check(moment({}, { nearby: { mobs: [zombie(5)] } }))).toBeNull();
-    // Seen coming: no startle when it arrives.
-    expect(hostileUpClose.check(moment({ nearby: { mobs: [zombie(12)] } }, { nearby: { mobs: [zombie(2)] } }))).toBeNull();
-  });
-
-  it("hurt unseen: hit by something while no threat was in view", () => {
-    const hit = { self: { lastHurt: { msAgo: 10, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } };
-    expect(hurtUnseen.check(moment({}, hit))).toEqual({ source: null });
-    expect(hurtUnseen.check(moment({}, { ...hit, nearby: { mobs: [zombie(20, 9)] } }))).toEqual({ source: { id: "entity:9", kind: "zombie" } });
-    // A threat was already in view: being hit is no surprise.
-    expect(hurtUnseen.check(moment({ nearby: { mobs: [zombie(4)] } }, { ...hit, nearby: { mobs: [zombie(4)] } }))).toBeNull();
-    // A fall, fire or hunger has no attacker, and an old hurt is not a new one.
-    expect(hurtUnseen.check(moment({}, { self: { lastHurt: { msAgo: 10, by: null, kind: null, at: { x: 0, y: 63, z: 0 } } } }))).toBeNull();
-    expect(hurtUnseen.check(moment({ self: { lastHurt: { msAgo: 100, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } }, { self: { lastHurt: { msAgo: 600, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } }))).toBeNull();
-  });
-
-  it("loud nearby: an explosion or thunder within 16 blocks, with where it came from to brace toward", () => {
-    const heard = (type: string, dist: number, loudness: number) => ({ nearby: { heard: [{ type, dist, loudness, bearing: { side: "behind" as const, angle: 180 }, position: { x: 0, y: 63, z: dist } }] } });
-    expect(loudNearby.check(moment({}, heard("explosion", 9, 0.8)))).toEqual({ source: { id: "pos:0,63,9", kind: "explosion" } });
-    expect(loudNearby.check(moment({}, heard("explosion", 30, 0.6)))).toBeNull();
-    // A door or a cow close by is heard, but does not startle.
-    expect(loudNearby.check(moment({}, heard("door", 3, 0.35)))).toBeNull();
-  });
-});
-
 describe("the startle alarm trigger", () => {
-  it("adds to alarm on the tick the brainstem is startled", () => {
+  it("adds 0.4 × the startle's size on the tick the brainstem startles", () => {
     const store = createWorkspace();
     const check = () => startled.check({ before: fakeState(), after: fakeState(), ws: store.viewFor("noradrenaline") });
     expect(check()).toBe(0);
     store.viewFor("brainstem").setSignal("startle", 1);
-    expect(check()).toBe(0.3);
+    expect(check()).toBe(0.4);
+    store.viewFor("brainstem").setSignal("startle", 0.5);
+    expect(check()).toBe(0.2);
     store.viewFor("brainstem").setSignal("startle", 0);
     expect(check()).toBe(0);
+  });
+
+  it("names the trigger that shares its cause this tick, if there is one", () => {
+    const store = createWorkspace();
+    const moment = { before: fakeState(), after: fakeState(), ws: store.viewFor("noradrenaline") };
+    expect(startled.sameCauseAs!(moment)).toBeNull();
+    store.viewFor("brainstem").setSignal("startle", 0.8);
+    expect(startled.sameCauseAs!(moment)).toBeNull(); // a bang: nothing else was set off by it
+    store.viewFor("brainstem").setSignal("startle_from_damage", 0.8);
+    expect(startled.sameCauseAs!(moment)).toBe("damage");
+    store.viewFor("brainstem").setSignal("startle_from_damage", 0);
+    expect(startled.sameCauseAs!(moment)).toBeNull();
   });
 });
 

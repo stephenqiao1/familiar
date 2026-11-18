@@ -181,7 +181,7 @@ describe("what the ears deliver", () => {
   it("an explosion carries its position and bearing, and fades after 2 seconds", async () => {
     const w = world();
     w.packet("explosion", { center: { x: 0.5, y: 63, z: 9.5 } });
-    expect(w.data().nearby.heard).toEqual([{ type: "explosion", bearing: { side: "behind", angle: 180 }, dist: 9, position: { x: 0, y: 63, z: 9 }, loudness: 0.9 }]);
+    expect(w.data().nearby.heard).toEqual([{ type: "explosion", bearing: { side: "behind", angle: 180 }, dist: 9, position: { x: 0, y: 63, z: 9 }, loudness: 0.9, msAgo: 0 }]);
     await w.run(2500);
     expect(w.data().nearby.heard).toEqual([]);
   });

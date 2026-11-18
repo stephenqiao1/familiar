@@ -22,5 +22,7 @@ export interface MinecraftCtx {
   lastHurt(): Hurt | null;
   /** What the bot remembers about the chests it has opened. */
   chests: ChestMemory;
+  /** A level the brain is sharing right now (a signal such as "startle"), 0 to 1. Default: not known (0). */
+  level?(signal: string): number;
   log: (msg: string) => void;
 }

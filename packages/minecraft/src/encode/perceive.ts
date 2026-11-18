@@ -20,7 +20,7 @@ const HEARD_WITHIN = { ordinary: 32, loud: 64 };
 const PRESENCE = { within: 8, loudness: 0.2 };
 /** The head is pointed at the nearest seen thing within this many degrees of straight ahead. */
 const GAZE_WITHIN = 12;
-const NO_SENSES: Senses = { closing: () => 0, speed: () => 0, appearedAt: () => null, startedMovingAt: () => null, incoming: () => [], changed: () => [], heard: () => [] };
+const NO_SENSES: Senses = { closing: () => 0, speed: () => 0, appearedOthers: () => [], appearedAt: () => null, startedMovingAt: () => null, incoming: () => [], changed: () => [], heard: () => [] };
 
 /** Where the thing an id names is: an entity's middle, or the middle of a block. Null if it is gone. */
 export function positionOf(bot: EncodableBot, id: string): Vec3 | null {
@@ -61,6 +61,11 @@ export function suddenThings(bot: EncodableBot, things: (Nearby & Sighted)[], se
     const { bearing, seen } = sightOf(bot, at);
     if (seen && !sudden.some((s) => s.id === `entity:${p.id}`)) sudden.push({ id: `entity:${p.id}`, what: "looming", bearing, dist: Math.round(at.distanceTo(me)) });
   }
+  // Things that are not creatures, players or projectiles (a lit explosive, a falling block): seen appearing, not known for what they are.
+  for (const o of senses.appearedOthers(now)) {
+    const { bearing, seen } = sightOf(bot, o.position);
+    if (seen) sudden.push({ id: `entity:${o.id}`, what: "appeared", bearing, dist: Math.round(o.position.distanceTo(me)) });
+  }
   for (const c of senses.changed(now)) {
     const { bearing, seen } = sightOf(bot, c.position.offset(0.5, 0.5, 0.5));
     if (seen && !sudden.some((s) => s.id === posId(c.position))) sudden.push({ id: posId(c.position), what: "changed", bearing, dist: Math.round(c.position.distanceTo(me)) });
@@ -91,7 +96,7 @@ export function heardThings(bot: EncodableBot, senses: Senses, now: number): Nea
     const reach = h.loudness >= 1 ? HEARD_WITHIN.loud : HEARD_WITHIN.ordinary;
     if (dist > reach) return [];
     const loudness = Math.round(h.loudness * (1 - (dist / reach) * 0.7) * 100) / 100;
-    return [{ type: h.type, bearing: bearingOf(me, bot.entity.yaw ?? 0, h.position), dist: Math.round(dist), position: whole(h.position), loudness }];
+    return [{ type: h.type, bearing: bearingOf(me, bot.entity.yaw ?? 0, h.position), dist: Math.round(dist), position: whole(h.position), loudness, msAgo: Math.max(0, now - h.at) }];
   });
 }
 

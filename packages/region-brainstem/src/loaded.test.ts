@@ -29,7 +29,7 @@ describe("createLoadedResponses", () => {
     loaded.observe(g, [], 0);
     expect(loaded.observe(g, [creeper], 1000).fire).not.toBeNull();
     expect(loaded.observe(g, [creeper, { id: "entity:2", kind: "creeper" }], 2000).fire).toBeNull();
-    expect(loaded.observe(g, [creeper, { id: "entity:2", kind: "creeper" }, { id: "entity:3", kind: "creeper" }], 4000).fire?.thing.id).toBe("entity:3");
+    expect(loaded.observe(g, [creeper, { id: "entity:2", kind: "creeper" }, { id: "entity:3", kind: "creeper" }], 4000).fire?.thing?.id).toBe("entity:3");
   });
 
   it("fires for the source of a startle even if it was already in view", () => {

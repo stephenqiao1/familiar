@@ -1,4 +1,4 @@
-/** What a schemaVersion 15 Minecraft State carries in `data`. Distances are whole blocks. */
+/** What a schemaVersion 16 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
   time: { isNight: boolean; lightLevel: number };
   self: {
@@ -108,9 +108,9 @@ export interface MinecraftStateData {
     /**
      * Sounds heard in the last 2 seconds: "explosion", "thunder", "hurt", "door", "shot", "sound"
      * (anything else), or "presence" (an unseen hostile close by, a stand-in for footsteps).
-     * `loudness` is how loud it is here, 0 to 1.
+     * `loudness` is how loud it is here, 0 to 1; `msAgo` how long ago it was heard.
      */
-    heard: { type: string; bearing: Bearing; dist: number; position: { x: number; y: number; z: number }; loudness: number }[];
+    heard: { type: string; bearing: Bearing; dist: number; position: { x: number; y: number; z: number }; loudness: number; msAgo?: number }[];
   };
   /** How this place feels from memory (the strongest good or bad memory close by), or null. */
   memory: { nearby: "good" | "bad"; kind: string } | null;

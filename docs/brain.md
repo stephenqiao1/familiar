@@ -140,9 +140,38 @@ blocks known to hurt within 3 blocks.
   gain = (0.6 + 0.8 × alarm) × bravery factor × hold-back factor, kept within 0.3 to 1.5. Brave
   bots flee less readily and fight more readily; timid bots the reverse. A reflex the goal holds
   back fires at 0.3 of its gain.
-- **Startle.** A hit from something unseen, a hostile first seen within 3 blocks, or something
-  loud within 16 (an explosion, thunder): shares `startle` for one tick, proposes `brace` once
-  (urgency 1) toward where it came from, and raises alarm. At most one per 5 seconds.
+- **Startle** is graded: how big it is depends on the event and on the state the bot is in.
+  The maths is one game-free file, `packages/region-brainstem/src/startle.ts`:
+
+      magnitude = intensity × potentiation × (1 − warning) × (1 − habituated) × brainstem.startle
+
+  kept within 0 to 1, and 0 for something the bot did itself.
+
+  | Part | Range | What sets it |
+  |---|---|---|
+  | intensity | 0 to 1 | The detector (`packages/minecraft/src/brain/startle.ts`): a sound by how loud it is here and how sudden that kind of sound is; a hostile first seen within 3 blocks by how near and how fast it came; a hit from nowhere, or damage with no attacker, by the share of health lost; something looming. The strongest event of the tick counts. |
+  | potentiation | 1 to 1.6 | Being on edge: alarm (+0.3), `sore` (+0.2), the dark (+0.15), a place remembered as bad (+0.15) |
+  | warning | 0 to 0.8 | It was seen coming: the source (or the place it happened) was attended, or was in view and approaching, in the last 2 seconds; or a weaker event of the same kind came from the same place in the last half second |
+  | habituated | 0 to 0.9 | The same kind of event from roughly the same place (8-block squares) halves each time, and comes back over about a minute. If other harm follows within 3 seconds it resets. Per kind and place, never global. It shares its code with the colliculus (`habituation.ts`). |
+  | self-caused | 0 | The event is where the bot just broke, placed, lit or opened something (from the primitives' `changes.targetAt`), or is the noise of something it is striking: within 4.5 seconds and 8 blocks. Unsure counts as not self-caused. |
+
+  If health dropped on the same tick, warning and habituated are capped at 0.5: an event that is
+  hurting the bot right now is never silenced. Nothing is special-cased for hunger or fire: a
+  small hurt that repeats startles the first time at most, then the bot is used to it.
+
+  | Magnitude | What the body does |
+  |---|---|
+  | under 0.25 | Nothing. The colliculus's look is enough. |
+  | 0.25 to 0.6 | A **flinch** (`flinch`, reflex-only, proposed at 0.9): the legs freeze for about 150 ms and the head snaps to the source. It claims no part of the body, so it runs beside whatever is under way: the journey is paused (`locomotion.pause`) and picks up again by itself. Never while a hard reflex is acting. |
+  | over 0.6 | A **full startle**: `brace` (stop, face it, hold) at urgency 1, the hold growing from 250 to 500 ms with the magnitude |
+
+  `startle` is shared as the magnitude for that tick. At most one startle per second.
+  **Alarm** gets 0.4 × magnitude. A startle and what set it off are one event, so where that
+  thing has an alarm trigger of its own (a hit, a mob appearing, something looming) alarm takes
+  the larger of the two, not their sum; a bang, which sets off nothing else, adds in full.
+  **A prepared action**: a goal's `ifThen` entry may carry `onStartle: true`. A full startle
+  releases the first such response at urgency 1 in place of the brace, whatever caused the
+  startle, on the same tick. At most one, and never within 3 seconds of another loaded response.
 - Turning to look at things is the colliculus's job (below), not the brainstem's.
 - **Loaded responses.** A goal's `ifThen` (up to 3, e.g. creeper → flee) fires at urgency 0.95 the
   moment the thing appears, without waiting for the planner. At most one per 3 seconds. A response
@@ -607,7 +636,11 @@ in `data/<name>/`.
 | Change how many sightings it takes to learn a surface | `SIGHTINGS_TO_LEARN` in `packages/minecraft/src/posture/surfaces.ts` |
 | Add a hard reflex | `packages/minecraft/src/brain/reflexes.ts` (write a rule with `"hard"`, add it to `playerReflexes`). Keep these to what saves the bot's life: nothing can overrule them. |
 | Add a soft reflex | Same file, with `"soft"` and a base urgency. If it defends the bot, add its name to `DEFENCE_REFLEXES`; if its skill moves toward or away from a threat, add the skill to `LEANINGS` in `brainstem.ts`. |
-| Add a startle detector | `packages/minecraft/src/brain/brainstem.ts` (write a detector, add it to `playerStartles`) |
+| Add something that startles | `packages/minecraft/src/brain/startle.ts` (write a detector that returns an intensity from 0 to 1 and a source, add it to `createPlayerStartles`) |
+| Make a bot jumpier | `bots.json`: `brainstem.startle` (0 never startles, 1 normal, up to 1.5 jumpy) |
+| Change how fast it gets used to things | `HABITUATION_STEP` in `packages/region-brainstem/src/startle.ts` (startle) or `STEP` in `habituation.ts` (looks); a bot's own strength is `brainstem.habituation` |
+| Change what makes a startle bigger or smaller | `POTENTIATES` and `LIMITS` in `packages/region-brainstem/src/startle.ts`; a bot's strengths are `brainstem.potentiation`, `warning`, `selfCaused` |
+| Prepare an action to go off when startled | In the goal: `ifThen: [{ when, skill, onStartle: true }]` |
 | Add a primitive | `packages/minecraft/src/primitives/`: one file that exports a `do...` function and a skill made with `primitive({ parts, expects, ... })`; add it to `primitives` in `index.ts` and a scene to `apps/run-bot/scripts/primitive-check/scenes.ts` |
 | Make a skill act on the body | Call a primitive's `do...` function. Never call the bot's action methods outside `primitives/` (the doorway rule fails the build's tests). |
 | Add a locomotion pattern | `packages/minecraft/src/locomotion/`: one small file like `swim.ts`, a name in `types.ts`, and a branch in `patterns.ts` (the slot is marked) |

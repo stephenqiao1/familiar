@@ -209,6 +209,7 @@ export function fakeBot(options: FakeOptions = {}) {
     status: () => ({ moving: walking, pattern: walking ? "walk" : null, gait: "walk", stuck: false, progress: 0, recoveries: 0 }),
     setHeadOverride: () => {},
     setDrive: () => {},
+    pause: (ms: number) => (log.push(`paused ${ms}`), walking),
     goTo: async () => ({ status: "failed", reason: "no fake travel" }),
     follow: async () => ({ status: "failed", reason: "no fake travel" }),
     awayFrom: async () => ({ status: "failed", reason: "no fake travel" }),

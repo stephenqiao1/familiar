@@ -30,6 +30,8 @@ export interface Senses {
   appearedAt(entityId: number): number | null;
   /** When an entity last went from still to moving, or null. */
   startedMovingAt(entityId: number): number | null;
+  /** Things that are not creatures, players, projectiles or dropped items that appeared in the last moment (a lit explosive, a falling block). */
+  appearedOthers(now: number): { id: number; position: Vec3 }[];
   /** Projectiles that appeared lately heading the bot's way. */
   incoming(now: number): { id: number; position: Vec3 }[];
   /** Blocks close by that were placed, broken, opened or shut lately. */
@@ -47,6 +49,9 @@ const CHANGED_WITHIN = 8;
 /** A projectile is coming this way if its path passes this close. */
 const PASSES_WITHIN = 2.5;
 const OWN_SOUND_WITHIN = 1.5;
+const JUST_APPEARED_MS = 700;
+/** "Other" entities that are not things to turn to. */
+const NOT_THINGS = new Set(["item", "experience_orb", "lightning_bolt", "area_effect_cloud", "marker", "item_display", "block_display", "text_display", "interaction"]);
 const LOUD: Record<string, number> = { explosion: 1, thunder: 1, shot: 0.5, hurt: 0.45, door: 0.4 };
 const SOUND_SCALE = 0.4;
 const OPENS = /door|gate/;
@@ -143,6 +148,11 @@ export function trackSenses(bot: Bot): Senses {
     speed: (id) => Math.round((tracks.get(id)?.speed ?? 0) * 10) / 10,
     appearedAt: (id) => tracks.get(id)?.appeared ?? null,
     startedMovingAt: (id) => tracks.get(id)?.started ?? null,
+    appearedOthers: (now) =>
+      Object.values(bot.entities).flatMap((e) => {
+        const appeared = tracks.get(e.id)?.appeared;
+        return e.type === "other" && !NOT_THINGS.has(e.name ?? "") && appeared !== undefined && now - appeared <= JUST_APPEARED_MS ? [{ id: e.id, position: e.position.clone() }] : [];
+      }),
     incoming: (now) => incoming.filter((p) => now - p.at <= KEEP_MS.incoming),
     changed: (now) => changed.filter((c) => now - c.at <= KEEP_MS.changed),
     heard: (now) => heard.filter((h) => now - h.at <= KEEP_MS.heard),

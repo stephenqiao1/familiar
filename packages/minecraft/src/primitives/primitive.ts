@@ -38,7 +38,8 @@ const SETTLE_MS = 100;
 /**
  * Turns a description into a primitive skill, and wraps every run the same way:
  *   - a container left open by an earlier movement is closed first (unless this one uses it);
- *   - a snapshot is taken before and after, and what changed is reported in `changes`;
+ *   - a snapshot is taken before and after, and what changed is reported in `changes`
+ *     (with `targetAt`, where it changed a block, so an effect can be traced to the bot's own act);
  *   - stance: if it leaves the legs free and the bot is at an edge or beside something that
  *     hurts, sneak is held for as long as it runs (`changes.stance`), and let go the moment it is stopped;
  *   - `changes.asExpected` says whether the run did what the primitive says it does when it works;
@@ -79,6 +80,8 @@ export function primitive(spec: PrimitiveSpec): Skill<MinecraftCtx> {
       // A window opened in passing (a crafting table that was used, say) is not left open.
       if (!spec.usesWindow) await doClose(bot).catch(() => {});
       const changes: Changes = { ...changesBetween(before, takeSnapshot(bot, focus, hurts)), ...(stance.held ? { stance: true } : {}), ...result.changes };
+      // Where it changed the world, so what happens there next can be traced to the bot's own act.
+      if (focus.block && (changes.targetBlock !== undefined || changes.opened !== undefined)) changes.targetAt = `${focus.block.x},${focus.block.y},${focus.block.z}`;
       // A block the bot dug under came down: that is how it learns which blocks are loose.
       if (typeof changes.cameDown === "string" && focus.block) sawComeDown(bot, changes.cameDown, focus.block);
       // HOOK(prediction-checker): `asExpected` is only recorded here. A later region will read it

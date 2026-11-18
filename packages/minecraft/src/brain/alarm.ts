@@ -1,6 +1,6 @@
 import type { State } from "@familiar/contracts";
 import { BAD_SURPRISE_SIGNAL, BIG_SURPRISE, changedThreshold, FOCUS_SIGNAL, type AlarmTrigger } from "@familiar/neuromodulators";
-import { LOOMING_SIGNAL, STARTLE_SIGNAL } from "@familiar/region-brainstem";
+import { LOOMING_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL } from "@familiar/region-brainstem";
 import { minecraftDataOf, nearestThreat } from "./read-state.js";
 
 // What raises the player's alarm. Each trigger says how much to add right now (0 to 1).
@@ -11,8 +11,10 @@ const MAX_HEALTH = 20;
 const DAMAGE_FOR_FULL_ALARM = MAX_HEALTH / 3;
 /** Enough on its own to count as a sudden jump (more than 0.5), so the bot drops what it was doing. */
 const HOSTILE_APPEARED = 0.6;
-/** A startle adds this on top of whatever caused it (a hit, a mob appearing). */
-const STARTLED = 0.3;
+/** A startle of full size adds this (smaller ones in proportion). */
+const STARTLED = 0.4;
+/** Signals set this close together were set on the same tick. */
+const SAME_TICK_MS = 100;
 /** Something looming at full strength adds this. */
 const LOOMED = 0.6;
 /** A mob seen as a threat within this long is the same threat coming back, not a new one. */
@@ -66,10 +68,20 @@ export function bigSurprise(byFocus = false): AlarmTrigger {
   };
 }
 
-/** The brainstem was startled this tick (a hit from nowhere, a mob up close, something loud). */
+/**
+ * The brainstem startled this tick: adds 0.4 × the startle's size. A startle and the thing that
+ * set it off are one event, so where that thing has an alarm trigger of its own (a hit, a mob
+ * appearing, something looming) alarm takes the larger of the two, not their sum.
+ */
 export const startled: AlarmTrigger = {
   name: "startle",
-  check: ({ ws }) => ((ws.signals[STARTLE_SIGNAL]?.value ?? 0) > 0 ? STARTLED : 0),
+  check: ({ ws }) => STARTLED * (ws.signals[STARTLE_SIGNAL]?.value ?? 0),
+  sameCauseAs({ ws }) {
+    const startle = ws.signals[STARTLE_SIGNAL];
+    if (!startle || startle.value <= 0) return null;
+    const from = Object.entries(ws.signals).find(([name, signal]) => name.startsWith(STARTLE_FROM) && signal.value > 0 && Math.abs(signal.at - startle.at) <= SAME_TICK_MS);
+    return from ? from[0].slice(STARTLE_FROM.length) : null;
+  },
 };
 
 /** Something is coming at the bot fast (the colliculus's `looming` signal): once, as it starts. Enough on its own to count as a sudden jump. */

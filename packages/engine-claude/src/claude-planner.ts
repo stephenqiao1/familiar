@@ -32,6 +32,10 @@ const PlanSchema = z.object({
       z.object({
         when: z.string().describe("A kind of thing by game name, as in watchFor (e.g. creeper, villager, chest)."),
         skill: z.string().describe("The name of one of the listed abilities to do the moment it appears."),
+        onStartle: z
+          .boolean()
+          .optional()
+          .describe("True to make this a prepared action: any sudden fright (a bang, a hit from nowhere) releases it at once, whatever caused the fright. At most one."),
       }),
     )
     .describe(
@@ -99,7 +103,7 @@ export class ClaudePlanner implements Planner {
     if (response.stop_reason === "refusal") throw new Error("planner declined to plan");
     if (!response.parsed_output) throw new Error(`planner gave no plan (stop reason: ${response.stop_reason})`);
     const plan = response.parsed_output;
-    return { ...plan, wants: cleanWants(plan.wants), ifThen: plan.ifThen.filter((r) => r.when && r.skill).slice(0, 3), holdBack: plan.holdBack.filter(Boolean) };
+    return { ...plan, wants: cleanWants(plan.wants), ifThen: plan.ifThen.filter((r) => r.when && r.skill).slice(0, 3).map(({ when, skill, onStartle }) => ({ when, skill, ...(onStartle ? { onStartle: true } : {}) })), holdBack: plan.holdBack.filter(Boolean) };
   }
 }
 
@@ -123,7 +127,7 @@ export function cleanWants(wants: ItemWant[]): ItemWant[] {
 
 /** The current goal's loaded responses and held-back reflexes, if it has any. */
 function formatTuning(goal: Pick<Goal, "ifThen" | "holdBack">): string {
-  const loaded = goal.ifThen.length ? `\nLoaded responses: ${goal.ifThen.map((r) => `if ${r.when} then ${r.skill}`).join("; ")}` : "";
+  const loaded = goal.ifThen.length ? `\nLoaded responses: ${goal.ifThen.map((r) => `if ${r.when} then ${r.skill}${r.onStartle ? " (also released by any fright)" : ""}`).join("; ")}` : "";
   const held = goal.holdBack.length ? `\nHolding back: ${goal.holdBack.join(", ")}` : "";
   return loaded + held;
 }

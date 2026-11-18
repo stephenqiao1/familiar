@@ -172,7 +172,8 @@ const scenes: Scene[] = [
     checks: (run) => {
       const alarm = run.signal("alarm");
       const firstHigh = run.ticks.find((t) => (t.signals.alarm?.value ?? 0) > 0.5);
-      const reflexWon = run.ticks.some((t) => t.winner?.region === "reflex");
+      // A reflex wins a tick, or the startle releases a response the planner had prepared (then Jev may carry the same skill on).
+      const reflexWon = run.ticks.some((t) => t.winner?.region === "reflex" || (t.winner?.region === "brainstem" && (run.trace(t, "brainstem").startle as { released?: string } | undefined)?.released !== undefined));
       const recorded = run.ticks.flatMap((t) => (run.trace(t, "hippocampus").recorded as { summary: string; strength: number }[] | undefined) ?? []);
       const danger = recorded.filter((r) => /damage|Died|surprised by/.test(r.summary));
       const lastAlarm = alarm.at(-1) ?? 1;
@@ -181,7 +182,7 @@ const scenes: Scene[] = [
       return [
         ["alarm is low before the ambush", max(run.ticks.filter((t) => run.at(t) < 22).map((t) => t.signals.alarm?.value ?? 0)) < 0.3],
         ["alarm spikes above 0.5 within 10 s of the zombie appearing", firstHigh !== undefined && run.at(firstHigh) < 35, firstHigh ? `at ${run.at(firstHigh).toFixed(1)} s` : "never"],
-        ["a reflex takes over", reflexWon],
+        ["a reflex, or a response the startle released, takes over", reflexWon],
         ["the planner's weight drops", min(run.signal("planner_weight")) < 0.8, `min ${min(run.signal("planner_weight")).toFixed(2)}`],
         ["patience is cut by about 0.2 when alarm jumps", patienceDrop > 0.15, `largest drop in one tick ${patienceDrop.toFixed(2)}`],
         ["the danger is remembered, more strongly than a calm event", danger.some((d) => d.strength > 0.35), danger.map((d) => `${d.summary} [${d.strength.toFixed(2)}]`).join("; ") || "nothing recorded"],
@@ -489,7 +490,7 @@ const scenes: Scene[] = [
       return [
         ["the explosion was heard", heard.length > 0, `${heard.length} ticks`],
         ["it startled, once", startles.length === 1 && first?.by === "loud_nearby", startles.map((s) => s.by).join(", ") || "no startle"],
-        ["bracing won that tick", first?.t.winner?.region === "brainstem" && first.t.action.skill === "brace"],
+        ["bracing (or a response the planner had prepared) won that tick", first?.t.winner?.region === "brainstem" && (first.t.action.skill === "brace" || (run.trace(first.t, "brainstem").startle as { released?: string } | undefined)?.released === first.t.action.skill), String(first?.t.action.skill)],
         ["the startle raised alarm on the same tick", (raised?.startle ?? 0) > 0, JSON.stringify(raised ?? {})],
       ];
     },

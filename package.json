@@ -17,6 +17,7 @@
     "medulla-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/medulla-check.ts",
     "posture-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/posture-check.ts",
     "colliculus-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/colliculus-check.ts",
+    "startle-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/startle-check.ts",
     "reflex-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/reflex-check.ts",
     "locomotion-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/locomotion-check.ts",
     "skill-check:skills": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/skill-check.ts",

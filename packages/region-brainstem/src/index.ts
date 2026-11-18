@@ -1,4 +1,4 @@
-export { createBrainstemRegion, type Body, type BrainstemMoment, type BrainstemOptions, type StartleDetector } from "./brainstem-region.js";
+export { createBrainstemRegion, type Body, type BrainstemMoment, type BrainstemOptions, type StartleDetector, type StartleHit } from "./brainstem-region.js";
 export { createDefenceWatch, type DefenceTick, type OverruledDefence } from "./defence-watch.js";
 export { createReflexGain, HELD_BACK, isHeldBack, MAX_GAIN, MIN_GAIN, reflexGain, type GainInputs, type Leaning, type ReflexGainOptions } from "./gain.js";
 export { createMedullaRegion, overall, type MedullaOptions, type Vitals } from "./medulla-region.js";
@@ -10,3 +10,5 @@ export { colliculusProblem, DEFAULT_COLLICULUS, FEATURES, type ColliculusSetting
 export { partsOf, salienceOf, type Sense } from "./salience.js";
 export { createHabituation } from "./habituation.js";
 export { LOADED_SIGNAL, LOOMING_SIGNAL } from "./signals.js";
+export { createStartle, FLINCH, FULL, holdMsOf, LIMITS as STARTLE_LIMITS, magnitudeOf, potentiationOf, REFRACTORY_MS, sizeOf, type Edge, type Factors, type Judged, type StartleEvent, type StartleStrengths } from "./startle.js";
+export { STARTLE_FROM } from "./signals.js";

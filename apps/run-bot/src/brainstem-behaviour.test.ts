@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import { createArbiter, createBrain } from "./brain.js";
 
 const signal = new AbortController().signal;
-const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, loadedResponses: 0, holdBack: 0, arousalGate: 0, bodySignals: 0 };
+const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, potentiation: 0, warning: 0, habituation: 0, selfCaused: 0, startReact: 0, loadedResponses: 0, holdBack: 0, arousalGate: 0, bodySignals: 0 };
 type Mob = MinecraftStateData["nearby"]["mobs"][number];
 const mob = (type: string, dist: number, id = 1): Mob => ({ id: `entity:${id}`, type, dist, hostile: true, reachable: true });
 
@@ -198,9 +198,9 @@ describe("reflex gains through the real brain", () => {
 
   it("a goal that holds back flee damps it to 0.3 of its gain; last_stand still pulls the bot out", async () => {
     const free = bot();
-    const held = bot();
+    // The goal comes from the planner: now that a close ambush no longer takes it offline, it would replace one set by hand.
+    const held = bot({ plan: { goal: "Stand and fight", steps: [], reason: "", holdBack: ["flee"] } });
     for (const b of [free, held]) await b.tick();
-    held.store.viewFor("prefrontal").setGoal({ text: "Stand and fight", steps: [], reason: "", holdBack: ["flee"] });
     const zombie = { mobs: [mob("zombie", 2)] };
     for (const b of [free, held]) await b.tick(zombie);
     const [a, b] = [await free.tick(zombie), await held.tick(zombie)];
@@ -274,31 +274,131 @@ describe("defence by distance through the real brain", () => {
 });
 
 describe("startle", () => {
-  it("fires once when a hostile appears on top of the bot, raises alarm, and not again within 5 seconds", async () => {
+  const ambush = { mobs: [mob("zombie", 2)] };
+  const bangAt = (loudness: number) => ({ heard: [{ type: "explosion", bearing: { side: "behind" as const, angle: 180 }, dist: 9, position: { x: 0, y: 63, z: 9 }, loudness, msAgo: 30 }] });
+
+  it("a hostile appearing on top of the bot: a full startle, sized, braced toward it", async () => {
+    const { tick, value } = bot();
+    await tick();
+    const out = await tick(ambush);
+    expect(value("startle")).toBeCloseTo(0.62, 1);
+    expect(out.winner).toMatchObject({ region: "brainstem", action: { skill: "brace", target: "entity:1" }, urgency: 1 });
+    expect(out.traces.brainstem?.startle).toMatchObject({ by: "hostile_up_close", size: "full", cause: "hostile_appeared", potentiation: 1, warning: 0, habituated: 0 });
+    // Not again within a second, whatever turns up.
+    await tick({ mobs: [mob("zombie", 2), mob("zombie", 1, 2)] }, null, 400);
+    expect(value("startle")).toBe(0);
+  });
+
+  it("alarm takes the larger of the startle and its cause, not the sum: a close ambush no longer takes the planner offline", async () => {
     const withStartle = bot();
     const without = bot({ brainstem: { startle: 0 } });
     for (const b of [withStartle, without]) await b.tick();
-    const ambush = { mobs: [mob("zombie", 2)] };
     const out = await withStartle.tick(ambush);
     await without.tick(ambush);
-    expect(withStartle.value("startle")).toBe(1);
-    expect(out.winner).toMatchObject({ region: "brainstem", action: { skill: "brace", target: "entity:1" }, urgency: 1 });
-    expect(out.traces.noradrenaline?.raisedBy).toMatchObject({ startle: 0.3, hostile_appeared: 0.6 });
-    expect(withStartle.value("alarm")).toBeGreaterThan(without.value("alarm")!);
-
-    // A second mob up close a second later does not startle again; one six seconds later does.
-    await withStartle.tick({ mobs: [mob("zombie", 2), mob("zombie", 2, 2)] }, null, 1000);
-    expect(withStartle.value("startle")).toBe(0);
-    await withStartle.tick({ mobs: [mob("zombie", 2), mob("zombie", 2, 2), mob("zombie", 2, 3)] }, null, 5000);
-    expect(withStartle.value("startle")).toBe(1);
+    // 0.4 × 0.62 is less than the 0.6 the mob's appearing already gave: the startle adds nothing on top.
+    expect(out.traces.noradrenaline?.raisedBy).toEqual({ hostile_appeared: 0.6 });
+    expect(out.traces.noradrenaline?.sameCause).toEqual({ startle: "hostile_appeared" });
+    expect(withStartle.value("alarm")).toBeCloseTo(0.6);
+    expect(withStartle.value("alarm")).toBe(without.value("alarm"));
+    expect(withStartle.value("planner_offline")).toBe(0);
   });
 
-  it("a hit from something unseen startles and turns the bot toward it", async () => {
+  it("different causes still add: a bang (nothing else set off by it) adds its own 0.4 × size", async () => {
+    const { tick, value } = bot();
+    await tick();
+    const out = await tick(bangAt(0.9));
+    expect(out.traces.noradrenaline?.raisedBy).toEqual({ startle: expect.closeTo(0.36) });
+    // A bang while a mob also appears close: the mob's own trigger and the bang's startle are two things.
+    const both = bot();
+    await both.tick();
+    const two = await both.tick({ ...bangAt(0.9), mobs: [mob("zombie", 6)] });
+    expect(two.traces.brainstem?.startle).toMatchObject({ by: "loud_nearby" });
+    expect(two.traces.noradrenaline?.raisedBy).toEqual({ hostile_appeared: 0.6, startle: expect.closeTo(0.36) });
+    expect(both.value("alarm")).toBeCloseTo(0.96);
+    expect(value("alarm")).toBeCloseTo(0.36);
+  });
+
+  it("a hit from something unseen startles and turns the bot toward it; its alarm is the larger of the hit and the startle", async () => {
     const { tick, value } = bot();
     await tick();
     const out = await tick({ self: { health: 17, lastHurt: { msAgo: 20, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } }, mobs: [{ ...mob("skeleton", 20, 9) }] });
-    expect(value("startle")).toBe(1);
-    expect(out.traces.brainstem?.startle).toEqual({ by: "hurt_unseen", source: { id: "entity:9", kind: "skeleton" } });
+    expect(value("startle")).toBeCloseTo(0.67);
+    expect(out.traces.brainstem?.startle).toMatchObject({ by: "hurt_unseen", source: { id: "entity:9", kind: "skeleton" }, size: "full", cause: "damage" });
+    expect(out.winner).toMatchObject({ action: { skill: "brace", target: "entity:9" } });
+    expect(out.traces.noradrenaline?.raisedBy).toEqual({ damage: expect.closeTo(0.45) });
+  });
+
+  it("a mild bang is a flinch, proposed below urgency 1, toward where it came from", async () => {
+    const { tick, value } = bot();
+    await tick({}, "go_to");
+    const out = await tick(bangAt(0.45), "go_to");
+    expect(value("startle")).toBeCloseTo(0.45);
+    expect(out.candidates).toContainEqual(expect.objectContaining({ region: "brainstem", action: { skill: "flinch", target: "pos:0,63,9" }, urgency: 0.9 }));
+    expect(out.traces.brainstem?.startle).toMatchObject({ size: "flinch" });
+  });
+
+  it("is bigger in the dark just after being hurt than when calm", async () => {
+    const calm = bot();
+    await calm.tick();
+    await calm.tick(bangAt(0.5));
+    const edgy = bot();
+    await edgy.tick();
+    await edgy.tick({ night: true, self: { health: 12 } }); // hurt: alarm is up
+    const out = await edgy.tick({ night: true, self: { health: 12 }, ...bangAt(0.5) });
+    expect(calm.value("startle")).toBeCloseTo(0.5);
+    expect(edgy.value("startle")!).toBeGreaterThan(0.6);
+    expect((out.traces.brainstem?.startle as { potentiation: number }).potentiation).toBeGreaterThan(1.2);
+  });
+
+  it("the same bang again and again startles less each time, down to nothing", async () => {
+    const { tick, value } = bot();
+    await tick();
+    const sizes: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      await tick(bangAt(0.9), null, 2500);
+      sizes.push(value("startle")!);
+      await tick({}, null, 2500);
+    }
+    expect(sizes[0]).toBeCloseTo(0.9);
+    expect(sizes[1]).toBeLessThan(sizes[0]!);
+    expect(sizes[2]).toBeLessThan(sizes[1]!);
+    expect(sizes[3]).toBe(0);
+  });
+
+  it("hunger ticks startle at most the first time, with no special case for them", async () => {
+    const { tick } = bot();
+    await tick();
+    const flinched: boolean[] = [];
+    for (let i = 0; i < 6; i++) {
+      const out = await tick({ self: { health: 19 - i, food: 0, lastHurt: { msAgo: 20, by: null, kind: "starve", at: { x: 0, y: 63, z: 0 } } } }, null, 500);
+      flinched.push(out.traces.brainstem?.startle !== undefined);
+      await tick({ self: { health: 19 - i, food: 0, lastHurt: { msAgo: 3500, by: null, kind: "starve", at: { x: 0, y: 63, z: 0 } } } }, null, 3500);
+    }
+    expect(flinched.filter(Boolean).length).toBeLessThanOrEqual(1);
+    expect(flinched[0]).toBe(true);
+  });
+
+  it("a goal's onStartle response is released by a full startle from something unrelated, in place of the brace", async () => {
+    const { tick } = bot({ plan: { goal: "Hold the line", steps: [], reason: "", ifThen: [{ when: "creeper", skill: "flee", onStartle: true }] } });
+    await tick();
+    await tick();
+    // Something to flee from must be there for the skill to be aimed; the bang is what sets it off.
+    const out = await tick({ ...bangAt(0.9), mobs: [mob("zombie", 12)] });
+    expect(out.traces.brainstem?.startle).toMatchObject({ by: "loud_nearby", size: "full", released: "flee" });
+    expect(out.winner).toMatchObject({ region: "brainstem", action: { skill: "flee" }, urgency: 1 });
+    expect(out.candidates.some((c) => "skill" in c.action && c.action.skill === "brace")).toBe(false);
+  });
+
+  it("brainstem.startle at 0 gives no startles; at 1.5 gives larger ones", async () => {
+    const off = bot({ brainstem: { startle: 0 } });
+    await off.tick();
+    const none = await off.tick(bangAt(1));
+    expect(none.traces.brainstem?.startle).toBeUndefined();
+    expect(none.candidates.some((c) => c.region === "brainstem")).toBe(false);
+    const jumpy = bot({ brainstem: { startle: 1.5 } });
+    await jumpy.tick();
+    await jumpy.tick(bangAt(0.5));
+    expect(jumpy.value("startle")).toBeCloseTo(0.75);
   });
 });
 

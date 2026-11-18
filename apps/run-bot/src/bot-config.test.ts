@@ -73,6 +73,13 @@ describe("loadBotConfig", () => {
     await expect(loadBotConfig("List", file)).rejects.toThrow(/reflexes.innateHurts must be a list/);
   });
 
+  it("brainstem.startle is a real strength: 0 to 1.5, with a strength for each thing that changes a startle's size", async () => {
+    await writeFile(file, JSON.stringify({ Jumpy: { brainstem: { startle: 1.5, habituation: 0.5, startReact: 0 } }, TooJumpy: { brainstem: { startle: 2 } }, Bad: { brainstem: { warning: 1.2 } } }));
+    expect((await loadBotConfig("Jumpy", file)).brainstem).toEqual({ ...DEFAULT_BRAINSTEM, startle: 1.5, habituation: 0.5, startReact: 0 });
+    await expect(loadBotConfig("TooJumpy", file)).rejects.toThrow(/brainstem.startle must be 0 to 1.5/);
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow(/brainstem.warning must be 0 to 1/);
+  });
+
   it("reads the colliculus block: the weights, the threshold and each part's strength", async () => {
     await writeFile(file, JSON.stringify({ Jumpy: { colliculus: { threshold: 0.2, weights: { looming: 2 }, fieldOfView: 1 } }, Bad: { colliculus: { hearing: 2 } }, Odd: { colliculus: { weights: { hostile: 1 } } } }));
     // A bot may give only some weights: the rest keep their defaults.

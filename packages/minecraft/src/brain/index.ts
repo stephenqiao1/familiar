@@ -1,5 +1,5 @@
 export { playerAlarms, threatPresent } from "./alarm.js";
-export { drowsy, HOLDABLE, leaningOf, playerBrainstem, playerStartles, REFLEX_NOTE } from "./brainstem.js";
+export { drowsy, HOLDABLE, leaningOf, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
 export { asleep, moved, playerFocus, watchedThings } from "./focus.js";
 export { approachableThings, skillsToward, thingsInView } from "./cues.js";
 export { DEFAULT_LOCOMOTION, driveFrom, locomotionProblem, RESTING_DRIVE, type LocomotionSettings } from "./locomotion.js";
@@ -15,3 +15,4 @@ export { describeSituation, type Storage } from "./situation.js";
 export { situationOf } from "./situation-labels.js";
 export { createScan, featuresOf, headFree, perceptsOf, playerColliculus, usesNothing, type Physical } from "./colliculus.js";
 export { createFieldOfView, toldView, type FieldOfView } from "./field-of-view.js";
+export { createPlayerStartles, roughPositionOf, selfCaused, startleSurroundings } from "./startle.js";

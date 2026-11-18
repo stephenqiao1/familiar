@@ -26,6 +26,11 @@ export interface AlarmMoment {
 export interface AlarmTrigger {
   name: string;
   check(moment: AlarmMoment): number;
+  /**
+   * The name of another trigger that this one shares its cause with on this tick, or null. The two
+   * are then one event: alarm takes the larger of them, not their sum. Default: never.
+   */
+  sameCauseAs?(moment: AlarmMoment): string | null;
 }
 
 export interface NoradrenalineOptions {
@@ -127,10 +132,21 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
 
       // Alarm.
       const raisedBy: Record<string, number> = {};
+      const sameCause: Record<string, string> = {};
       if (before) {
+        const moment = { before, after, ws };
         for (const trigger of triggers) {
-          const bump = trigger.check({ before, after, ws });
+          const bump = trigger.check(moment);
           if (bump > 0) raisedBy[trigger.name] = bump;
+        }
+        // Two triggers set off by one event count once, at the larger: the second adds only what it has over the first.
+        for (const trigger of triggers) {
+          const other = raisedBy[trigger.name] !== undefined ? trigger.sameCauseAs?.(moment) : null;
+          if (!other || raisedBy[other] === undefined) continue;
+          const over = raisedBy[trigger.name]! - raisedBy[other];
+          if (over > 0) raisedBy[trigger.name] = over;
+          else delete raisedBy[trigger.name];
+          sameCause[trigger.name] = other;
         }
       }
       before = after;
@@ -223,6 +239,7 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
         trace: {
           alarm: level,
           ...(Object.keys(raisedBy).length ? { raisedBy } : {}),
+          ...(Object.keys(sameCause).length ? { sameCause } : {}),
           threat,
           plannerWeight: weight,
           ...(plannerOffline ? { plannerOffline: true } : {}),

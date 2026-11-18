@@ -1,7 +1,8 @@
 import type { Proposal, Region, State, Workspace } from "@familiar/contracts";
 import { createLoadedResponses, LOADED_URGENCY, type Thing } from "./loaded.js";
+import { createStartle } from "./startle.js";
 import type { BrainstemSettings } from "./settings.js";
-import { AROUSAL_SIGNAL, LOADED_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+import { AROUSAL_SIGNAL, LOADED_SIGNAL, SORE_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
 
 /** What a detector looks at: the last tick's state, this tick's, and the workspace. */
 export interface BrainstemMoment {
@@ -10,10 +11,30 @@ export interface BrainstemMoment {
   ws: Workspace;
 }
 
-/** One kind of sudden event. Returns its source (a thing to face, or null if unknown) when it happens. */
+/** A sudden event, as a detector reports it. */
+export interface StartleHit {
+  /** The thing to face, or null if unknown. */
+  source: Thing | null;
+  /** How sudden and strong it was, 0 to 1. */
+  intensity: number;
+  /** What kind of event, for getting used to it. Default: the source's kind, else the detector's name. */
+  kind?: string;
+  /** Roughly where it came from. Default: nowhere (an event that travels with the body). */
+  place?: string;
+  /** It was seen coming, 0 to 1. Default: 0. */
+  foreseen?: number;
+  /** The body did it itself. Default: false. */
+  selfCaused?: boolean;
+  /** The alarm trigger that the same event also sets off, if any (alarm then takes the larger of the two, not their sum). */
+  cause?: string;
+  /** How long ago the raw event happened, in ms (for timing the reaction). Default: 0. */
+  msAgo?: number;
+}
+
+/** One kind of sudden event. Returns what happened, and how strongly, when it happens. */
 export interface StartleDetector {
   name: string;
-  check(moment: BrainstemMoment): { source: Thing | null } | null;
+  check(moment: BrainstemMoment): StartleHit | null;
 }
 
 /** What the brainstem needs to know of the body right now. (Its vital signs are the medulla's to report.) */
@@ -36,10 +57,14 @@ export interface BrainstemOptions {
   hardReflex?(ws: Workspace): boolean;
   /** b: the sudden events that startle. */
   startle: StartleDetector[];
+  /** b: how dark it is here and how strongly this place is remembered as bad, each 0 to 1. Default: neither. */
+  surroundings?(state: State): { dark: number; badPlace: number };
   /** d: everything in view, for matching loaded responses. */
   thingsOf(state: State): Thing[];
   /** d: why a loaded response may not use a skill (unknown, a primitive, reflex-only), or null if it may. */
   responseProblem(skill: string): string | null;
+  /** d: whether a skill could be started right now with no target (a prepared response that cannot is not released). Default: always. */
+  canStart?(skill: string): boolean;
   /** d: whether a skill can be aimed at a target right now. */
   acceptsTarget(skill: string, target: string): boolean;
   /** d: the names a goal may hold back (soft reflexes and the skills they propose). */
@@ -52,16 +77,16 @@ export interface BrainstemOptions {
   body(state: State): Body | null;
   /** f: what the body's balance and posture did this tick, for the trace. Asked once a tick. Default: nothing. */
   postureNotes?(state: State): Record<string, unknown> | null;
-  /** The skill proposed for a startle. (Turning to look at things is the colliculus's job.) */
-  skills: { brace: string };
+  /** The skills proposed for a full startle and for a flinch. (Turning to look at things is the colliculus's job.) */
+  skills: { brace: string; flinch: string };
   /** Default: "brainstem". */
   name?: string;
   /** Default: 0 (runs inside every tick). */
   layer?: number;
 }
 
-/** At most one startle per this long. */
-const STARTLE_GAP_MS = 5000;
+/** A flinch is proposed below 1, so it can never take over from a hard reflex's skill. */
+const FLINCH_URGENCY = 0.9;
 /** Pain fades with this time constant: about gone after 10 seconds. */
 const PAIN_TAU_SECONDS = 3.3;
 /** Being stuck fades from the signal with this time constant: about gone after 5 seconds. */
@@ -77,8 +102,10 @@ const STAY_ASLEEP_URGENCY = 0.5;
 /**
  * The brainstem: keeps the body going and reacts before the rest of the brain has noticed. It
  * proposes little; mostly it shares signals. (It also supplies the reflex gains: see `createReflexGain`.)
- *   b) startle: on a sudden event, shares `startle` for one tick and proposes bracing once
- *      (urgency 1) toward where it came from, at most once per 5 s;
+ *   b) startle: a sudden event gives a startle sized by how strong it was and by the state the
+ *      body is in (see startle.ts). A small one is a flinch (a moment's freeze, then carry on);
+ *      a big one a full brace toward where it came from, or the release of a response the goal
+ *      prepared. `startle` is shared as its size for that tick;
  *   (c, orienting, moved to the colliculus region);
  *   d) loaded responses: fires a response the goal loaded in advance the moment its thing appears;
  *      reports loaded responses and hold-backs it had to ignore;
@@ -93,7 +120,8 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
   let before: State | null = null;
   let pain = 0;
   let stuck = 0;
-  let lastStartle = -Infinity;
+  const startle = createStartle(settings);
+  let startleCause: string | null = null;
   let checkedGoal: number | null = null;
 
   return {
@@ -124,36 +152,53 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
       const posture = options.postureNotes?.(after);
       if (posture) trace.posture = posture;
 
-      // b) Startle.
-      let startled: { by: string; source: Thing | null } | null = null;
+      // b) Startle: the strongest sudden event this tick, sized.
+      let startled: { by: string; source: Thing | null; size: "flinch" | "full"; magnitude: number } | null = null;
+      if (startleCause) ws.setSignal(STARTLE_FROM + startleCause, 0);
+      startleCause = null;
       if (settings.startle > 0) {
-        if (moment && now - lastStartle >= STARTLE_GAP_MS) {
-          for (const detector of options.startle) {
-            const hit = detector.check(moment);
-            if (hit) {
-              startled = { by: detector.name, source: hit.source };
-              break;
-            }
+        const hits = moment ? options.startle.flatMap((detector) => { const hit = detector.check(moment); return hit ? [{ by: detector.name, hit }] : []; }) : [];
+        const strongest = hits.sort((a, b) => b.hit.intensity - a.hit.intensity)[0];
+        const event = strongest && { kind: strongest.hit.kind ?? strongest.hit.source?.kind ?? strongest.by, intensity: strongest.hit.intensity, ...(strongest.hit.place ? { place: strongest.hit.place } : {}), foreseen: strongest.hit.foreseen ?? 0, selfCaused: strongest.hit.selfCaused ?? false };
+        // Harm since the last tick: whatever startled lately was worth it (unless this is that same event again).
+        if (hurt > 0) startle.harmed(now, event);
+        if (strongest && event) {
+          const edge = { alarm: options.alarmOf(ws), sore: body?.sore ?? 0, ...(options.surroundings?.(after) ?? { dark: 0, badPlace: 0 }) };
+          const judged = startle.judge(event, edge, hurt > 0, now);
+          const { hit, by } = strongest;
+          const eventToDecideMs = Math.max(0, Math.round(Date.now() - (now - (hit.msAgo ?? 0))));
+          const report = { by, kind: event.kind, source: hit.source, intensity: round(hit.intensity), potentiation: round(judged.potentiation), warning: round(judged.warning), habituated: round(judged.habituated), selfCaused: judged.selfCaused, magnitude: round(judged.magnitude), ...(hit.cause ? { cause: hit.cause } : {}), eventAt: now - (hit.msAgo ?? 0), eventToDecideMs };
+          // A flinch never cuts across a hard reflex's skill.
+          const flinchBarred = judged.size === "flinch" && (options.hardReflex?.(ws) ?? false);
+          if (judged.size === "none" || flinchBarred) trace.startleQuiet = { ...report, why: flinchBarred ? "a hard reflex is acting" : judged.silenced };
+          else {
+            startled = { by, source: hit.source, size: judged.size, magnitude: judged.magnitude };
+            trace.startle = { ...report, size: judged.size };
+            if (hit.cause) ws.setSignal(STARTLE_FROM + (startleCause = hit.cause), judged.magnitude);
           }
         }
-        ws.setSignal(STARTLE_SIGNAL, startled ? 1 : 0);
-        if (startled) {
-          lastStartle = now;
-          trace.startle = startled;
-          proposals.push({ action: { skill: skills.brace, ...(startled.source ? { target: startled.source.id } : {}) }, urgency: 1, reason: `startled: ${startled.by}` });
-        }
+        ws.setSignal(STARTLE_SIGNAL, startled?.magnitude ?? 0);
       }
+      const facing = startled?.source ? { target: startled.source.id } : {};
 
       // d) Loaded responses, and hold-backs the goal asked for that cannot be honoured.
+      let released = false;
       if (settings.loadedResponses > 0) {
-        const { fire, dropped } = loaded.observe(ws.goal, options.thingsOf(after), now, startled?.source);
+        const { fire, dropped } = loaded.observe(ws.goal, options.thingsOf(after), now, startled?.source, startled?.size === "full" && settings.startReact > 0, (rule) => options.canStart?.(rule.skill) ?? true);
         if (dropped) trace.droppedResponses = dropped;
         ws.setSignal(LOADED_SIGNAL, fire ? 1 : 0);
         if (fire) {
-          const target = options.acceptsTarget(fire.rule.skill, fire.thing.id) ? { target: fire.thing.id } : {};
-          trace.loadedResponse = { when: fire.rule.when, skill: fire.rule.skill, thing: fire.thing.id };
-          proposals.push({ action: { skill: fire.rule.skill, ...target }, urgency: LOADED_URGENCY, reason: `loaded response: ${fire.rule.when} appeared` });
+          const target = fire.thing && options.acceptsTarget(fire.rule.skill, fire.thing.id) ? { target: fire.thing.id } : {};
+          released = fire.released ?? false;
+          trace.loadedResponse = { when: fire.rule.when, skill: fire.rule.skill, thing: fire.thing?.id ?? null, ...(released ? { releasedByStartle: true } : {}) };
+          // A response released by a startle goes off in the startle's place, at its urgency.
+          proposals.push({ action: { skill: fire.rule.skill, ...target }, urgency: released ? 1 : LOADED_URGENCY, reason: released ? `startled (${startled!.by}): releasing the prepared ${fire.rule.skill}` : `loaded response: ${fire.rule.when} appeared` });
+          if (released) (trace.startle as Record<string, unknown>).released = fire.rule.skill;
         }
+      }
+      if (startled && !released) {
+        const full = startled.size === "full";
+        proposals.push({ action: { skill: full ? skills.brace : skills.flinch, ...facing }, urgency: full ? 1 : FLINCH_URGENCY, reason: `${full ? "startled" : "flinched"}: ${startled.by} (${round(startled.magnitude)})` });
       }
       if (ws.goal && ws.goal.setAt !== checkedGoal) {
         checkedGoal = ws.goal.setAt;
@@ -189,3 +234,5 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
     },
   };
 }
+
+const round = (n: number) => Math.round(n * 100) / 100;

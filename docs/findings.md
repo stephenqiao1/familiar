@@ -3,6 +3,90 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-18: the startle circuit
+
+*Found by running the real bot on the test server with `pnpm startle-check`. No Jev and no
+planner calls, except the ambush scene, which runs the whole brain.*
+
+| Scene | Magnitude | Flinch or full | What changed its size | Event to start |
+|---|---|---|---|---|
+| Bang 10 blocks behind, calm | 0.89 | Full | Nothing | 21 to 174 ms over four runs |
+| Bang it watched coming (a lit fuse 8 blocks in front) | 0.18 | None | Warning 0.8 | |
+| Five bangs 4 s apart, then one two minutes later | 0.89, 0.52, 0.06, 0.22, 0.17; then 0.89 | Full, flinch, then none | Habituation (and a warning on the third) | |
+| The same bang in the dark, just after being hurt | 1.00 | Full | Potentiation × 1.6 | 116 ms |
+| Its own explosive (placed, lit, walked clear) | 0 | None | Self-caused | |
+| A far bang (40 blocks) mid-journey | 0.56 | Flinch; the one journey finished | Nothing | 29 ms |
+| A prepared action released by an unrelated bang | 0.89 | Full: `return_to_base` released | Nothing | 33 to 37 ms (127 to 138 ms fired the ordinary way) |
+| Ambush, whole brain | 0.72 | Full | Potentiation × 1.15 | 5 ms |
+| Starving for a minute | 0.28 | One flinch in 16 hurts | Habituation | |
+
+**Speed.** From the raw event to the brace or flinch starting took 5 to 174 ms, all under the
+200 ms aim. The spread is the loop, not the reflex: the state is checked for a significant
+change every 100 ms, and two ticks must be 150 ms apart, so an event waits 0 to about 150 ms
+before the tick that reacts to it. Deciding and starting the skill then takes 1 to 3 ms. To make
+it steadier the loop would need to be poked by the raw event itself instead of polling
+(`watchMs` and `minGapMs` in `packages/core/src/brain-loop.ts`); that was not changed.
+
+**Found and fixed.**
+
+- **A prepared action that could not start swallowed the startle.** In the `neuro-check` bang
+  scene Claude, unprompted, marked `flee` as `onStartle`. The bang released it, but with nothing
+  to flee from the skill could not run, so the bot neither fled nor braced. A prepared response
+  is now released only if it can be started right now; otherwise the body braces.
+- **The flinch missed the legs.** The journey only looked for a pause every 250 ms, so a 150 ms
+  flinch could pass unnoticed. A pause now takes hold at once.
+- **In scenes with no Jev, a look took the place of the walk.** A manually started `go_to` has
+  nothing proposing it, so the colliculus's competing look at the bang won the tick and ended
+  the journey before the flinch ran. Those scenes use `--same-time` so the look runs alongside.
+  With Jev running, the walk is proposed every tick and keeps going.
+- **Two `neuro-check` checks expected the old behaviour**: "bracing won that tick" (now a
+  prepared response may win instead) and "a reflex takes over" (after the startle released
+  `flee`, Jev carried the same skill on and outvoted the now calmer reflex). Both were widened.
+
+**Seen, left as it is.**
+
+- **The five bangs are not evenly smaller.** The third fell to 0.06 because the bot was still
+  looking toward the last one, which counts as having seen it coming. The fourth, with its head
+  elsewhere, was 0.22.
+- **An ambush that hurts still takes the planner offline** (see the closed finding above).
+- **A starving bot's alarm climbs anyway.** The startle habituates to hunger ticks, but the
+  separate damage trigger adds 0.15 for each one: a bot left starving reached alarm 0.58 in 20
+  seconds with no startle after the first. That trigger was not part of this change.
+- **Standing next to its own blast still startles.** The explosion is self-caused and silent;
+  the hurt from it is a second event and is not (an event that is hurting the bot is never
+  silenced). In the first run of that scene the bot lost 15 health and braced.
+
+## Startle: limits of this first version
+
+- **The self-caused window is 4.5 seconds, not the spec's "about 3".** An explosive the bot
+  lights goes off after 4. Anything else that happens within 8 blocks of where it just dug,
+  placed or lit something in that time is also taken for its own doing.
+- **Self-caused covers only what a primitive reports changing** (a block broken, placed or
+  replaced, a container opened) and what the bot is striking. A door opened with `use_on` leaves
+  no trace in `changes`, so its sound is not known to be the bot's own; nor is anything done by a
+  skill that does not go through `break_block`, `place_block`, `use_on`, `open`, `hit` or `attack`.
+- **"Seen coming" is by place as well as by thing.** A bang within 3 blocks of something the bot
+  was attending counts as warned, whatever that something was. A fuse lit more than 2 seconds
+  before the bang, and no longer attended, does not: the default 4-second fuse gives no warning
+  unless the bot keeps looking at it.
+- **Looming is read from the state, not from the colliculus's signal**, which arrives a tick
+  late (the colliculus runs after the brainstem). The colliculus and the startle therefore judge
+  looming separately.
+- **A flinch freezes the legs for 150 to about 400 ms**, not exactly 150: the journey carries on
+  at its next look, up to 250 ms later. Steering (swimming, a dash) is paused the same way. A
+  single `step` in progress is not.
+- **Habituation is by kind and 8-block square.** Thunder from a different square startles
+  afresh; an event with no place (a hurt) is habituated by kind alone, everywhere.
+- **An ordinary sound never startles on its own** (it tops out below the flinch threshold), a
+  door or a shot can flinch, and only explosions and thunder give a full startle by sound alone.
+  Those weights (`ONSET`) are hand-set.
+- **"Hostile up close" has no raw-event time**, so its event-to-start reads as a few
+  milliseconds: it is timed from the tick that saw it.
+- **A released response replaces the brace.** The bot does not freeze first; and if several
+  entries are marked `onStartle` only the first usable one is ever released.
+- **`selfCaused` and `startReact` are still on or off**, as are the other brainstem strengths
+  named in the closed finding.
+
 ## Live testing, 2026-11-18: the colliculus
 
 *Found by running the real bot on the test server with `pnpm colliculus-check`. No Jev and no
@@ -838,7 +922,7 @@ was also hit.
 
 **What would fix it.** Take the larger of the two instead of the sum, or lower the startle's share.
 
-**Status.** Open. It seems right for an ambush; revisit if the planner is offline too often.
+**Status.** Closed 2026-11-18. A startle now adds 0.4 × its size, and alarm takes the larger of the startle and the trigger for the same cause. Live, with the whole brain: the tick a zombie appeared 2 blocks away gave alarm 0.60 (it was 0.9), and the planner stayed online on arrival. Once the zombie lands a hit, the damage adds on top and alarm still passes 0.8: in that run the planner was offline for 50 of the fight's 55 ticks. So an ambush that is only seen no longer takes the planner offline; one that hurts still does.
 
 ## Brainstem: holding back flee leaves an unarmed bot with nothing until last_stand
 
@@ -870,7 +954,7 @@ threshold, or let the planner hold back one zone at a time.
 **What would fix it.** Give each a meaning for in-between values (e.g. startle strength scales the
 alarm it adds).
 
-**Status.** Open.
+**Status.** Closed for startle 2026-11-18: `brainstem.startle` now multiplies the size of every startle (0 to 1.5), and `potentiation`, `warning` and `habituation` scale smoothly too. `orienting` is gone (the colliculus has its own strengths). `loadedResponses`, `arousalGate`, `bodySignals`, `selfCaused` and `startReact` are still on or off.
 
 ## Brainstem: startle and orienting miss some things
 
@@ -887,7 +971,7 @@ alarm it adds).
 **What would fix it.** Add the explosion's position to `nearby.loud`; add thunder once sound names
 can be trusted on this version.
 
-**Status.** Mostly closed 2026-11-18 by the colliculus. An explosion and thunder now carry where they came from, and the bot braces toward it (live: facing a bang behind it 0.4 s after it went off). Other sounds are heard by where they came from (not by name: see the colliculus findings). Anything that appears, moves or changes in view can draw a look, friendly mobs and blocks included. Still open: damage with no attacker does not startle.
+**Status.** Closed 2026-11-18. The colliculus closed the hearing and looking parts. Damage with no attacker now startles too, by how much it cost, with no special case for hunger or fire: a small hurt that repeats startles the first time at most and is then habituated (live: 8 starvation hurts in a minute, one flinch).
 
 ## Brainstem: a cue can wake a sleeping bot
 

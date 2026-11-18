@@ -156,7 +156,28 @@ console.log(
   `SOFT REFLEX GAIN: ${soft.length ? `mean ${meanOf(soft.map((f) => f.gain)).toFixed(2)}, range ${Math.min(...soft.map((f) => f.gain)).toFixed(2)} to ${Math.max(...soft.map((f) => f.gain)).toFixed(2)}, mean urgency ${meanOf(soft.map((f) => f.urgency)).toFixed(2)}` : "no soft reflex fired"}`,
 );
 const stem = (key: string) => ticks.filter((t) => trace(t, "brainstem")[key] !== undefined);
-console.log(`STARTLES: ${list(count(stem("startle"), (t) => (trace(t, "brainstem").startle as { by: string }).by))}`);
+// Startle: graded by how strong the event was and the state the body was in.
+type Startled = { by: string; kind: string; intensity: number; potentiation: number; warning: number; habituated: number; selfCaused: boolean; magnitude: number; size?: string; why?: string; released?: string; eventAt: number };
+const startles = ticks.flatMap((t) => (trace(t, "brainstem").startle ? [{ t, s: trace(t, "brainstem").startle as Startled }] : []));
+const quiet = ticks.flatMap((t) => (trace(t, "brainstem").startleQuiet ? [{ t, s: trace(t, "brainstem").startleQuiet as Startled }] : []));
+console.log(`STARTLES: ${startles.filter((x) => x.s.size === "full").length} full, ${startles.filter((x) => x.s.size === "flinch").length} flinches, ${quiet.length} events with none; by ${list(count(startles, (x) => x.s.by))}`);
+const everyEvent = [...startles, ...quiet];
+const ofEvents = (n: number) => (everyEvent.length ? `${n} of ${everyEvent.length}` : "0");
+console.log(`  made bigger (on edge): ${ofEvents(everyEvent.filter((x) => x.s.potentiation > 1.05).length)}; made smaller by a warning: ${ofEvents(everyEvent.filter((x) => x.s.warning > 0).length)}, by habituation: ${ofEvents(everyEvent.filter((x) => x.s.habituated > 0).length)}`);
+console.log(`  silenced: ${list(count(quiet, (x) => (x.s.why === "too small" && x.s.habituated > 0 ? "habituated" : x.s.why === "too small" && x.s.warning > 0 ? "seen coming" : (x.s.why ?? "?"))))}`);
+// From the raw event to the brace, flinch or released response starting.
+const startTimes = startles.flatMap(({ t, s: st }) => {
+  const wanted = st.released ?? (st.size === "full" ? "brace" : "flinch");
+  const at = ticks.filter((u) => u.timestamp >= t.timestamp - 50 && u.timestamp <= t.timestamp + 1500).flatMap((u) => (u.skillEvents ?? []).filter((e) => e.skill === wanted && e.type === "started").map((e) => (e as { timestamp?: number }).timestamp ?? u.timestamp))[0];
+  return at !== undefined && st.eventAt > 0 ? [Math.max(0, at - st.eventAt)] : [];
+});
+console.log(`  event to start: ${startTimes.length ? `median ${middle(startTimes)} ms, slowest ${Math.max(...startTimes)} ms (${startTimes.length} timed; the aim is under 200)` : "none timed"}`);
+const releases = startles.filter((x) => x.s.released);
+if (releases.length) console.log(`  prepared responses released: ${list(count(releases, (x) => x.s.released!))}`);
+for (const d of died) {
+  const damped = quiet.filter((x) => d.timestamp - x.t.timestamp >= 0 && d.timestamp - x.t.timestamp <= 3000 && x.s.why === "too small" && (x.s.warning > 0 || x.s.habituated > 0) && x.s.intensity >= 0.25);
+  for (const x of damped) console.log(`!! DIED within 3 s of a startle damped to nothing: ${x.s.by} (${x.s.kind}), intensity ${x.s.intensity}, warning ${x.s.warning}, habituated ${x.s.habituated}: the damping may be too strong`);
+}
 console.log(`LOADED RESPONSES FIRED: ${list(count(stem("loadedResponse"), (t) => { const r = trace(t, "brainstem").loadedResponse as { when: string; skill: string }; return `${r.when} → ${r.skill}`; }))}; dropped: ${stem("droppedResponses").length}; hold-backs ignored: ${stem("ignoredHoldBack").length}`);
 console.log(`ORIENTING: ${stem("orienting").length} times, ${ticks.filter((t) => t.winner?.region === "brainstem" && t.winner.action.skill === "look_at").length} looks taken`);
 // Time is counted from each tick to the next.

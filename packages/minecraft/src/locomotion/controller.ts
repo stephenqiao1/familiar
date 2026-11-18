@@ -36,6 +36,7 @@ const CATCH_UP_BEYOND = 2;
 /** How often the body is felt and the pattern checked: walking, and steering (which needs a finer hand). */
 const POLL_MS = { walk: 250, steer: 100 };
 const FEEL_MS = 250;
+const PAUSE_POLL_MS = 25;
 /** A journey is late once it has run past this many times its estimate; no estimate is under this long. */
 const LATE_FACTOR = 2;
 const MIN_ESTIMATE_MS = 2000;
@@ -59,6 +60,7 @@ interface Active {
   tries: number;
   stuckAt: Vec3 | null;
   recovering: boolean;
+  paused: boolean;
   startGap: number;
   goalSetAt: number;
   doors: Set<string>;
@@ -78,6 +80,7 @@ export function createLocomotion(bot: Bot, options: LocomotionOptions = {}): Loc
   let head: HeadOverride | null = null;
   let stuckUntil = 0;
   let usingCareful: boolean | null = null;
+  let pausedUntil = 0;
 
   /** Falling this far behind what it follows, the bot sprints to catch up whatever its speed. */
   const fallenBehind = () => {
@@ -178,6 +181,22 @@ export function createLocomotion(bot: Bot, options: LocomotionOptions = {}): Loc
     try {
       while (true) {
         if (signal.aborted) return report(run, "interrupted");
+        // Paused (a flinch): stand still with no key held, then pick the journey up where it was.
+        if (Date.now() < pausedUntil) {
+          await sleepFor(PAUSE_POLL_MS, signal);
+          continue;
+        }
+        if (run.paused) {
+          run.paused = false;
+          sense.reset();
+          try {
+            if (run.pattern === "walk") setGoal(run);
+            log("locomotion: carrying on after a pause");
+          } catch (error) {
+            log(`locomotion: could not carry on after a pause (${error instanceof Error ? error.message : String(error)})`);
+            return report(run, "failed", "could not resume after a pause");
+          }
+        }
         const { journey } = run;
         if (journey.arrived(run.pattern === "walk" && walk.reached(), run.pattern !== null && run.pattern !== "walk")) return report(run, "done");
         const next = choosePattern(bot, journey.urgent, run.pattern);
@@ -240,7 +259,7 @@ export function createLocomotion(bot: Bot, options: LocomotionOptions = {}): Loc
     const aim = journey.aim();
     const run: Active = {
       journey, cancel: new AbortController(), pattern: null, finished: Promise.resolve({ status: "done" }), startedAt: Date.now(),
-      from: me, last: me, distance: 0, switches: 0, recoveries: [], tries: 0, stuckAt: null, recovering: false,
+      from: me, last: me, distance: 0, switches: 0, recoveries: [], tries: 0, stuckAt: null, recovering: false, paused: false,
       startGap: aim ? aim.distanceTo(me) : 0, goalSetAt: 0, doors: new Set(), estimateMs: null,
     };
     active = run;
@@ -272,6 +291,14 @@ export function createLocomotion(bot: Bot, options: LocomotionOptions = {}): Loc
         progress: run && run.startGap > 0 ? Math.min(1, Math.max(0, 1 - left / run.startGap)) : 0,
         recoveries: run?.recoveries.length ?? 0,
       };
+    },
+    pause(ms) {
+      if (!active) return false;
+      pausedUntil = Math.max(pausedUntil, Date.now() + ms);
+      // At once, not at the journey's next look: a flinch is over in less time than that.
+      active.paused = true;
+      halt();
+      return true;
     },
     avoid: (spot) => spots.mark(spot, Date.now()),
     forget() {

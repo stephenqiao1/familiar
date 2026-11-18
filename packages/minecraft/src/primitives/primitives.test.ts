@@ -149,10 +149,10 @@ describe("the primitives", () => {
       ["equip", undefined, { items: [item("bread"), item("stone_sword")], held: "bread" }, { held: "stone_sword" }],
       ["drop_item", undefined, { items: [item("bread", 3)], held: "bread" }, { lost: { bread: 1 }, drops: 1 }],
       ["drop_item", "held", { items: [item("bread", 3)], held: "bread" }, { lost: { bread: 3 }, held: "nothing", drops: 1 }],
-      ["break_block", "dir:forward", { blocks: { "0,63,-1": "dirt" } }, { targetBlockWas: "dirt", targetBlock: "air", progress: 1 }],
-      ["place_block", "dir:forward", { items: [item("dirt", 2)], held: "dirt" }, { turned: expect.any(Number), lost: { dirt: 1 }, targetBlockWas: "air", targetBlock: "dirt" }],
+      ["break_block", "dir:forward", { blocks: { "0,63,-1": "dirt" } }, { targetBlockWas: "dirt", targetBlock: "air", targetAt: "0,63,-1", progress: 1 }],
+      ["place_block", "dir:forward", { items: [item("dirt", 2)], held: "dirt" }, { turned: expect.any(Number), lost: { dirt: 1 }, targetBlockWas: "air", targetBlock: "dirt", targetAt: "0,63,-1" }],
       ["hit", "entity:9", { entities: [entity(9, "zombie", 0, -1)] }, { turned: expect.any(Number), targetHurt: true }],
-      ["open", "dir:forward", { blocks: { "0,63,-1": "chest" } }, { opened: "chest" }],
+      ["open", "dir:forward", { blocks: { "0,63,-1": "chest" } }, { opened: "chest", targetAt: "0,63,-1" }],
       ["craft", "item:oak_planks", { items: [item("oak_log")], recipes: { oak_planks: { uses: { oak_log: 1 }, makes: 4 } } }, { gained: { oak_planks: 4 }, lost: { oak_log: 1 } }],
       ["craft", "item:wooden_pickaxe", { blocks: { "1,63,0": "crafting_table" }, items: [item("oak_planks", 3), item("stick", 2)], recipes: { wooden_pickaxe: { uses: { oak_planks: 3, stick: 2 }, makes: 1, table: true } } }, { gained: { wooden_pickaxe: 1 }, lost: { oak_planks: 3, stick: 2 } }],
     ];
@@ -246,6 +246,20 @@ describe("the primitives", () => {
       expect(bot.log).toContain("stopped digging");
       expect(bot.state.targetDigBlock).toBeNull();
       expect(bot.blockName(0, 63, -1)).toBe("dirt");
+    });
+
+    it("brace holds longer the bigger the startle: 250 ms at the threshold, 500 at the top", async () => {
+      const held = async (startle: number | undefined) => {
+        const bot = fakeBot();
+        if (startle !== undefined) bot.ctx.level = (signal) => (signal === "startle" ? startle : 0);
+        const started = Date.now();
+        await run(bot, "brace");
+        return Date.now() - started;
+      };
+      const [plain, big] = [await held(undefined), await held(1)];
+      expect(plain).toBeGreaterThanOrEqual(240);
+      expect(plain).toBeLessThan(400);
+      expect(big).toBeGreaterThanOrEqual(490);
     });
 
     it("brace drops the path and every key", async () => {

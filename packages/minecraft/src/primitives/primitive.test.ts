@@ -26,7 +26,7 @@ describe("primitive (the shared wrapper)", () => {
   it("watches the target block and the target entity", async () => {
     const { ctx, state } = fakeBot({ blocks: { "0,63,-1": "dirt" }, items: [item("dirt")], held: "dirt" });
     const dig = primitive(spec({ expects: ["targetBlock=air"], run: async () => (await ctx.bot.dig(ctx.bot.blockAt(state.entity.position.offset(0, 0, -1))!), { status: "done" }) }));
-    expect((await dig.run(ctx, "dir:forward", signal)).changes).toEqual({ targetBlockWas: "dirt", targetBlock: "air", asExpected: true });
+    expect((await dig.run(ctx, "dir:forward", signal)).changes).toEqual({ targetBlockWas: "dirt", targetBlock: "air", targetAt: "0,63,-1", asExpected: true });
   });
 
   it("turns an error into a clean failure, and a stop into an interrupt", async () => {

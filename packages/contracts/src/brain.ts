@@ -27,6 +27,8 @@ export interface IfThen {
   when: string;
   /** The name of an existing skill. */
   skill: string;
+  /** A prepared action: a full startle releases it at once, whatever caused the startle. Default: false. */
+  onStartle?: boolean;
 }
 
 /** A goal written by a planning region. Other regions read it to guide their choices. */

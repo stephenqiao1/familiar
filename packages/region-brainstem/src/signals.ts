@@ -40,3 +40,5 @@ export const UNSTEADY_SIGNAL = "unsteady";
 export const LOOMING_SIGNAL = "looming";
 /** 1 on a tick when a response the goal loaded in advance fired. */
 export const LOADED_SIGNAL = "loaded_response";
+/** On the tick of a startle, `startle_from_<cause>` carries its size too, naming what set it off (so alarm does not count the same event twice). */
+export const STARTLE_FROM = "startle_from_";

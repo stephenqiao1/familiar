@@ -183,6 +183,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     lastHurt: () => bodyEvents.lastHurt(),
     wants: () => workspace.goal()?.wants ?? [],
     chests: believedChests,
+    level: (signal) => view.signals[signal]?.value ?? 0,
     log: (msg) => console.log(`    ${msg}`),
   };
   const storage = { chests: believedChests, baseChest: posId(base.chest) };
@@ -259,7 +260,10 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   const skillNamed = (name: string | undefined) => skills.find((s) => s.name === name);
   const runsAlongside = (c: Candidate) => {
     if (!("skill" in c.action)) return false;
-    const parts = skillNamed(c.action.skill)?.parts;
+    const skill = skillNamed(c.action.skill);
+    // A reflex that claims no part of the body (a flinch) runs beside whatever is under way.
+    if (skill?.reflexOnly && skill.parts?.length === 0) return true;
+    const parts = skill?.parts;
     const running = skillNamed(executor.current()?.skill);
     // Beside a skill that uses no part of the body (idling) always; beside one that leaves the head free with --same-time.
     return parts?.length === 1 && parts[0] === "head" && (usesNothing(running) || ((brainArgs.sameTime ?? false) && headFree(running)));

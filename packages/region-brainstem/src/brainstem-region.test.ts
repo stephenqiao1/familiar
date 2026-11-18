@@ -13,7 +13,11 @@ interface World {
   hunger?: number;
   asleep?: boolean;
   night?: boolean;
-  bang?: boolean;
+  /** A sudden event this tick: true (strong), or its intensity. */
+  bang?: boolean | number;
+  /** Extra fields for that event (foreseen, selfCaused, place, kind, cause). */
+  hit?: Record<string, unknown>;
+  dark?: number;
   things?: { id: string; kind: string }[];
 }
 const world = (state: State) => state.data as World;
@@ -24,7 +28,7 @@ function bot(settings: Partial<BrainstemSettings> = {}, over: Partial<BrainstemO
     settings: { ...DEFAULT_BRAINSTEM, ...settings },
     alarmOf: (ws) => ws.signals.alarm?.value ?? 0,
     hardReflex: (ws) => (ws.signals.hard_reflex?.value ?? 0) > 0,
-    startle: [{ name: "bang", check: ({ after }) => (world(after).bang ? { source: world(after).things?.[0] ?? null } : null) }],
+    startle: [{ name: "bang", check: ({ after }) => (world(after).bang ? { source: world(after).things?.[0] ?? null, intensity: typeof world(after).bang === "number" ? (world(after).bang as number) : 0.9, kind: "bang", ...world(after).hit } : null) }],
     thingsOf: (state) => world(state).things ?? [],
     responseProblem: (skill) => (skill === "flee" ? null : "unknown skill"),
     acceptsTarget: () => true,
@@ -32,7 +36,8 @@ function bot(settings: Partial<BrainstemSettings> = {}, over: Partial<BrainstemO
     asleep: (ws) => world(ws.state).asleep ?? false,
     drowsy: (ws) => world(ws.state).night ?? false,
     body: (state) => ({ health: world(state).health ?? 1 }),
-    skills: { brace: "brace" },
+    skills: { brace: "brace", flinch: "flinch" },
+    surroundings: (state) => ({ dark: world(state).dark ?? 0, badPlace: 0 }),
     ...over,
   });
   let ms = 0;
@@ -51,27 +56,152 @@ describe("createBrainstemRegion", () => {
   });
 
   describe("startle", () => {
-    it("shares startle for one tick and proposes bracing toward the source, once", async () => {
+    const zombie = { id: "entity:1", kind: "zombie" };
+
+    it("a strong event: shares startle as its size for one tick and proposes bracing toward the source, at full urgency", async () => {
       const { tick, value } = bot();
       await tick();
-      const out = await tick({ bang: true, things: [{ id: "entity:1", kind: "zombie" }] });
-      expect(value("startle")).toBe(1);
-      expect(out.proposals).toContainEqual({ action: { skill: "brace", target: "entity:1" }, urgency: 1, reason: "startled: bang" });
-      expect(out.trace).toMatchObject({ startle: { by: "bang" } });
-      const next = await tick({ bang: true, things: [{ id: "entity:1", kind: "zombie" }] });
+      const out = await tick({ bang: 0.9, things: [zombie] });
+      expect(value("startle")).toBeCloseTo(0.9);
+      expect(out.proposals).toContainEqual({ action: { skill: "brace", target: "entity:1" }, urgency: 1, reason: "startled: bang (0.9)" });
+      expect(out.trace).toMatchObject({ startle: { by: "bang", intensity: 0.9, potentiation: 1, warning: 0, habituated: 0, magnitude: 0.9, size: "full" } });
+      const next = await tick({ things: [zombie] });
       expect(value("startle")).toBe(0);
-      expect(next.proposals.some((p) => "skill" in p.action && p.action.skill === "brace")).toBe(false);
+      expect(next.proposals).toEqual([]);
     });
 
-    it("fires at most once per 5 seconds", async () => {
+    it("a milder one is a flinch, proposed below urgency 1; a weak one is nothing at all", async () => {
       const { tick, value } = bot();
       await tick();
-      await tick({ bang: true });
-      expect(value("startle")).toBe(1);
-      await tick({ bang: true }, null, 4000);
+      const out = await tick({ bang: 0.4, things: [zombie] });
+      expect(out.proposals).toEqual([{ action: { skill: "flinch", target: "entity:1" }, urgency: 0.9, reason: "flinched: bang (0.4)" }]);
+      expect(value("startle")).toBeCloseTo(0.4);
+      const weak = await bot().tick({ bang: 0.4 });
+      expect(weak.proposals).toEqual([]); // the first tick has nothing to compare with
+      const quiet = bot();
+      await quiet.tick();
+      const none = await quiet.tick({ bang: 0.2 });
+      expect(none.proposals).toEqual([]);
+      expect(quiet.value("startle")).toBe(0);
+      expect(none.trace).toMatchObject({ startleQuiet: { by: "bang", magnitude: 0.2, why: "too small" } });
+    });
+
+    it("a flinch does not cut across a hard reflex's skill", async () => {
+      const { store, tick, value } = bot();
+      await tick();
+      store.viewFor("reflex").setSignal("hard_reflex", 1);
+      const out = await tick({ bang: 0.4 }, "escape_hazard");
+      expect(out.proposals).toEqual([]);
       expect(value("startle")).toBe(0);
-      await tick({ bang: true }, null, 1500);
-      expect(value("startle")).toBe(1);
+      expect(out.trace).toMatchObject({ startleQuiet: { why: "a hard reflex is acting" } });
+    });
+
+    it("is bigger when the body is on edge: alarm, soreness and the dark", async () => {
+      const edgy = bot({}, { body: () => ({ health: 1, sore: 1 }) });
+      edgy.store.viewFor("noradrenaline").setSignal("alarm", 1);
+      await edgy.tick({ dark: 1 });
+      const out = await edgy.tick({ bang: 0.5, dark: 1 });
+      expect(out.trace).toMatchObject({ startle: { potentiation: 1.6, magnitude: 0.8, size: "full" } });
+    });
+
+    it("is smaller, or silent, when it was seen coming, got used to, or self-caused", async () => {
+      const seen = bot();
+      await seen.tick();
+      expect((await seen.tick({ bang: 0.9, hit: { foreseen: 1 } })).trace).toMatchObject({ startleQuiet: { warning: 0.8, why: "too small" } });
+      const own = bot();
+      await own.tick();
+      expect((await own.tick({ bang: 1, hit: { selfCaused: true } })).trace).toMatchObject({ startleQuiet: { selfCaused: true, magnitude: 0, why: "self-caused" } });
+      const used = bot();
+      await used.tick();
+      const sizes: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        await used.tick({ bang: 0.9, hit: { place: "0,0" } }, null, 3000);
+        sizes.push(used.value("startle")!);
+        await used.tick({}, null, 1000);
+      }
+      expect(sizes[0]).toBeCloseTo(0.9);
+      expect(sizes[1]).toBeLessThan(sizes[0]!);
+      expect(sizes[3]).toBe(0);
+    });
+
+    it("fires again a second later, not sooner", async () => {
+      const { tick, value } = bot();
+      await tick();
+      await tick({ bang: 0.9, hit: { kind: "a" } });
+      expect(value("startle")).toBeCloseTo(0.9);
+      await tick({});
+      const soon = await tick({ bang: 0.9, hit: { kind: "b" } }, null, 300);
+      expect(value("startle")).toBe(0);
+      expect(soon.trace).toMatchObject({ startleQuiet: { why: "refractory" } });
+      await tick({}, null, 100);
+      await tick({ bang: 0.9, hit: { kind: "c" } }, null, 700);
+      expect(value("startle")).toBeCloseTo(0.9);
+    });
+
+    it("damage on the same tick caps the damping: it still startles", async () => {
+      const { tick, value } = bot();
+      await tick();
+      await tick({ bang: 0.9, health: 0.7, hit: { foreseen: 1 } });
+      expect(value("startle")).toBeCloseTo(0.45);
+    });
+
+    it("says which alarm trigger shares its cause, for that tick only", async () => {
+      const { tick, value } = bot();
+      await tick();
+      await tick({ bang: 0.9, hit: { cause: "damage" } });
+      expect(value("startle_from_damage")).toBeCloseTo(0.9);
+      await tick();
+      expect(value("startle_from_damage")).toBe(0);
+    });
+
+    it("the strength setting scales it: 0 never startles, 1.5 startles harder", async () => {
+      const off = bot({ startle: 0 });
+      await off.tick();
+      expect((await off.tick({ bang: 1 })).proposals).toEqual([]);
+      expect(off.value("startle")).toBeUndefined();
+      const jumpy = bot({ startle: 1.5 });
+      await jumpy.tick();
+      await jumpy.tick({ bang: 0.5 });
+      expect(jumpy.value("startle")).toBeCloseTo(0.75);
+    });
+  });
+
+  describe("releasing a prepared action", () => {
+    const goal = (ifThen: { when: string; skill: string; onStartle?: boolean }[]) => ({ text: "g", steps: [], reason: "", ifThen });
+
+    it("a full startle from an unrelated source fires the response marked onStartle, once, in place of the brace", async () => {
+      const { store, tick } = bot();
+      store.viewFor("prefrontal").setGoal(goal([{ when: "creeper", skill: "flee", onStartle: true }]));
+      await tick();
+      const out = await tick({ bang: 0.9 });
+      expect(out.proposals).toEqual([{ action: { skill: "flee" }, urgency: 1, reason: "startled (bang): releasing the prepared flee" }]);
+      expect(out.trace).toMatchObject({ startle: { size: "full", released: "flee" }, loadedResponse: { skill: "flee", releasedByStartle: true } });
+      // Not again straight away: the usual limit on loaded responses holds.
+      await tick({}, null, 600);
+      const again = await tick({ bang: 0.9, hit: { kind: "other" } }, null, 600);
+      expect(again.proposals.map((p) => ("skill" in p.action ? p.action.skill : ""))).toEqual(["brace"]);
+    });
+
+    it("a prepared response that cannot be started right now is not released: the body braces instead", async () => {
+      const { store, tick } = bot({}, { canStart: () => false });
+      store.viewFor("prefrontal").setGoal(goal([{ when: "creeper", skill: "flee", onStartle: true }]));
+      await tick();
+      expect((await tick({ bang: 0.9 })).proposals.map((p) => ("skill" in p.action ? p.action.skill : ""))).toEqual(["brace"]);
+    });
+
+    it("not on a flinch, not without the mark, and not with the release switched off", async () => {
+      const flinch = bot();
+      flinch.store.viewFor("prefrontal").setGoal(goal([{ when: "creeper", skill: "flee", onStartle: true }]));
+      await flinch.tick();
+      expect((await flinch.tick({ bang: 0.4 })).proposals.map((p) => ("skill" in p.action ? p.action.skill : ""))).toEqual(["flinch"]);
+      const unmarked = bot();
+      unmarked.store.viewFor("prefrontal").setGoal(goal([{ when: "creeper", skill: "flee" }]));
+      await unmarked.tick();
+      expect((await unmarked.tick({ bang: 0.9 })).proposals.map((p) => ("skill" in p.action ? p.action.skill : ""))).toEqual(["brace"]);
+      const off = bot({ startReact: 0 });
+      off.store.viewFor("prefrontal").setGoal(goal([{ when: "creeper", skill: "flee", onStartle: true }]));
+      await off.tick();
+      expect((await off.tick({ bang: 0.9 })).proposals.map((p) => ("skill" in p.action ? p.action.skill : ""))).toEqual(["brace"]);
     });
   });
 

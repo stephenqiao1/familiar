@@ -51,6 +51,30 @@ describe("the locomotion controller: commands", () => {
     expect(t.state.entity.position).toEqual(where);
   });
 
+  it("pause() freezes the legs for a moment without ending the journey, which then carries on and arrives", async () => {
+    const t = fakeTraveller();
+    const journey = t.locomotion.goTo(t.at(0, -20), {}, never);
+    await t.run(1000);
+    const before = t.state.entity.position.z;
+    expect(t.locomotion.pause(150)).toBe(true);
+    await t.run(100);
+    // Frozen: no key held, no ground covered, and the journey is still under way.
+    expect(t.keysDown()).toEqual([]);
+    expect(t.locomotion.status().moving).toBe(true);
+    const frozenAt = t.state.entity.position.z;
+    expect(before - frozenAt).toBeLessThan(0.6);
+    await t.run(400);
+    expect(t.state.entity.position.z).toBeLessThan(frozenAt - 0.5);
+    expect(t.logged).toContain("locomotion: carrying on after a pause");
+    await t.run(8000);
+    expect(await journey).toMatchObject({ status: "done" });
+    expect(t.keysDown()).toEqual([]);
+  });
+
+  it("pause() with no journey under way does nothing", () => {
+    expect(fakeTraveller().locomotion.pause(150)).toBe(false);
+  });
+
   it("stop() ends travel now and releases every key", async () => {
     const t = fakeTraveller();
     const journey = t.locomotion.goTo(t.at(0, -40), {}, never);
