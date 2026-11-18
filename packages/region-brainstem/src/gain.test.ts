@@ -42,10 +42,10 @@ describe("reflexGain", () => {
 
 describe("isHeldBack", () => {
   it("matches the reflex's name or the skill it proposes", () => {
-    expect(isHeldBack({ holdBack: ["flee"] }, "threat_contact", "flee")).toBe(true);
-    expect(isHeldBack({ holdBack: ["threat_contact"] }, "threat_contact", "attack")).toBe(true);
-    expect(isHeldBack({ holdBack: ["flee"] }, "threat_contact", "attack")).toBe(false);
-    expect(isHeldBack(null, "threat_contact", "flee")).toBe(false);
+    expect(isHeldBack({ holdBack: ["flee"] }, "defence_flee", "flee")).toBe(true);
+    expect(isHeldBack({ holdBack: ["defence_fight"] }, "defence_fight", "attack")).toBe(true);
+    expect(isHeldBack({ holdBack: ["flee"] }, "defence_fight", "attack")).toBe(false);
+    expect(isHeldBack(null, "defence_flee", "flee")).toBe(false);
   });
 });
 
@@ -71,5 +71,21 @@ describe("brainstemProblem", () => {
     expect(brainstemProblem(DEFAULT_BRAINSTEM)).toBeNull();
     expect(brainstemProblem({ ...DEFAULT_BRAINSTEM, bravery: 1.5 })).toMatch(/brainstem.bravery/);
     expect(brainstemProblem({ ...DEFAULT_BRAINSTEM, startle: -1 })).toMatch(/brainstem.startle/);
+  });
+
+  it("a new threat's first tick is not damped: the gain uses this tick's threat when it is above last tick's alarm", () => {
+    const ws = createWorkspace().viewFor("reflex");
+    let threat = 0.8;
+    const gainOf = createReflexGain({ settings: DEFAULT_BRAINSTEM, alarmOf: (w) => w.signals.alarm?.value ?? 0, leaningOf: () => null, threatOf: () => threat });
+    const flee = { action: { skill: "flee" }, urgency: 0.7, reason: "" };
+    // Alarm is still 0 (it is set later in the tick), but the threat is coming: 0.6 + 0.8 × 0.8.
+    expect(gainOf({ name: "defence_flee" }, ws, flee)).toBeCloseTo(1.24);
+    expect(0.7 * gainOf({ name: "defence_flee" }, ws, flee)).toBeGreaterThan(0.7);
+    // Once alarm is the higher of the two, alarm sets it.
+    ws.setSignal("alarm", 1);
+    expect(gainOf({ name: "defence_flee" }, ws, flee)).toBeCloseTo(1.4);
+    threat = 0;
+    ws.setSignal("alarm", 0);
+    expect(gainOf({ name: "defence_flee" }, ws, flee)).toBeCloseTo(0.6);
   });
 });

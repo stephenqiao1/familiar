@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { fakeData, fakeState, inView } from "../encode/state.test-helper.js";
 import { looming } from "./alarm.js";
 import { createScan, featuresOf, perceptsOf, playerColliculus, type Physical } from "./colliculus.js";
-import { loomingThreat, threatApproachingRule } from "./reflexes.js";
+import { defenceReflexes } from "./defence.js";
 
 const still: Physical = { dist: 8, angle: 0, closing: 0, speed: 0, sudden: false, incoming: false, loudness: 0, touch: false };
 const mob = (id: number, type: string, dist: number, over: Partial<ReturnType<typeof inView>> & { hostile?: boolean; speed?: number } = {}) => ({ id: `entity:${id}`, type, dist, hostile: false, reachable: true, ...inView(over), ...over });
@@ -133,25 +133,24 @@ describe("createScan", () => {
 
 describe("looming in the defence reflexes and in alarm", () => {
   const arrow = { id: "entity:9", what: "looming" as const, bearing: { side: "ahead" as const, angle: 0 }, dist: 12 };
-  const check = (rule: ReturnType<typeof threatApproachingRule>, patch: Parameters<typeof fakeState>[0]) => {
+  const flee = defenceReflexes().find((r) => r.name === "defence_flee")!;
+  const check = (patch: Parameters<typeof fakeState>[0]) => {
     const store = createWorkspace();
     store.update(fakeState(patch), null);
-    return rule.check(store.viewFor("reflex"));
+    return flee.check(store.viewFor("reflex"));
   };
 
-  it("something looming makes a far hostile count as approaching, with no list of which mobs shoot", () => {
+  it("something looming makes a far hostile count as coming, with no list of which mobs shoot", () => {
     const skeleton = mob(1, "skeleton", 14, { hostile: true });
-    expect(check(threatApproachingRule(true), { nearby: { mobs: [skeleton] } })).toBeNull();
-    expect(check(threatApproachingRule(true), { nearby: { mobs: [skeleton], sudden: [arrow] } })).toMatchObject({ action: { skill: "flee", target: "entity:1" }, urgency: 0.7, reason: "something coming fast, skeleton 14 blocks away" });
-    expect(check(threatApproachingRule(false), { nearby: { mobs: [skeleton], sudden: [arrow] } })).toBeNull();
+    expect(check({ nearby: { mobs: [skeleton] } })).toBeNull();
+    expect(check({ nearby: { mobs: [skeleton], sudden: [arrow] } })).toMatchObject({ action: { skill: "flee", target: "entity:1" }, urgency: 0.7 });
   });
 
   it("a creature that is itself coming fast is the thing to get away from, at any distance", () => {
     const charging = { ...mob(2, "ravager", 15, { hostile: true }), closing: 7 };
-    const data = fakeData({ nearby: { mobs: [charging], sudden: [{ ...arrow, id: "entity:2", dist: 15 }] } });
-    expect(loomingThreat(data)).toEqual({ id: "entity:2", what: "ravager coming fast" });
+    expect(check({ nearby: { mobs: [charging], sudden: [{ ...arrow, id: "entity:2", dist: 15 }] } })).toMatchObject({ action: { skill: "flee", target: "entity:2" } });
     // A projectile with nothing hostile in sight: nothing to run from.
-    expect(loomingThreat(fakeData({ nearby: { sudden: [arrow] } }))).toBeNull();
+    expect(check({ nearby: { sudden: [arrow] } })).toBeNull();
   });
 
   it("looming raises alarm once, as it starts", () => {

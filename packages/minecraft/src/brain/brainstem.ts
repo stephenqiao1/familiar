@@ -2,6 +2,7 @@ import type { Skill, Workspace } from "@familiar/contracts";
 import type { BrainstemOptions, Leaning } from "@familiar/region-brainstem";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { thingsInView } from "./cues.js";
+import { DEFENCE_SKILL, playerDefence } from "./defence.js";
 import { asleep } from "./focus.js";
 import type { PostureNotes } from "../posture/runtime.js";
 import { MEDULLA_URGES } from "./medulla.js";
@@ -49,12 +50,14 @@ export function playerBrainstem<Ctx>(
   posture: { unsteady: number; notes?: () => PostureNotes } = { unsteady: 0 },
 ): Pick<
   BrainstemOptions,
-  "startle" | "surroundings" | "thingsOf" | "responseProblem" | "acceptsTarget" | "canStart" | "holdable" | "asleep" | "drowsy" | "body" | "postureNotes" | "skills"
+  "startle" | "surroundings" | "defence" | "activeDefences" | "thingsOf" | "responseProblem" | "acceptsTarget" | "canStart" | "holdable" | "asleep" | "drowsy" | "body" | "postureNotes" | "skills"
 > {
   const find = (name: string) => skills.find((s) => s.name === name);
   return {
     startle: createPlayerStartles(),
     surroundings: startleSurroundings,
+    defence: playerDefence,
+    activeDefences: [DEFENCE_SKILL.flee, DEFENCE_SKILL.fight],
     thingsOf: thingsInView,
     responseProblem(name) {
       const skill = find(name);

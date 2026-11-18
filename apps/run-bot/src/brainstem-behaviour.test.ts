@@ -5,7 +5,7 @@
 import type { Answer, Candidate, DecisionEngine, Plan, Planner, Question, Skill, State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { createMemory } from "@familiar/memory";
-import { createChestMemory, SCHEMA_VERSION, type MinecraftStateData } from "@familiar/minecraft";
+import { createChestMemory, DEFAULT_DEFENCE, SCHEMA_VERSION, type DefenceSettings, type MinecraftStateData } from "@familiar/minecraft";
 import {
   createNoveltyMemory,
   createPersistence,
@@ -90,12 +90,14 @@ const skills = [
   skill("attack", { risky: true }),
   skill("escape_hazard", { reflexOnly: true }),
   skill("surface", { reflexOnly: true }),
+  skill("freeze", { reflexOnly: true }),
+  skill("recuperate", { reflexOnly: true }),
   skill("look_at", { primitive: true }),
   skill("brace", { primitive: true }),
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; only?: string[]; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; defence?: Partial<DefenceSettings>; only?: string[]; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
   const store = createWorkspace();
   const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
   const engine: DecisionEngine = {
@@ -132,6 +134,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       focus: DEFAULT_FOCUS,
       brainstem: { ...DEFAULT_BRAINSTEM, ...options.brainstem },
       colliculus: { ...DEFAULT_COLLICULUS, ...options.colliculus },
+      defence: { ...DEFAULT_DEFENCE, ...options.defence },
       sameTime: options.sameTime ?? false,
       memory: createMemory(),
       persistence,
@@ -169,14 +172,16 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
 }
 
 describe("reflex gains through the real brain", () => {
-  it("a soft reflex is damped while calm and boosted once alarm has risen", async () => {
+  it("a new threat's first tick is not damped: the gain uses this tick's threat, then alarm once it has risen", async () => {
     const { tick } = bot();
     await tick();
     const first = await tick({ mobs: [mob("zombie", 6)] });
-    expect(first.reflexes).toMatchObject([{ rule: "threat_approaching", kind: "soft", skill: "flee", base: 0.7 }]);
-    expect(first.reflexes[0]!.gain).toBeCloseTo(0.6); // alarm was still 0 when the reflex fired
+    expect(first.reflexes).toMatchObject([{ rule: "defence_flee", kind: "soft", skill: "flee", base: 0.7 }]);
+    // Alarm was still 0 when the reflex fired, but the threat is coming (0.8): 0.6 + 0.8 × 0.8.
+    expect(first.reflexes[0]!.gain).toBeCloseTo(1.24);
+    expect(first.reflexes[0]!.urgency).toBeGreaterThan(0.7);
     const second = await tick({ mobs: [mob("zombie", 6)] });
-    expect(second.reflexes[0]!.gain).toBeGreaterThan(1); // the alarm raised on the first tick now counts
+    expect(second.reflexes[0]!.gain).toBeGreaterThan(1);
     expect(second.won).toBe("flee");
   });
 
@@ -598,7 +603,7 @@ describe("the colliculus through the real brain", () => {
     expect(out.traces.colliculus?.winner).toMatchObject({ id: "pos:0,63,9", via: "sound" });
   });
 
-  it("looming raises alarm at once, and makes a far thing count as approaching in the defence reflexes", async () => {
+  it("looming raises alarm at once, and makes a far thing count as coming in the defence reflexes", async () => {
     const { tick, value } = bot({ brainstem: { startle: 0 } });
     await tick({ mobs: [mob("skeleton", 14)] });
     expect(value("alarm")).toBe(0);
@@ -609,17 +614,17 @@ describe("the colliculus through the real brain", () => {
     const out = await tick({ mobs: [mob("skeleton", 14)], sudden: [arrow] });
     expect(value("looming")).toBe(1);
     expect(value("alarm")).toBeGreaterThanOrEqual(0.6);
-    expect(out.reflexes).toMatchObject([{ rule: "threat_approaching", skill: "flee" }]);
+    expect(out.reflexes).toMatchObject([{ rule: "defence_flee", skill: "flee" }]);
     expect(out.candidates).toContainEqual(expect.objectContaining({ region: "reflex", action: { skill: "flee", target: "entity:1" } }));
     expect(out.traces.colliculus?.winner).toMatchObject({ id: "entity:9", why: "sight: looming" });
   });
 
-  it("with looming switched off, an arrow is just something sudden", async () => {
+  it("with looming switched off, the colliculus shares no looming; the defence circuit still retreats from what is coming fast", async () => {
     const { tick, value } = bot({ brainstem: { startle: 0 }, colliculus: { looming: 0 } });
     await tick({ mobs: [mob("skeleton", 14)] });
     const out = await tick({ mobs: [mob("skeleton", 14)], sudden: [{ id: "entity:9", what: "looming", bearing: LEFT, dist: 12 }] });
     expect(value("looming")).toBeUndefined();
-    expect(out.reflexes).toEqual([]);
+    expect(out.reflexes).toMatchObject([{ rule: "defence_flee" }]);
   });
 
   it("with the colliculus region off: no looks are proposed, attended stays null, and everything else runs", async () => {
@@ -634,9 +639,7 @@ describe("the colliculus through the real brain", () => {
     // Startle, the reflexes and Jev are all still there.
     expect(out.winner).toMatchObject({ region: "brainstem", action: { skill: "brace" } });
     const close = await tick({ mobs: [mob("zombie", 6)] }, "idle");
-    expect(close.reflexes.map((r) => r.rule)).toEqual(["threat_approaching"]);
-    // And without it, something looming is not a reason to retreat.
-    expect((await tick({ mobs: [mob("skeleton", 14)], sudden: [{ id: "entity:9", what: "looming", bearing: LEFT, dist: 12 }] })).reflexes).toEqual([]);
+    expect(close.reflexes.map((r) => r.rule)).toEqual(["defence_flee"]);
   });
 
   describe("with the field of view on", () => {
@@ -810,5 +813,114 @@ describe("the medulla through the real brain", () => {
     // The hard limit is not the medulla's to switch off.
     expect((await tick(diving(6))).winner).toMatchObject({ region: "reflex", urgency: 1, action: { skill: "surface" } });
     expect((await tick({ self: { inLava: true } })).winner).toMatchObject({ region: "reflex", action: { skill: "escape_hazard" } });
+  });
+});
+
+describe("the defence circuit through the real brain", () => {
+  /** A zombie in view that has not noticed the bot (it is not closing), and one that has. */
+  const unaware = (dist: number): Mob => ({ ...mob("zombie", dist), seen: true, closing: 0, bearing: LEFT });
+  const closing = (dist: number): Mob => ({ ...mob("zombie", dist), seen: true, closing: 2, bearing: LEFT });
+  const armed = { bestWeapon: "stone_sword" };
+
+  it("freezes for a threat that has not noticed, and flees the tick it notices and closes", async () => {
+    const { tick, value } = bot();
+    await tick();
+    const still = await tick({ mobs: [unaware(10)] });
+    expect(still.reflexes).toMatchObject([{ rule: "defence_freeze", skill: "freeze", base: 0.5 }]);
+    expect(value("threat")).toBe(0.5);
+    expect(still.traces.brainstem?.defence).toMatchObject({ mode: "freeze", target: "entity:1", flightDistance: 8, cornered: false });
+    const noticed = await tick({ mobs: [closing(7)] }, "freeze");
+    expect(noticed.reflexes).toMatchObject([{ rule: "defence_flee", skill: "flee" }]);
+    expect(value("threat")).toBe(0.8);
+    expect(noticed.won).toBe("flee");
+  });
+
+  it("is wary of what it cannot see: no reflex, a `wary` signal", async () => {
+    const { tick, value } = bot();
+    await tick();
+    const out = await tick({ mobs: [{ ...mob("zombie", 12), seen: false, closing: 0, bearing: { side: "behind", angle: 170 } }] });
+    expect(out.reflexes).toEqual([]);
+    expect(value("wary")).toBe(1);
+    expect(value("threat")).toBe(0.3);
+    expect((await tick()).traces.brainstem?.defence).toBeUndefined();
+    expect(value("wary")).toBe(0);
+  });
+
+  it("a goal that holds back defence_flee leaves freezing and fighting at full strength", async () => {
+    const free = bot();
+    const held = bot({ plan: { goal: "Hold the line", steps: [], reason: "", holdBack: ["defence_flee"] } });
+    for (const b of [free, held]) await b.tick();
+    for (const b of [free, held]) await b.tick();
+    const gains = async (patch: Patch) => [(await free.tick(patch)).reflexes[0]!, (await held.tick(patch)).reflexes[0]!] as const;
+    const [fleeFree, fleeHeld] = await gains({ mobs: [closing(6)] });
+    expect(fleeHeld.rule).toBe("defence_flee");
+    expect(fleeHeld.gain).toBeCloseTo(fleeFree.gain * 0.3);
+    const [fightFree, fightHeld] = await gains({ self: armed, mobs: [closing(2)] });
+    expect(fightHeld).toMatchObject({ rule: "defence_fight", skill: "attack" });
+    expect(fightHeld.gain).toBeCloseTo(fightFree.gain);
+    const calm = [bot(), bot({ plan: { goal: "Hold the line", steps: [], reason: "", holdBack: ["defence_flee"] } })];
+    for (const b of calm) await b.tick();
+    for (const b of calm) await b.tick();
+    const [freezeFree, freezeHeld] = [(await calm[0]!.tick({ mobs: [unaware(9)] })).reflexes[0]!, (await calm[1]!.tick({ mobs: [unaware(9)] })).reflexes[0]!];
+    expect(freezeHeld.rule).toBe("defence_freeze");
+    expect(freezeHeld.gain).toBeCloseTo(freezeFree.gain);
+  });
+
+  it("alarm fades with a threat that cannot reach the bot, and holds with one that can", async () => {
+    const alarmAfter = async (reachable: boolean) => {
+      const { tick, value } = bot({ brainstem: { startle: 0 } });
+      await tick();
+      for (let i = 0; i < 3; i++) await tick({ mobs: [closing(5)] });
+      const raised = value("alarm")!;
+      for (let i = 0; i < 12; i++) await tick({ mobs: [{ ...closing(5), reachable }] }, null, 5000);
+      return { raised, later: value("alarm")! };
+    };
+    const [can, cannot] = [await alarmAfter(true), await alarmAfter(false)];
+    expect(can.later).toBeGreaterThanOrEqual(can.raised - 0.01);
+    expect(cannot.later).toBeLessThan(0.2);
+  });
+
+  it("pain is dulled while fleeing or fighting and felt afterwards; the hard reflexes still see the damage", async () => {
+    const run = async (analgesia: number) => {
+      const { tick, value } = bot({ defence: { analgesia }, brainstem: { startle: 0 } });
+      await tick();
+      for (let i = 0; i < 6; i++) await tick({ mobs: [closing(6)] });
+      const dulled = value("analgesia")!;
+      const hit = await tick({ self: { health: 12 }, mobs: [closing(6)] });
+      return { tick, value, dulled, pain: value("pain")!, hit };
+    };
+    const [on, off] = [await run(1), await run(0)];
+    expect(on.dulled).toBeGreaterThan(0.6);
+    expect(off.dulled).toBe(0);
+    expect(off.pain).toBeGreaterThan(0.9);
+    expect(on.pain).toBeCloseTo(off.pain * (1 - on.dulled), 1);
+    // The medulla's own reading is the damage as it is.
+    expect(on.hit.traces.medulla?.vitals).toMatchObject({ pain: off.pain });
+    // Once the threat is gone the analgesia fades, within about 10 seconds.
+    await on.tick({ self: { health: 12 } }, null, 5000);
+    expect(on.value("analgesia")).toBeLessThan(0.2);
+    await on.tick({ self: { health: 12 } }, null, 6000);
+    expect(on.value("analgesia")).toBeLessThan(0.05);
+    // Dulled or not, last_stand fires on the health itself.
+    const dying = await (await run(1)).tick({ self: { health: 5 }, mobs: [closing(2)] });
+    expect(dying.winner).toMatchObject({ region: "reflex", urgency: 1, action: { skill: "flee" } });
+  });
+
+  it("recuperates when hurt and clear after a flight, and stops when a threat returns", async () => {
+    const { tick, value } = bot({ brainstem: { startle: 0 } });
+    await tick();
+    for (let i = 0; i < 3; i++) await tick({ self: { health: 8 }, mobs: [closing(6)] });
+    expect(value("recovering")).toBe(0);
+    await tick({ self: { health: 8 } });
+    expect(value("recovering")).toBe(1);
+    const resting = await tick({ self: { health: 8 } });
+    expect(resting.reflexes).toContainEqual(expect.objectContaining({ rule: "recuperate", skill: "recuperate", base: 0.4 }));
+    const back = await tick({ self: { health: 8 }, mobs: [closing(6)] }, "recuperate");
+    expect(back.reflexes.map((r) => r.rule)).toEqual(["defence_flee"]);
+    expect(value("recovering")).toBe(0);
+    // Mended: no more resting.
+    await tick({ self: { health: 8 } });
+    expect((await tick({ self: { health: 16 } })).reflexes).toEqual([]);
+    expect(value("recovering")).toBe(0);
   });
 });

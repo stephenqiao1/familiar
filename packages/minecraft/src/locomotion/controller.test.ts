@@ -360,4 +360,39 @@ describe("the locomotion controller: feeling the ground", () => {
     expect(t.logged).toEqual(["locomotion: one round of planning took 180 ms (success)"]);
     expect([t.state.pathfinder.thinkTimeout, t.state.pathfinder.tickTimeout]).toEqual([3000, 15]);
   });
+
+  describe("an area to keep clear of", () => {
+    it("routes steer round it while it lasts, and a renewal moves it", async () => {
+      const t = fakeTraveller();
+      t.locomotion.avoidArea("entity:7", { x: 10, y: 63, z: 0 }, 4, 3000);
+      expect(t.avoided(10, 0)).toBe(true);
+      expect(t.avoided(13, 0)).toBe(true);
+      expect(t.avoided(15, 0)).toBe(false);
+      t.locomotion.avoidArea("entity:7", { x: 20, y: 63, z: 0 }, 4, 3000);
+      expect(t.avoided(10, 0)).toBe(false);
+      expect(t.avoided(20, 0)).toBe(true);
+      await t.run(3100);
+      expect(t.avoided(20, 0)).toBe(false);
+      t.locomotion.avoidArea("entity:7", { x: 20, y: 63, z: 0 }, 4, 3000);
+      t.locomotion.forget();
+      expect(t.avoided(20, 0)).toBe(false);
+    });
+
+    it("a journey under way is planned again when an area appears or moves, at most once a second", async () => {
+      const t = fakeTraveller();
+      const journey = t.locomotion.goTo(t.at(30, 0), {}, new AbortController().signal);
+      await t.run(1500);
+      const goals = () => t.calls.filter((c) => c === "goal set").length;
+      const before = goals();
+      t.locomotion.avoidArea("entity:7", { x: 15, y: 63, z: 3 }, 4, 3000);
+      expect(goals()).toBe(before + 1);
+      expect(t.logged).toContain("locomotion: routing round entity:7");
+      // Renewed in the same place, or moved again within the second: no new plan.
+      t.locomotion.avoidArea("entity:7", { x: 15, y: 63, z: 3 }, 4, 3000);
+      t.locomotion.avoidArea("entity:7", { x: 15, y: 63, z: 9 }, 4, 3000);
+      expect(goals()).toBe(before + 1);
+      t.locomotion.stop();
+      await journey;
+    });
+  });
 });

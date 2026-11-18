@@ -14,6 +14,9 @@ import {
   type PatienceSettings,
 } from "@familiar/neuromodulators";
 import {
+  DEFAULT_DEFENCE,
+  defenceProblem,
+  type DefenceSettings,
   DEFAULT_LOCOMOTION,
   DEFAULT_MEDULLA,
   DEFAULT_REFLEXES,
@@ -55,6 +58,8 @@ export interface BotConfig {
   posture: PostureSettings;
   /** The colliculus: what makes something striking, how easily the bot turns its head, and whether it knows only what it sees. */
   colliculus: ColliculusSettings;
+  /** Defence: what the bot is born knowing about threats, and the strength of each part of the defence circuit. */
+  defence: DefenceSettings;
   memory: MemorySettings;
 }
 
@@ -68,7 +73,7 @@ export const DEFAULT_MEMORY: MemorySettings = { halfLifeDays: 2 };
 export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Promise<BotConfig> {
   const bots = await readBots(file);
   const entry = bots[name] as
-    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings>; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings>; posture?: Partial<PostureSettings>; memory?: Partial<MemorySettings> }
+    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings>; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; memory?: Partial<MemorySettings> }
     | undefined;
   const personality = { ...DEFAULT_PERSONALITY, ...entry?.personality };
   const patience = { ...DEFAULT_PATIENCE, ...entry?.patience };
@@ -81,11 +86,12 @@ export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Pro
   const posture = { ...DEFAULT_POSTURE, ...entry?.posture };
   // A bot may give only some of the weights; the rest keep their defaults.
   const colliculus = { ...DEFAULT_COLLICULUS, ...entry?.colliculus, weights: { ...DEFAULT_COLLICULUS.weights, ...entry?.colliculus?.weights } };
+  const defence = { ...DEFAULT_DEFENCE, ...entry?.defence };
   const memory = { ...DEFAULT_MEMORY, ...entry?.memory };
   const memoryProblem = memory.halfLifeDays > 0 ? null : `memory.halfLifeDays must be above 0, got ${memory.halfLifeDays}`;
-  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? memoryProblem;
+  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? memoryProblem;
   if (problem) throw new Error(`${file}: bot "${name}": ${problem}`);
-  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, memory };
+  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, memory };
 }
 
 /** The file's bots by name; none if the file is missing. Throws if it exists but is not valid. */

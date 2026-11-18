@@ -34,6 +34,11 @@ export interface MedullaOptions {
   urges?: ReflexRule[];
   /** How strongly each urge fires right now. Default: 1. */
   gainOf?: ReflexOptions["gainOf"];
+  /**
+   * How far pain is dulled right now, 0 to 1 (the defence circuit's analgesia). Only the shared
+   * `pain` signal is scaled: the readings, the urges and the hard reflexes see the damage as it is. Default: 0.
+   */
+  analgesiaOf?(ws: Workspace): number;
   /** Whether the body is asleep (an urge that fires then may wake it). Default: never. */
   asleep?(ws: Workspace): boolean;
   /** Default: "medulla". */
@@ -98,7 +103,9 @@ export function createMedullaRegion(options: MedullaOptions): Region {
         if (options.share > 0) {
           ws.setSignal(AIR_SIGNAL, body.air);
           ws.setSignal(HUNGER_SIGNAL, body.hunger);
-          ws.setSignal(PAIN_SIGNAL, pain);
+          const dulled = Math.min(1, Math.max(0, options.analgesiaOf?.(ws) ?? 0));
+          ws.setSignal(PAIN_SIGNAL, pain * (1 - dulled));
+          if (dulled > 0) trace.painDulled = { felt: pain * (1 - dulled), analgesia: dulled };
           ws.setSignal(HURT_SIGNAL, hurt);
           ws.setSignal(SICK_SIGNAL, body.sick);
           if (body.cold !== undefined) ws.setSignal(COLD_SIGNAL, body.cold);

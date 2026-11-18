@@ -12,3 +12,8 @@ export { createHabituation } from "./habituation.js";
 export { LOADED_SIGNAL, LOOMING_SIGNAL } from "./signals.js";
 export { createStartle, FLINCH, FULL, holdMsOf, LIMITS as STARTLE_LIMITS, magnitudeOf, potentiationOf, REFRACTORY_MS, sizeOf, type Edge, type Factors, type Judged, type StartleEvent, type StartleStrengths } from "./startle.js";
 export { STARTLE_FROM } from "./signals.js";
+export { BASE as DEFENCE_BASE, chooseDefence, DEFENCE_RULES, flightDistance, FLIGHT_BLOCKS, FREEZE_WITHIN, mostPressing, THREAT_LEVEL, WEAK_HEALTH, type Choice, type DefenceInputs, type DefenceStrengths, type Mode, type Stage, type Threat } from "./defence.js";
+export { createDefenceState, MAX_ANALGESIA, RECOVER, type DefenceState } from "./defence-state.js";
+export { summariseDefence, type DefenceRow, type DefenceSummary } from "./defence-stats.js";
+export type { DefenceMoment } from "./defence-watch.js";
+export { ANALGESIA_SIGNAL, RECOVERING_SIGNAL, THREAT_SIGNAL, WARY_SIGNAL } from "./signals.js";

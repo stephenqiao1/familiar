@@ -42,3 +42,11 @@ export const LOOMING_SIGNAL = "looming";
 export const LOADED_SIGNAL = "loaded_response";
 /** On the tick of a startle, `startle_from_<cause>` carries its size too, naming what set it off (so alarm does not count the same event twice). */
 export const STARTLE_FROM = "startle_from_";
+/** How pressing the nearest danger is: 0 none, about 0.3 possible, 0.5 seen, 0.8 coming, 1 on the body. */
+export const THREAT_SIGNAL = "threat";
+/** 1 while danger is possible or only being watched (nothing to act on yet), else 0. */
+export const WARY_SIGNAL = "wary";
+/** How far pain is dulled while fleeing or fighting, 0 to about 0.7; it fades over about 10 seconds afterwards. */
+export const ANALGESIA_SIGNAL = "analgesia";
+/** 1 while the body is resting to recover after a fight or flight, else 0. */
+export const RECOVERING_SIGNAL = "recovering";

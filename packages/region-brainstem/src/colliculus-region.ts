@@ -31,6 +31,8 @@ export interface ColliculusOptions {
   alarmOf?(ws: Workspace): number;
   /** Arousal, 0 to 1. Default: 0.5. */
   arousalOf?(ws: Workspace): number;
+  /** How wary the body is, 0 to 1: a wary body turns to slighter things. Default: 0. */
+  waryOf?(ws: Workspace): number;
   /** In bed, asleep: only touch and loud sounds can win. Default: never. */
   asleep?(ws: Workspace): boolean;
   /** The running skill is a hard reflex's ("reflex") or marks itself demanding: only touch and looming may turn the head. Default: neither. */
@@ -58,7 +60,7 @@ export interface ColliculusOptions {
 /** A watched kind gets this much added. */
 const WATCH_BOOST = 0.4;
 /** How far alarm and arousal lower the threshold, and a demanding skill raises it. */
-const THRESHOLD = { alarm: 0.25, arousal: 0.2, demanding: 0.3, floor: 0.05 };
+const THRESHOLD = { alarm: 0.25, arousal: 0.2, wary: 0.1, demanding: 0.3, floor: 0.05 };
 /** Asleep, a sound must be at least this loud to get through. */
 const WAKING_LOUDNESS = 0.5;
 /** A winner is held at least this long, and let go after this long unless it is still the most striking. */
@@ -142,7 +144,7 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
       if (settings.looming > 0) ws.setSignal(LOOMING_SIGNAL, looming * settings.looming);
 
       // b) The threshold in force.
-      const lowered = settings.topDown * (THRESHOLD.alarm * (options.alarmOf?.(ws) ?? 0) + THRESHOLD.arousal * ((options.arousalOf?.(ws) ?? 0.5) - 0.5));
+      const lowered = settings.topDown * (THRESHOLD.alarm * (options.alarmOf?.(ws) ?? 0) + THRESHOLD.arousal * ((options.arousalOf?.(ws) ?? 0.5) - 0.5) + THRESHOLD.wary * (options.waryOf?.(ws) ?? 0));
       const threshold = Math.max(THRESHOLD.floor, settings.threshold - lowered + (busy === "demanding" ? settings.topDown * THRESHOLD.demanding : 0));
 
       // c) Who may win.

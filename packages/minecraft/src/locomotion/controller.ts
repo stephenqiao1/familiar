@@ -37,6 +37,8 @@ const CATCH_UP_BEYOND = 2;
 const POLL_MS = { walk: 250, steer: 100 };
 const FEEL_MS = 250;
 const PAUSE_POLL_MS = 25;
+/** A journey is planned again for a new or moved area to keep clear of at most this often. */
+const REPLAN_FOR_AREA_MS = 1000;
 /** A journey is late once it has run past this many times its estimate; no estimate is under this long. */
 const LATE_FACTOR = 2;
 const MIN_ESTIMATE_MS = 2000;
@@ -301,6 +303,19 @@ export function createLocomotion(bot: Bot, options: LocomotionOptions = {}): Loc
       return true;
     },
     avoid: (spot) => spots.mark(spot, Date.now()),
+    avoidArea(name, centre, radius, ms) {
+      const now = Date.now();
+      const changed = spots.area(name, centre, radius, ms, now);
+      // A route planned before the area was there (or before it moved) is planned again, at most once a second.
+      const run = active;
+      if (!changed || !run || run.pattern !== "walk" || run.paused || run.recovering || run.journey.kind !== "goTo" || now - run.goalSetAt < REPLAN_FOR_AREA_MS) return;
+      try {
+        setGoal(run);
+        log(`locomotion: routing round ${name}`);
+      } catch {
+        // The journey's own loop will notice and report.
+      }
+    },
     forget() {
       spots.clear();
       sense.reset();

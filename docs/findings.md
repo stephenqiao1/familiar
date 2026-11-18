@@ -3,6 +3,104 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-18: the defence circuit
+
+*Found by running the real bot on the test server with `pnpm defence-check`. No Jev and no
+planner calls: only the reflexes defend. Every scene uses a husk (zombies burn by day).*
+
+| Scene | What it did | Numbers |
+|---|---|---|
+| A husk 10 blocks off, facing away, that never notices | Froze and watched it | Sized up as seen, not noticed; never noticed |
+| The same husk beside a journey's route | Routed round it and arrived | Came no closer than 5.0 to 5.4 blocks; a straight walk passes at 3.5; flight distance 5.6 |
+| A husk walks up over open ground | Fled | Began at 8 blocks (flight distance 8); first-tick gain 1.24, urgency 0.87 |
+| The same, for a kind that has killed it before | Fled sooner | Began at 11 blocks (danger 0.9, flight distance 11.2) |
+| Shut in a 5 by 5 room with a husk, unarmed | Froze, then fought | Known to be cornered 0.2 to 0.7 s after the husk appeared; lived, health 14 to 19 |
+| A husk 2 blocks off, sword in hand | Fought and killed it | One kill recorded; analgesia reached 0.70 |
+| A husk in a pit 5 blocks off | Nothing: only wary | The cheap guess said it could reach; the route check said no after 0.5 to 1.5 s; alarm stayed at 0 |
+| A skeleton held on a pillar, shooting | Fled; learned it shoots | After two hits from afar: able to reach on 0 of 40 ticks before, 87 of 87 after |
+| A bot born knowing no threats meets a husk | Nothing until it was hit, then fled | "husk became a threat" on the first hit |
+| Hurt while fleeing, then left alone | Pain dulled; then rested | Pain felt 0.34 to 0.37 of 1.00 when struck; rested 5 s, health 6 to 15.8 |
+
+**Cost.** Over the final run's ten scenes (643 logged state reads) sizing up took a median of
+0.03 to 0.9 ms per scene and at most 4.0 ms, except one read of 18.8 ms. Almost all of the
+ordinary cost is the route check's one slice of pathfinding; without a check it is under 0.4 ms.
+Earlier settings (two slices of 2 ms) reached 5.2 ms and once 6.4, so the slice was cut to
+1 ms, one per state read.
+
+- **One read took 18.8 ms, over the 5 ms limit.** It asked no route check (the skeleton was 18
+  blocks off, beyond the 16 the checks cover) and learned nothing, and the tick it fell in came
+  twice as late as its neighbours. That points to the whole process stalling (a garbage
+  collection, most likely) rather than to work the threat sense did, but that was not proved.
+  The cost is measured by the clock, so any stall inside it is counted.
+- **The slower slice makes the answers later.** The pit's "it cannot reach me" came after 0.5 s
+  with 2 ms slices and 1.5 s with 1 ms ones. Until then the cheap guess stands.
+
+**Found and fixed.**
+
+- **A blow that knocked the threat back ended the fight.** Armed, the bot hit a husk to 4
+  blocks away; that tick it was "coming" (so: flee) or even "not noticed" (so: freeze), and the
+  bot dithered between attack, freeze and flee. A threat the bot has struck in the last 5
+  seconds now counts as having noticed it and stays "on it" out to 6 blocks.
+- **Noticing lapsed the moment a threat paused.** It is now remembered for 5 seconds.
+- **Analgesia only built on the ticks the mode said "flee".** A bot outrunning its threat
+  flips between flee and wary as the gap opens and closes; it reached 0.31 when struck. While
+  the flee or attack skill still runs the body now counts as defending: 0.64.
+- **An unnoticed threat stopped the journey meant to go round it.** A threat within 8 blocks
+  raised alarm by 0.6, and an alarm jump interrupts the running skill. Alarm now counts only
+  a threat that is coming or on the bot; one that has not noticed raises none.
+- **The first three shooter scenes never shot.** Summoning a skeleton with a helmet gives it
+  no bow; it walked off its pillar and came at the bot instead.
+
+**Limits of this version.**
+
+- **Freezing rarely works against a real hostile.** In this game a hostile notices a player
+  within its follow range whichever way it faces; only a mob with its AI off never noticed.
+  Freezing helps only out of line of sight or beyond that range. The scene proves the choice,
+  not that it pays.
+- **A frozen bot can stay frozen.** Nothing ends a freeze but the threat noticing, leaving, or
+  another proposal outvoting it (0.5 × gain). With Jev and the planner running they compete;
+  a bot left alone watches a harmless far zombie for as long as it stands there. A goal can
+  hold `defence_freeze` back.
+- **An armed, healthy bot still runs from what is coming.** It fights only once the threat is
+  on it (or it is cornered), and it outruns a zombie, so by reflex alone it fights mostly when
+  ambushed. That is the table as specified.
+- **The route checks walk; they do not open doors, dig, swim well or climb.** A threat behind a
+  closed door counts as unable to reach; a way out through a door does not count, so the bot
+  can be "cornered" in a room with a door. A spider that climbs is judged as if it walked
+  (once it hurts the bot it is "on it" regardless).
+- **While the bot is travelling the checks are skipped**, as specified, so a threat met
+  mid-journey, and the whole of a flight, are judged by the cheap guess and never count as
+  cornered. A flight that runs into a dead end is only found out once the journey ends.
+- **A detour of more than 16 blocks counts as no route**, and a way out more than 24 blocks
+  round counts as none. Both bound the search.
+- **Alarm was not used in choosing the mode.** The spec lists it as an input; nothing in the
+  table depends on it, and the gain already carries it.
+- **`colliculus.looming` at 0 no longer stops the retreat from something coming fast.** The
+  defence circuit reads looming from the state. It still switches off the `looming` signal and
+  its alarm trigger.
+- **A blast from 5 blocks counts toward "it shoots".** Two creeper blasts that hurt from beyond
+  4.5 blocks would mark creepers as shooters. Harmless in effect (they are fled either way).
+- **Kills are credited by timing**: the creature died within 5 seconds of the bot's blow.
+  Something else finishing it in that time is still the bot's kill.
+- **Deaths by a shooter's arrow are blamed on the shooter**; a death with no attacker named in
+  the last 5 seconds teaches nothing.
+- **Recuperating goes home only within 48 blocks**, else it rests where it stands. It does not
+  look for somewhere enclosed or lit. Well fed, the bot mends about 2 health a second, so the
+  rest is short.
+- **Wary at night, everywhere.** Dark alone makes danger "possible", so caution is up by 0.15
+  and the head turns a little more easily all night and underground.
+- **A flight hides a shove.** `pushed` is only sensed with no journey under way, so a bot
+  fleeing is never "pushed" and `hold_ground` cannot fire. Seen in `reflex-check`: the player
+  who shoves the bot was learned as a threat on the second hit, and the bot fled it straight
+  toward the ledge (it stopped at the edge; the route does not walk off). That check's bot now
+  has `defence.learnThreats: 0`.
+- **Fleeing a player by reflex may not be wanted.** Two hits 2 to 60 seconds apart make a
+  player a threat for good (until many harmless meetings). Friendly fire in a shared fight
+  would do it.
+- **Not run live on purpose:** a learned non-hostile threat (an angered wolf or golem; a
+  player was learned by accident, above), three threats at once, a goal holding back `defence_flee`, last_stand when
+  cornered, and a fight lost. All are unit-tested.
+
 ## Live testing, 2026-11-18: the startle circuit
 
 *Found by running the real bot on the test server with `pnpm startle-check`. No Jev and no
@@ -863,7 +961,7 @@ as reachable. One behind a fence or glass does not, though it may walk round.
 **What would fix it.** Run the pathfinder for the nearest one or two hostiles only, every second or
 so, and cache the answer.
 
-**Status.** Open.
+**Status.** Closed 2026-11-18. The defence circuit asks the pathfinder about the nearest two threats, at most once a second each, and keeps the answer. Live: a husk in a pit 5 blocks away counted as reachable by the old guess; the route check said no within half a second, and the bot took no defence. The guess is still used for every other threat, until the first answer arrives, and while the bot is travelling.
 
 ## Brainstem: a far threat gets no reflex, even one that shoots
 
@@ -892,7 +990,7 @@ a threat is.
 
 **What would fix it.** Have `threatPresent` and `hostile_appeared` use the same zones.
 
-**Status.** Open.
+**Status.** Closed 2026-11-18. Both now use the defence circuit's assessment: only a threat that can reach the bot (or shoots, with a clear line) and is coming or on it counts. Live, with the husk in the pit: alarm stayed at 0 for the whole scene.
 
 ## Brainstem: the first tick of a threat is damped
 
@@ -908,7 +1006,7 @@ spec allowed this. A hostile first seen within 3 blocks is covered by the startl
 **What would fix it.** List noradrenaline before reflex, or compute this tick's alarm bump inside
 the gain.
 
-**Status.** Open.
+**Status.** Closed 2026-11-18. The gain uses this tick's `threat` (0.8 for a threat that is coming) when it is above last tick's alarm. Live: the first tick of a flight had gain 1.24 and urgency 0.87. Reordering the regions was not the cleaner fix: noradrenaline needs dopamine's surprise and the brainstem's startle, which come after the reflexes.
 
 ## Brainstem: a close ambush now takes the planner offline every time
 
@@ -940,7 +1038,7 @@ before the death, with a hostile within 8 blocks).
 **What would fix it.** Nothing needs fixing. If it proves too costly: raise `last_stand`'s health
 threshold, or let the planner hold back one zone at a time.
 
-**Status.** Open, by design.
+**Status.** Partly closed 2026-11-18. A goal can now hold back one defence (`defence_freeze`, `defence_flee` or `defence_fight`) and leave the other two at full strength. Naming the skill (`flee`) still damps every reflex that proposes it, and held back, the flee is still not replaced by anything: only one defence is chosen each tick.
 
 ## Brainstem: most strengths are on or off
 

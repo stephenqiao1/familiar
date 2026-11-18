@@ -5,7 +5,8 @@ import type { MinecraftStateData } from "../encode/state-data.js";
 import { INNATE_BAD_FOODS } from "../foods.js";
 import { REFLEX_SKILLS } from "./protective-reflexes.js";
 import { minecraftDataOf } from "./read-state.js";
-import { closestIn, LOW_AIR } from "./reflexes.js";
+import { onIt } from "./defence.js";
+import { LOW_AIR } from "./reflexes.js";
 
 // The player's medulla: the body's automatic upkeep. What its vital signs are read from, and the
 // graded urges that keep it breathing, fed enough to heal, and clear of what makes it sick.
@@ -113,7 +114,7 @@ export function needAir(strength: number): ReflexRule {
 export function eatToHeal(strength: number): ReflexRule {
   return urge("eat_to_heal", (data) => {
     const { self } = data;
-    if (self.health >= MAX.health || self.food >= HEALING_FOOD || self.foodItems === 0 || closestIn(data, "contact")) return null;
+    if (self.health >= MAX.health || self.food >= HEALING_FOOD || self.foodItems === 0 || onIt(data)) return null;
     return { action: { skill: "eat", target: `level:${HEALING_FOOD}` }, urgency: EAT_TO_HEAL * strength, reason: `health ${self.health}/20 cannot heal at food ${self.food}/20` };
   });
 }

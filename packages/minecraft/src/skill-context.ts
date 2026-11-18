@@ -5,6 +5,7 @@ import type { ChestMemory } from "./chest-memory.js";
 import type { Locomotion } from "./locomotion/index.js";
 import type { Gut } from "./gut.js";
 import type { Hurt, Pain } from "./pain.js";
+import type { ThreatSense } from "./defence/threat-sense.js";
 
 /** What every Minecraft skill gets to act with. */
 export interface MinecraftCtx {
@@ -22,6 +23,8 @@ export interface MinecraftCtx {
   lastHurt(): Hurt | null;
   /** What the bot remembers about the chests it has opened. */
   chests: ChestMemory;
+  /** The threat sense: the last sizing-up of what is near, and how far is safe from a creature. Default: none. */
+  threats?: Pick<ThreatSense, "latest" | "safeDistance">;
   /** A level the brain is sharing right now (a signal such as "startle"), 0 to 1. Default: not known (0). */
   level?(signal: string): number;
   log: (msg: string) => void;

@@ -1,4 +1,5 @@
 export { createLocomotion, type LocomotionOptions } from "./controller.js";
+export { createRouteQueries } from "./route-queries.js";
 import type { SkillResult } from "@familiar/contracts";
 
 /** A skill's result, carrying the report of the journey that was part of it. */

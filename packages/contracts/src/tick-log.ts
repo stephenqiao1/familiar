@@ -40,4 +40,6 @@ export interface TickLog {
   firstSeen?: FirstSeen[];
   /** Set on the tick the agent died soon after a tunable defence reflex was held back or outvoted. */
   defenceOverruledBeforeDeath?: unknown;
+  /** On the tick after a death: the defence chosen on each tick of the 5 seconds before it, with the threat it was chosen for. */
+  defenceBeforeDeath?: unknown;
 }

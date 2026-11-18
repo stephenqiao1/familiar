@@ -74,7 +74,7 @@ describe("encodeState", () => {
     });
     const state = encodeState(bot, 7, { base, current: null, deaths: 2 });
 
-    expect(state).toMatchObject({ schemaVersion: 16, tick: 7 });
+    expect(state).toMatchObject({ schemaVersion: 17, tick: 7 });
     expect(state.data).toEqual({
       time: { isNight: false, lightLevel: 15 },
       self: {

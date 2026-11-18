@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { parseLearnedSkills, type LearnedSkill } from "@familiar/core";
 import { createMemory, type Fact, type KnownPlace, type Memory, type MemoryOptions, type MemoryStore } from "@familiar/memory";
-import { createChestMemory, type ChestMemory, type ChestRecord, type SurfaceCounts } from "@familiar/minecraft";
+import { createChestMemory, type ChestMemory, type ChestRecord, type SurfaceCounts, type ThreatEntries } from "@familiar/minecraft";
 import { createNoveltyMemory, createScorebook, type NoveltyMemory, type SavedScore, type Scorebook } from "@familiar/neuromodulators";
 
 // What each bot has learned and remembers, kept between runs, one folder per bot. A missing or
@@ -16,6 +16,7 @@ export const hurtsFile = (bot: string) => `data/${bot}/hurts.json`;
 export const badFoodsFile = (bot: string) => `data/${bot}/bad-foods.json`;
 export const bodyFile = (bot: string) => `data/${bot}/body.json`;
 export const surfacesFile = (bot: string) => `data/${bot}/surfaces.json`;
+export const threatsFile = (bot: string) => `data/${bot}/threats.json`;
 export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
 
 /** What the bot's body carries between runs: the world's age (in ticks) when it last woke from sleep. */
@@ -38,6 +39,23 @@ export async function loadSurfaces(file: string): Promise<Partial<SurfaceCounts>
 
 export async function saveSurfaces(surfaces: SurfaceCounts, file: string): Promise<void> {
   await writeJson(file, surfaces);
+}
+
+/** What the bot has learned about each kind of threat. A missing file means nothing yet; a broken entry is left out. */
+export async function loadThreats(file: string): Promise<ThreatEntries> {
+  const raw = await readJson(file);
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const whole = (n: unknown) => Number.isFinite(n) && (n as number) >= 0;
+  const ok = (c: unknown): c is ThreatEntries[string] => {
+    if (c === null || typeof c !== "object") return false;
+    const e = c as Record<string, unknown>;
+    return ["seen", "hurts", "damage", "kills", "deaths", "badLosses", "rangedHurts"].every((key) => whole(e[key])) && whole(e.danger) && (e.danger as number) <= 1;
+  };
+  return Object.fromEntries(Object.entries(raw).filter(([, c]) => ok(c))) as ThreatEntries;
+}
+
+export async function saveThreats(threats: ThreatEntries, file: string): Promise<void> {
+  await writeJson(file, threats);
 }
 
 /**

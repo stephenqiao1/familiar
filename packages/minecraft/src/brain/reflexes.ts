@@ -1,48 +1,23 @@
 import type { ReflexRule } from "@familiar/region-reflex";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { DEFAULT_REFLEXES, protectiveReflexes, type ReflexSettings } from "./protective-reflexes.js";
-import { DANGER_DISTANCE, minecraftDataOf } from "./read-state.js";
+import { defenceOf, defenceReflexes, onIt } from "./defence.js";
+import { minecraftDataOf } from "./read-state.js";
 
 // The player's wired-in reactions, in two classes.
 // Hard reflexes save its life: always urgency 1, and nothing learned, felt or planned can stop them.
 // Soft reflexes give a base urgency that the brainstem scales (alarm, bravery, the goal's
-// hold-backs), capped below 1, so the rest of the brain can outvote them.
+// hold-backs), capped below 1, so the rest of the brain can outvote them. The soft defence
+// reflexes come from the defence circuit (defence.ts).
 // Add one: write a rule here and add it to playerReflexes.
 
-/** Below this health the contact reflex flees instead of fighting. */
-export const FIGHT_HEALTH = 10;
 /** At or below this food level the bot eats if it can. */
 export const STARVING_FOOD = 6;
 /** At or below this much air (of 20), under water, the bot surfaces. */
 export const LOW_AIR = 6;
 /** At or below this health with a hostile this close, the bot breaks away whatever else it wanted. */
 export const LAST_STAND = { health: 6, distance: 4 };
-/** A hostile this close is on top of the bot. */
-export const CONTACT_DISTANCE = 3;
-/** A hostile is noticed (far zone) out to this distance. */
-export const FAR_DISTANCE = 16;
-/** Never fought by reflex: creepers explode, and the rest shoot from a distance. */
-const NEVER_FIGHT = new Set(["creeper", "skeleton", "stray", "bogged", "pillager", "blaze", "ghast", "witch", "shulker", "breeze", "drowned", "guardian", "elder_guardian"]);
-
-type Mob = MinecraftStateData["nearby"]["mobs"][number];
-
-/** How close a threat is, which decides the defence: watch it, retreat, or fight or break away. */
-export type Zone = "far" | "approaching" | "contact";
-
-/**
- * A hostile mob's zone, or null if it is too far to matter. Far: 9 to 16 blocks, or closer but
- * unable to reach the bot. Approaching: 4 to 8 blocks. Contact: 3 blocks or less.
- */
-export function zoneOf(mob: Mob): Zone | null {
-  if (!mob.hostile || mob.dist > FAR_DISTANCE) return null;
-  if (!mob.reachable || mob.dist > DANGER_DISTANCE) return "far";
-  return mob.dist <= CONTACT_DISTANCE ? "contact" : "approaching";
-}
-
-/** The closest hostile mob in a zone, or null. */
-export function closestIn(data: MinecraftStateData, zone: Zone): Mob | null {
-  return data.nearby.mobs.filter((m) => zoneOf(m) === zone).sort((a, b) => a.dist - b.dist)[0] ?? null;
-}
+export { CONTACT_DISTANCE, FAR_DISTANCE } from "../defence/size-up.js";
 
 /** A rule that reads the Minecraft state; silent before the first one arrives. */
 function rule(name: string, kind: ReflexRule["kind"], check: (data: MinecraftStateData) => ReturnType<ReflexRule["check"]>): ReflexRule {
@@ -68,51 +43,18 @@ export const drowning = rule("drowning", "hard", ({ self }) =>
   self.inWater && self.air <= LOW_AIR ? { action: { skill: "surface" }, urgency: 1, reason: `air ${self.air}/20` } : null,
 );
 
-/** Nearly dead with a hostile on top of it: break away. */
+/**
+ * Nearly dead with a hostile on top of it: break away. It goes by the game's own hostile flag,
+ * whatever the bot has or has not learned. Cornered, there is nowhere to break away to: it
+ * stays silent and the defence circuit fights instead.
+ */
 export const lastStand = rule("last_stand", "hard", (data) => {
   const mob = data.nearby.mobs.filter((m) => m.hostile && m.dist <= LAST_STAND.distance).sort((a, b) => a.dist - b.dist)[0];
-  if (!mob || data.self.health > LAST_STAND.health) return null;
+  if (!mob || data.self.health > LAST_STAND.health || defenceOf(data).choice.cornered) return null;
   return { action: { skill: "flee", target: mob.id }, urgency: 1, reason: `health ${data.self.health}, ${mob.type} ${mob.dist} blocks away` };
 });
 
-// Soft reflexes: defence by distance. A far threat gets no reflex at all, only a look (the colliculus),
-// unless something is coming at the bot fast.
-
-/**
- * What to get away from when something looms (closes fast, or a projectile heads this way),
- * whatever its distance: the thing itself if it is a creature, else the nearest hostile that can
- * be seen from afar (most likely what threw it), else nothing. No list of which mobs shoot.
- */
-export function loomingThreat(data: MinecraftStateData): { id: string; what: string } | null {
-  const looming = data.nearby.sudden.find((s) => s.what === "looming");
-  if (!looming) return null;
-  const itself = data.nearby.mobs.find((m) => m.id === looming.id);
-  if (itself) return { id: itself.id, what: `${itself.type} coming fast` };
-  const behindIt = data.nearby.mobs.filter((m) => m.hostile && m.dist < FAR_DISTANCE && m.seen !== false).sort((a, b) => a.dist - b.dist)[0];
-  return behindIt ? { id: behindIt.id, what: `something coming fast, ${behindIt.type} ${behindIt.dist} blocks away` } : null;
-}
-
-/** A hostile is closing in (4 to 8 blocks), or something looms from any distance (with `looming` on): retreat. */
-export function threatApproachingRule(looming: boolean): ReflexRule {
-  return rule("threat_approaching", "soft", (data) => {
-    if (closestIn(data, "contact")) return null;
-    const mob = closestIn(data, "approaching");
-    if (mob) return { action: { skill: "flee", target: mob.id }, urgency: 0.7, reason: `${mob.type} approaching, ${mob.dist} blocks away` };
-    const threat = looming ? loomingThreat(data) : null;
-    return threat ? { action: { skill: "flee", target: threat.id }, urgency: 0.7, reason: threat.what } : null;
-  });
-}
-export const threatApproaching = threatApproachingRule(true);
-
-/** A hostile is on top of the bot (3 blocks or less): fight if armed and healthy, else break away. */
-export const threatContact = rule("threat_contact", "soft", (data) => {
-  const mob = closestIn(data, "contact");
-  if (!mob) return null;
-  const { health, bestWeapon } = data.self;
-  const fight = health >= FIGHT_HEALTH && bestWeapon !== null && !NEVER_FIGHT.has(mob.type);
-  const why = fight ? "" : NEVER_FIGHT.has(mob.type) ? ", not one to fight" : bestWeapon === null ? ", no weapon" : "";
-  return { action: { skill: fight ? "attack" : "flee", target: mob.id }, urgency: 0.9, reason: `${mob.type} in contact, ${mob.dist} blocks away, health ${health}${why}` };
-});
+// Soft reflexes. Defence (freeze, flee, fight, and resting after) is the defence circuit's: see defence.ts.
 
 /**
  * Very hungry and carrying food: eat. With nothing else to hand it will eat food it knows to be
@@ -120,21 +62,18 @@ export const threatContact = rule("threat_contact", "soft", (data) => {
  */
 export const eatWhenStarving = rule("eat_when_starving", "soft", (data) => {
   const { self } = data;
-  if (self.food > STARVING_FOOD || (self.foodItems === 0 && self.badFoodItems === 0) || closestIn(data, "contact")) return null;
+  if (self.food > STARVING_FOOD || (self.foodItems === 0 && self.badFoodItems === 0) || onIt(data)) return null;
   return { action: { skill: "eat" }, urgency: 0.9, reason: `food ${self.food}/20${self.foodItems === 0 ? ", with only bad food to eat" : ""}` };
 });
 
 /**
  * Every reflex for a bot with these settings, checked every tick: the hard ones (the three that
- * were always there, then withdrawal, buried and about-to-touch), then the soft ones.
+ * were always there, then withdrawal, buried and about-to-touch), then the soft ones (defence first).
  */
-export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1, looming = 1): ReflexRule[] {
+export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1, defence: { recuperate: number } = { recuperate: 1 }): ReflexRule[] {
   const protective = protectiveReflexes(settings, righting);
-  return [inLavaOrFire, drowning, lastStand, ...protective.hard, threatContact, threatApproachingRule(looming > 0), ...protective.soft, eatWhenStarving];
+  return [inLavaOrFire, drowning, lastStand, ...protective.hard, ...defenceReflexes(defence), ...protective.soft, eatWhenStarving];
 }
 
 /** Every player reflex with the default settings. */
 export const playerReflexes: ReflexRule[] = createPlayerReflexes();
-
-/** The soft reflexes that defend the bot (a death while one was overruled is logged). */
-export const DEFENCE_REFLEXES = [threatApproaching.name, threatContact.name];

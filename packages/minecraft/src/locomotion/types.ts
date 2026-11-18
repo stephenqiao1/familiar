@@ -81,6 +81,12 @@ export interface Locomotion {
   /** Keeps routes away from a spot for 5 minutes (somewhere that hurt). */
   avoid(spot: { x: number; y: number; z: number }): void;
   /**
+   * Keeps routes clear of a round area for a short while (around a threat that has not noticed
+   * the bot). Calling again with the same name moves and renews it; a journey under way is
+   * planned again when the area is new or has moved.
+   */
+  avoidArea(name: string, centre: { x: number; y: number; z: number }, radius: number, ms: number): void;
+  /**
    * Freezes the legs for a moment without ending the journey: every key is let go, and the
    * journey picks up again by itself afterwards. Returns whether there was a journey to pause.
    */

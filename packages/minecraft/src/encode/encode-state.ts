@@ -11,9 +11,9 @@ import { dangerAlong, headInBlock, touchingOf } from "./touching.js";
 import { scanHazards } from "./scan-hazards.js";
 import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
-import type { MinecraftStateData } from "./state-data.js";
+import type { Defence, MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 export interface EncodeContext {
   base: Base;
@@ -41,6 +41,8 @@ export interface EncodeContext {
   locomotion?: MinecraftStateData["self"]["locomotion"];
   /** What the eyes and ears picked up between states (movement, changes, sounds). Default: nothing. */
   senses?: Senses;
+  /** The threat sense: sizes up what is near and chooses a defence. Default: none (the cheap rules are used by whoever asks). */
+  defence?: (data: MinecraftStateData, now: number) => Defence;
   /** How many of each kind of nearby thing to keep (focus sets it). Default: 10. */
   limit?: number;
   /** Narrow attention (high alarm): keep threats, drop friendly mobs and useful blocks. Default: false. */
@@ -90,6 +92,7 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
       secondsRunning: Math.round((now - ctx.current.startedAt) / 1000),
     },
   };
+  if (ctx.defence) data.defence = ctx.defence(data, now);
   return { schemaVersion: SCHEMA_VERSION, tick, timestamp: now, data: { ...data } };
 }
 

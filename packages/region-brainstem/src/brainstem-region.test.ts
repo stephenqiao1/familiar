@@ -311,4 +311,71 @@ describe("createBrainstemRegion", () => {
     expect(out.proposals).toEqual([]);
     expect(Object.keys(store.signals())).toEqual(["arousal"]);
   });
+
+  describe("g) defence signals", () => {
+    type Mode = "none" | "wary" | "freeze" | "flee" | "fight";
+    const reading = (mode: Mode, threat: number) => ({
+      choice: { mode, base: 0, why: `${mode} it`, target: mode === "none" ? null : "t1", threat, flightDistance: 8, cornered: false, coming: 0 },
+      threats: mode === "none" ? [] : [{ id: "t1", kind: "zombie", dist: 6, stage: "coming" as const, noticed: true, canReach: true, escapable: true, danger: 0.5, beatable: true, flightDistance: 8 }],
+    });
+    const defending = (over: Partial<BrainstemOptions> = {}) => {
+      const now = { mode: "none" as Mode, threat: 0 };
+      return { now, ...bot({}, { defence: () => reading(now.mode, now.threat), ...over }) };
+    };
+
+    it("shares threat and wary from the defence chosen, and logs it with each threat", async () => {
+      const { now, tick, value } = defending();
+      await tick();
+      expect([value("threat"), value("wary"), value("analgesia"), value("recovering")]).toEqual([0, 0, 0, 0]);
+      Object.assign(now, { mode: "wary", threat: 0.3 });
+      await tick();
+      expect([value("threat"), value("wary")]).toEqual([0.3, 1]);
+      Object.assign(now, { mode: "flee", threat: 0.8 });
+      const out = await tick();
+      expect([value("threat"), value("wary")]).toEqual([0.8, 0]);
+      expect(out.trace?.defence).toMatchObject({ mode: "flee", why: "flee it", target: "t1", flightDistance: 8, cornered: false, threats: [{ kind: "zombie", stage: "coming" }] });
+      expect(out.proposals).toEqual([]);
+    });
+
+    it("shares analgesia while fleeing or fighting, fading afterwards", async () => {
+      const { now, tick, value } = defending();
+      Object.assign(now, { mode: "fight", threat: 1 });
+      await tick();
+      await tick({}, null, 3000);
+      expect(value("analgesia")).toBeGreaterThan(0.6);
+      Object.assign(now, { mode: "none", threat: 0 });
+      await tick({}, null, 12_000);
+      expect(value("analgesia")).toBeLessThan(0.05);
+    });
+
+    it("soreness does not enlarge a startle while fleeing or fighting", async () => {
+      const magnitude = async (mode: Mode) => {
+        const { now, tick } = defending({ body: () => ({ health: 1, sore: 1 }) });
+        Object.assign(now, { mode, threat: mode === "none" ? 0 : 0.8 });
+        await tick();
+        return ((await tick({ bang: 0.5 })).trace?.startle as { potentiation: number }).potentiation;
+      };
+      expect(await magnitude("none")).toBeGreaterThan(1);
+      expect(await magnitude("flee")).toBe(1);
+    });
+
+    it("shares recovering after a flight that left the body hurt, with the strength at 0 never", async () => {
+      const run = async (recuperate: number) => {
+        const { now, tick, value } = defending({ defenceStrengths: { analgesia: 1, recuperate } });
+        Object.assign(now, { mode: "flee", threat: 0.8 });
+        await tick({ health: 0.4 });
+        Object.assign(now, { mode: "none", threat: 0 });
+        await tick({ health: 0.4 });
+        return value("recovering");
+      };
+      expect(await run(1)).toBe(1);
+      expect(await run(0)).toBe(0);
+    });
+
+    it("shares no defence signals when it is given no defence", async () => {
+      const { tick, value } = bot();
+      await tick();
+      expect([value("threat"), value("wary"), value("analgesia")]).toEqual([undefined, undefined, undefined]);
+    });
+  });
 });

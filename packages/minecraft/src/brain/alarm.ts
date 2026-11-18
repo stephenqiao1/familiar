@@ -1,7 +1,8 @@
 import type { State } from "@familiar/contracts";
 import { BAD_SURPRISE_SIGNAL, BIG_SURPRISE, changedThreshold, FOCUS_SIGNAL, type AlarmTrigger } from "@familiar/neuromodulators";
 import { LOOMING_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL } from "@familiar/region-brainstem";
-import { minecraftDataOf, nearestThreat } from "./read-state.js";
+import { pressingThreat } from "./defence.js";
+import { minecraftDataOf } from "./read-state.js";
 
 // What raises the player's alarm. Each trigger says how much to add right now (0 to 1).
 // Add or remove one: write it here and edit playerAlarms. Every number is a first guess.
@@ -31,7 +32,7 @@ export const damage: AlarmTrigger = {
 };
 
 /**
- * A hostile mob appears close by when none was. The same mob stepping out of range and back in
+ * A threat that can get to the bot starts coming for it when none was. The same mob stepping out of range and back in
  * within half a minute is not a new threat.
  */
 export function hostileAppeared(): AlarmTrigger {
@@ -40,11 +41,11 @@ export function hostileAppeared(): AlarmTrigger {
     name: "hostile_appeared",
     check({ before, after }) {
       const [a, b] = [minecraftDataOf(before), minecraftDataOf(after)];
-      const threat = b && nearestThreat(b);
+      const threat = b && pressingThreat(b);
       if (!a || !threat) return 0;
       const known = after.timestamp - (lastSeen.get(threat.id) ?? -Infinity) <= SAME_THREAT_MS;
       lastSeen.set(threat.id, after.timestamp);
-      return !nearestThreat(a) && !known ? HOSTILE_APPEARED : 0;
+      return !pressingThreat(a) && !known ? HOSTILE_APPEARED : 0;
     },
   };
 }
@@ -106,8 +107,11 @@ export function playerAlarms(surpriseByFocus = false): AlarmTrigger[] {
   return [damage, hostileAppeared(), startled, looming(), bigSurprise(surpriseByFocus)];
 }
 
-/** A threat is present (alarm does not fade): a hostile mob close by. */
+/**
+ * A threat is present (alarm does not fade): one that can get to the bot, or hit it from where
+ * it is, and is coming or on it. One that cannot reach the bot, or has not noticed it, does not hold alarm up.
+ */
 export function threatPresent(state: State): boolean {
   const data = minecraftDataOf(state);
-  return data !== null && nearestThreat(data) !== null;
+  return data !== null && pressingThreat(data) !== null;
 }

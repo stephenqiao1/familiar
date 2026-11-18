@@ -7,7 +7,7 @@ import { fakeData } from "../encode/state.test-helper.js";
 import { createChestMemory } from "../chest-memory.js";
 import { describeSituation } from "./situation.js";
 import type { ReflexRule } from "@familiar/region-reflex";
-import { drowning, eatWhenStarving, inLavaOrFire, lastStand, playerReflexes, threatApproaching, threatContact, zoneOf } from "./reflexes.js";
+import { drowning, eatWhenStarving, inLavaOrFire, lastStand, playerReflexes } from "./reflexes.js";
 import { withGoal } from "./instinct.js";
 
 /** A bot 12 blocks from base carrying a sword and bread. */
@@ -25,41 +25,6 @@ function workspace(d: MinecraftStateData) {
 
 const zombie = { id: "entity:7", type: "zombie", dist: 6, hostile: true, reachable: true };
 const check = (rule: ReflexRule, d: MinecraftStateData) => rule.check(workspace(d).viewFor("reflex"));
-
-describe("defence by distance", () => {
-  it("far (9 to 16 blocks, or unable to reach the bot): no reflex at all", () => {
-    for (const mob of [{ ...zombie, dist: 12 }, { ...zombie, dist: 5, reachable: false }, { ...zombie, dist: 2, reachable: false }]) {
-      expect(zoneOf(mob)).toBe("far");
-      expect(playerReflexes.flatMap((r) => check(r, data({ mobs: [mob] })) ?? [])).toEqual([]);
-    }
-    expect(zoneOf({ ...zombie, dist: 20 })).toBeNull();
-  });
-
-  it("approaching (4 to 8 blocks): flees, even when armed and healthy", () => {
-    expect(check(threatApproaching, data({ mobs: [zombie] }))).toMatchObject({ action: { skill: "flee", target: "entity:7" }, urgency: 0.7 });
-    expect(check(threatContact, data({ mobs: [zombie] }))).toBeNull();
-  });
-
-  it("contact (3 blocks or less): attacks when armed and healthy, flees otherwise", () => {
-    const close = { ...zombie, dist: 2 };
-    expect(check(threatContact, data({ mobs: [close] }))).toMatchObject({ action: { skill: "attack", target: "entity:7" }, urgency: 0.9 });
-    expect(check(threatContact, data({ self: { health: 8 }, mobs: [close] }))?.action).toEqual({ skill: "flee", target: "entity:7" });
-    expect(check(threatContact, data({ self: { bestWeapon: null }, mobs: [close] }))?.action).toEqual({ skill: "flee", target: "entity:7" });
-    // Contact takes over from approaching: only one defence reflex speaks.
-    expect(check(threatApproaching, data({ mobs: [close, zombie] }))).toBeNull();
-  });
-
-  it("creepers and ranged mobs: always flees, never attacks by reflex", () => {
-    for (const type of ["creeper", "skeleton", "witch"]) {
-      expect(check(threatContact, data({ mobs: [{ ...zombie, type, dist: 2 }] }))?.action).toEqual({ skill: "flee", target: "entity:7" });
-    }
-  });
-
-  it("ignores friendly mobs, and states before the first Minecraft one", () => {
-    expect(check(threatContact, data({ mobs: [{ ...zombie, dist: 2, hostile: false }] }))).toBeNull();
-    expect(threatContact.check(createWorkspace().viewFor("r"))).toBeNull();
-  });
-});
 
 describe("hard reflexes", () => {
   it("in lava, or on fire: escapes the hazard", () => {
@@ -84,7 +49,7 @@ describe("hard reflexes", () => {
 
   it("are the only hard rules, and every other rule is soft", () => {
     expect(playerReflexes.filter((r) => r.kind === "hard").map((r) => r.name)).toEqual(["in_lava_or_fire", "drowning", "last_stand", "pain_withdrawal", "buried", "about_to_touch", "falling_right"]);
-    expect(playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name)).toEqual(["threat_contact", "threat_approaching", "hold_ground", "edge_guard", "eat_when_starving"]);
+    expect(playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name)).toEqual(["defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard", "eat_when_starving"]);
   });
 });
 

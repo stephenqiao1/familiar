@@ -13,7 +13,7 @@ const REACH = 3;
 const LOW_HEALTH = 6;
 const SWING_MS = 650; // just over a sword's attack cooldown
 
-/** Fights a mob until it dies, escapes past 16 blocks, or the bot's health gets low. */
+/** Fights a mob until it dies, escapes past 16 blocks, or the bot's health gets low (cornered, it fights on: there is nowhere to go). */
 export const attack: Skill<MinecraftCtx> = {
   name: "attack",
   risky: true,
@@ -39,7 +39,7 @@ export const attack: Skill<MinecraftCtx> = {
     try {
       while (true) {
         if (!isStillThere(bot, mob)) return { status: "done" };
-        if (bot.health < LOW_HEALTH) return { status: "failed", reason: "low_health" };
+        if (bot.health < LOW_HEALTH && !(ctx.threats?.latest()?.choice.cornered ?? false)) return { status: "failed", reason: "low_health" };
         const distance = distanceTo(bot, mob);
         if (distance > MAX_DISTANCE) return { status: "failed", reason: "target out of range" };
 

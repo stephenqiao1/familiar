@@ -48,14 +48,19 @@ export interface ReflexGainOptions {
   alarmOf(ws: Workspace): number;
   /** Which way a skill takes the bot (flee: away, attack: toward). */
   leaningOf(skill: string): Leaning;
+  /**
+   * How pressing the danger is this very tick, 0 to 1. Alarm as shared is last tick's, so a
+   * threat's first tick would be damped; the gain uses whichever is higher. Default: alarm alone.
+   */
+  threatOf?(ws: Workspace): number;
 }
 
 /** The reflex region's `gainOf`: reads alarm and the goal from the workspace each time a soft rule fires. */
-export function createReflexGain({ settings, alarmOf, leaningOf }: ReflexGainOptions) {
+export function createReflexGain({ settings, alarmOf, leaningOf, threatOf }: ReflexGainOptions) {
   return (rule: { name: string }, ws: Workspace, proposal: Proposal): number => {
     const skill = "skill" in proposal.action ? proposal.action.skill : null;
     return reflexGain(
-      { alarm: alarmOf(ws), bravery: settings.bravery, leaning: skill === null ? null : leaningOf(skill), heldBack: isHeldBack(ws.goal, rule.name, skill) },
+      { alarm: Math.max(alarmOf(ws), threatOf?.(ws) ?? 0), bravery: settings.bravery, leaning: skill === null ? null : leaningOf(skill), heldBack: isHeldBack(ws.goal, rule.name, skill) },
       settings,
     );
   };

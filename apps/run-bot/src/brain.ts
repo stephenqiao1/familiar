@@ -21,6 +21,9 @@ import {
   DEFAULT_MEDULLA,
   medullaUrges,
   createFieldOfView,
+  DEFAULT_DEFENCE,
+  threatLevel,
+  type DefenceSettings,
   playerColliculus,
   toldView,
   DEFAULT_POSTURE,
@@ -73,7 +76,9 @@ import {
   type Thing,
 } from "@familiar/neuromodulators";
 import {
+  ANALGESIA_SIGNAL,
   AROUSAL_SIGNAL,
+  WARY_SIGNAL,
   createBrainstemRegion,
   createColliculusRegion,
   createMedullaRegion,
@@ -126,6 +131,8 @@ export interface BrainParts<Ctx> {
   medulla?: MedullaSettings;
   /** This bot's posture: its balance, righting reflex and reaction to being moved (from bots.json). Default: all on. */
   posture?: PostureSettings;
+  /** This bot's defence: what it is born knowing about threats, and the strength of each part of the defence circuit (from bots.json). Default: all on. */
+  defence?: DefenceSettings;
   /** What the posture system did since last asked (refusals, stance holds, falls, things learned), for the trace. Default: nothing. */
   postureNotes?: () => PostureNotes;
   /** This bot's colliculus: what makes something striking, and how easily it turns its head (from bots.json). Default: the usual weights, field of view off. */
@@ -171,26 +178,28 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const medulla = parts.medulla ?? DEFAULT_MEDULLA;
   const posture = parts.posture ?? DEFAULT_POSTURE;
   const colliculus = parts.colliculus ?? DEFAULT_COLLICULUS;
+  const defence = parts.defence ?? DEFAULT_DEFENCE;
   // With the field of view on, the deciding layers are told only what the bot sees, hears or just saw.
   const view = colliculus.fieldOfView > 0 ? createFieldOfView() : null;
   const told = (ws: Workspace) => (view ? toldView(ws, view.tell(ws.state)) : ws);
   // The brainstem sets how strongly each soft reflex and each upkeep urge fires (alarm, bravery, the goal's hold-backs).
   // The upkeep urges take a goal's hold-backs, but not alarm or bravery: needing air is no weaker for being calm.
   const upkeepGain = hasBrainstem && brainstem.holdBack > 0 ? createReflexGain({ settings: brainstem, alarmOf: () => NEUTRAL_ALARM, leaningOf: () => null }) : undefined;
-  const gainOf = hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? createReflexGain({ settings: brainstem, alarmOf, leaningOf }) : undefined;
+  const gainOf = hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? createReflexGain({ settings: brainstem, alarmOf, leaningOf, threatOf: (ws) => threatLevel(ws.state) }) : undefined;
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
   const instinct = playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE, parts.showPrimitives);
   const all: Region[] = [
     createReflexRegion({
-      rules: createPlayerReflexes(parts.reflexes, posture.righting, hasColliculus ? colliculus.looming : 0),
+      rules: createPlayerReflexes(parts.reflexes, posture.righting, defence),
       ...(gainOf ? { gainOf } : {}),
     }), //                                                                                  layer 0, every tick
     // The medulla: vital signs, and the graded urges of upkeep. Left out (--regions), the hard reflexes above still fire.
-    createMedullaRegion({ vitals: playerVitals, share: medulla.vitals, urges: medullaUrges(medulla), asleep, ...(upkeepGain ? { gainOf: upkeepGain } : {}) }), // layer 0, every tick
+    createMedullaRegion({ vitals: playerVitals, share: medulla.vitals, urges: medullaUrges(medulla), asleep, analgesiaOf: (ws) => level(ws, ANALGESIA_SIGNAL), ...(upkeepGain ? { gainOf: upkeepGain } : {}) }), // layer 0, every tick
     createBrainstemRegion({
       ...playerBrainstem(skills, ctx, parts.sore, { unsteady: posture.unsteady, ...(parts.postureNotes ? { notes: parts.postureNotes } : {}) }),
       settings: brainstem,
+      defenceStrengths: defence,
       alarmOf,
       hardReflex: (ws) => level(ws, REFLEX_SIGNAL) >= 1,
     }), //                                                                                  layer 0, every tick
@@ -200,6 +209,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       settings: colliculus,
       alarmOf,
       arousalOf: (ws) => level(ws, AROUSAL_SIGNAL, 0.5),
+      waryOf: (ws) => level(ws, WARY_SIGNAL),
       // A flinch does not count: it runs beside whatever is under way, so a look may still take over.
       spoken: (ws) => up(ws, REFLEX_SIGNAL) || level(ws, STARTLE_SIGNAL) > FULL || up(ws, LOADED_SIGNAL),
     }), //                                                                                  layer 0, every tick

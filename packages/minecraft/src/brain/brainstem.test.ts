@@ -66,8 +66,8 @@ describe("playerBrainstem", () => {
   });
 
   it("knows which way each reflex skill leans, and what a goal may hold back", () => {
-    expect([leaningOf("flee"), leaningOf("attack"), leaningOf("eat")]).toEqual(["away", "toward", null]);
-    expect(HOLDABLE).toEqual(["threat_contact", "threat_approaching", "hold_ground", "edge_guard", "eat_when_starving", "need_air", "eat_to_heal", "cure", "flee", "attack", "eat", "steady"]);
+    expect([leaningOf("flee"), leaningOf("attack"), leaningOf("freeze"), leaningOf("eat")]).toEqual(["away", "toward", null, null]);
+    expect(HOLDABLE).toEqual(["defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard", "eat_when_starving", "need_air", "eat_to_heal", "cure", "flee", "attack", "eat", "steady"]);
     expect(REFLEX_NOTE).toContain("in_lava_or_fire, drowning, last_stand");
   });
 

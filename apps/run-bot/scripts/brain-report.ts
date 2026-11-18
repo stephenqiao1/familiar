@@ -1,8 +1,9 @@
 // Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
-// surprises, reflexes and the brainstem, the medulla, balance and posture, the colliculus, memories, interrupts, warnings and region errors.
+// surprises, reflexes and the brainstem, the defence circuit, the medulla, balance and posture, the colliculus, memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { summariseDefence, type DefenceRow } from "@familiar/region-brainstem";
 
 interface RegionLog {
   region: string;
@@ -195,6 +196,34 @@ const woken = count(stem("woken"), (t) => String(trace(t, "brainstem").woken));
 console.log(`WOKEN BY: ${list(woken)}`);
 const overruled = ticks.filter((t) => (t as Tick & { defenceOverruledBeforeDeath?: unknown }).defenceOverruledBeforeDeath);
 for (const t of overruled) console.log(`!! DIED WITH DEFENCE OVERRULED at tick ${t.tick}: ${JSON.stringify((t as Tick & { defenceOverruledBeforeDeath?: unknown }).defenceOverruledBeforeDeath)}`);
+
+// The defence circuit: what it chose, how each defence went, and what was learned.
+type DefenceTrace = { mode: string; why: string; target: string | null; flightDistance: number | null; cornered: boolean; recovering: boolean; learned?: string[]; costMs?: number; worstMs?: number; threats: { id: string; kind: string; dist: number; noticed: boolean; stage: string; canReach: boolean; escapable: boolean; danger: number; beatable: boolean }[] };
+const defenceOf = (t: Tick) => trace(t, "brainstem").defence as DefenceTrace | undefined;
+const diedAt = new Set(died.map((d) => d.tick));
+const defenceRows: DefenceRow[] = ticks.map((t) => {
+  const d = defenceOf(t);
+  const top = d?.threats.find((x) => x.id === d.target);
+  return { at: t.timestamp, mode: d?.mode ?? "none", target: d?.target ?? null, kind: top?.kind ?? null, dist: top?.dist ?? null, flightDistance: d?.flightDistance ?? null, noticed: top?.noticed ?? false, cornered: d?.cornered ?? false, recovering: d?.recovering ?? false, present: d?.threats.map((x) => x.id) ?? [], died: diedAt.has(t.tick), ...(d?.learned ? { learned: d.learned } : {}) };
+});
+const defence = summariseDefence(defenceRows);
+const acted = Object.entries(defence.secondsIn).filter(([mode]) => mode !== "none");
+console.log(`DEFENCE: time in each mode: ${acted.length ? acted.map(([mode, s]) => `${mode} ${s} s`).join(", ") : "none"}`);
+console.log(`  freezes: ${defence.freezes.worked} worked (never noticed), ${defence.freezes.failed} failed; fights: ${defence.fights.won} won, ${defence.fights.lost} lost; cornered ${defence.cornered} times; recoveries ${defence.recoveries}`);
+if (defence.flights.length) console.log(`  flights began at: ${defence.flights.map((f) => `${f.kind ?? "?"} ${f.startedAt ?? "?"} blocks (flight distance ${f.flightDistance ?? "?"})`).join("; ")}`);
+if (defence.learned.length) console.log(`  learned: ${defence.learned.join("; ")}`);
+const sizedKinds = new Map<string, { danger: number; beatable: boolean }>();
+for (const t of ticks) for (const x of defenceOf(t)?.threats ?? []) sizedKinds.set(x.kind, { danger: x.danger, beatable: x.beatable });
+if (sizedKinds.size) console.log(`  kinds met (as last sized up): ${[...sizedKinds.entries()].map(([kind, k]) => `${kind} danger ${k.danger}${k.beatable ? ", beatable" : ", not beatable"}`).join("; ")}`);
+const costs = ticks.flatMap((t) => defenceOf(t)?.worstMs ?? []);
+if (costs.length) console.log(`  sizing up cost at worst ${Math.max(...costs).toFixed(2)} ms in a tick (limit 5)`);
+console.log(`  analgesia max ${Math.max(0, ...ticks.map((t) => t.signals.analgesia?.value ?? 0)).toFixed(2)}; wary on ${ticks.filter((t) => (t.signals.wary?.value ?? 0) > 0).length} ticks; recovering on ${ticks.filter((t) => (t.signals.recovering?.value ?? 0) > 0).length} ticks`);
+for (const d of defence.deaths) {
+  const last = defenceRows.filter((r) => d.at - r.at >= 0 && d.at - r.at <= 5000);
+  const sized = [...ticks].reverse().find((t) => t.timestamp < d.at && defenceOf(t)?.threats.length);
+  console.log(`!! DIED: defence in the last 5 s: ${last.length ? last.map((r) => `${((d.at - r.at) / 1000).toFixed(1)}s ago ${r.mode}${r.kind ? ` (${r.kind} ${r.dist})` : ""}`).join(", ") : "none"}`);
+  if (sized) console.log(`   last assessment: ${JSON.stringify(defenceOf(sized)!.threats)}`);
+}
 
 // The medulla: body upkeep.
 type Signs = Record<string, number>;

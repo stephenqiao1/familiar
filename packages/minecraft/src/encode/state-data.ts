@@ -1,4 +1,6 @@
-/** What a schemaVersion 16 Minecraft State carries in `data`. Distances are whole blocks. */
+import type { Choice } from "@familiar/region-brainstem";
+import type { ThreatView } from "../defence/size-up.js";
+/** What a schemaVersion 17 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
   time: { isNight: boolean; lightLevel: number };
   self: {
@@ -112,9 +114,29 @@ export interface MinecraftStateData {
      */
     heard: { type: string; bearing: Bearing; dist: number; position: { x: number; y: number; z: number }; loudness: number; msAgo?: number }[];
   };
+  /**
+   * The defence circuit's reading of this moment: each thing that might be a threat, sized up
+   * (has it noticed, can it reach, is there a way out, how dangerous the kind has been), and the
+   * defence chosen. Left out of a state made without the threat sense (it is then worked out
+   * from the mobs by the cheap rules).
+   */
+  defence?: Defence;
   /** How this place feels from memory (the strongest good or bad memory close by), or null. */
   memory: { nearby: "good" | "bad"; kind: string } | null;
   current: { skill: string; target: string | null; secondsRunning: number } | null;
+}
+
+/** What the threat sense adds to the state. */
+export interface Defence {
+  threats: ThreatView[];
+  /** Why danger is possible with nothing seen (dark, a bad memory, something heard), or null. */
+  possible: string | null;
+  choice: Choice;
+  /** What sizing up cost this tick, and the worst tick so far, in ms. */
+  costMs?: number;
+  worstMs?: number;
+  /** What was learned about a kind since the last state. */
+  learned?: string[];
 }
 
 /** Something dangerous along a direction: a "drop", or the name of a block known to hurt, and how many blocks away (1 or 2). */

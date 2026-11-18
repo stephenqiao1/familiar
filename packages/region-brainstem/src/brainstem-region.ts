@@ -1,8 +1,10 @@
 import type { Proposal, Region, State, Workspace } from "@familiar/contracts";
 import { createLoadedResponses, LOADED_URGENCY, type Thing } from "./loaded.js";
+import type { Choice, Threat } from "./defence.js";
+import { createDefenceState } from "./defence-state.js";
 import { createStartle } from "./startle.js";
 import type { BrainstemSettings } from "./settings.js";
-import { AROUSAL_SIGNAL, LOADED_SIGNAL, SORE_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+import { ANALGESIA_SIGNAL, AROUSAL_SIGNAL, LOADED_SIGNAL, RECOVERING_SIGNAL, THREAT_SIGNAL, WARY_SIGNAL, SORE_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
 
 /** What a detector looks at: the last tick's state, this tick's, and the workspace. */
 export interface BrainstemMoment {
@@ -77,6 +79,15 @@ export interface BrainstemOptions {
   body(state: State): Body | null;
   /** f: what the body's balance and posture did this tick, for the trace. Asked once a tick. Default: nothing. */
   postureNotes?(state: State): Record<string, unknown> | null;
+  /**
+   * g: the defence chosen for this state, each threat as it was sized up, and anything else to
+   * log (what was learned, what the checks cost). Null before the first state. Default: no defence signals.
+   */
+  defence?(state: State): { choice: Choice; threats: Threat[]; notes?: Record<string, unknown> } | null;
+  /** g: the skills that are a flight or a fight: while one runs, the body is still defending whatever this tick's mode. Default: none. */
+  activeDefences?: string[];
+  /** g: how far pain is dulled while defending (0 never), and whether the body rests to recover after. Default: both on. */
+  defenceStrengths?: { analgesia: number; recuperate: number };
   /** The skills proposed for a full startle and for a flinch. (Turning to look at things is the colliculus's job.) */
   skills: { brace: string; flinch: string };
   /** Default: "brainstem". */
@@ -111,7 +122,10 @@ const STAY_ASLEEP_URGENCY = 0.5;
  *      reports loaded responses and hold-backs it had to ignore;
  *   e) arousal gate: shares `arousal`; while asleep and undisturbed, shares `upper_paused` so the
  *      deciding layers above make no calls. A startle, damage, a hard reflex or alarm ends it at once;
- *   f) body signals: shares `stuck`, `sore` and `unsteady` (the vital signs are the medulla's).
+ *   f) body signals: shares `stuck`, `sore` and `unsteady` (the vital signs are the medulla's);
+ *   g) defence signals: shares `threat` and `wary` from the defence chosen this tick (the defence
+ *      reflexes themselves fire in the reflex region), `analgesia` while fleeing or fighting, and
+ *      `recovering` while resting after.
  * Everything it does is in the trace.
  */
 export function createBrainstemRegion(options: BrainstemOptions): Region {
@@ -121,6 +135,7 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
   let pain = 0;
   let stuck = 0;
   const startle = createStartle(settings);
+  const defence = createDefenceState(options.defenceStrengths);
   let startleCause: string | null = null;
   let checkedGoal: number | null = null;
 
@@ -152,6 +167,22 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
       const posture = options.postureNotes?.(after);
       if (posture) trace.posture = posture;
 
+      // g) Defence: how pressing the danger is, and what defending does to the body.
+      let defending = false;
+      const reading = options.defence?.(after);
+      if (reading) {
+        const { choice, threats, notes } = reading;
+        const felt = defence.step(choice, body?.health ?? 1, now, ws.current !== null && (options.activeDefences ?? []).includes(ws.current.skill));
+        defending = felt.active;
+        ws.setSignal(THREAT_SIGNAL, choice.threat);
+        ws.setSignal(WARY_SIGNAL, choice.mode === "wary" || choice.mode === "avoid" ? 1 : 0);
+        ws.setSignal(ANALGESIA_SIGNAL, felt.analgesia);
+        ws.setSignal(RECOVERING_SIGNAL, felt.recovering ? 1 : 0);
+        if (choice.mode !== "none" || felt.analgesia > 0.01 || felt.recovering || notes) {
+          trace.defence = { mode: choice.mode, why: choice.why, target: choice.target, threat: choice.threat, flightDistance: choice.flightDistance, cornered: choice.cornered, coming: choice.coming, threats, analgesia: round(felt.analgesia), recovering: felt.recovering, ...notes };
+        }
+      }
+
       // b) Startle: the strongest sudden event this tick, sized.
       let startled: { by: string; source: Thing | null; size: "flinch" | "full"; magnitude: number } | null = null;
       if (startleCause) ws.setSignal(STARTLE_FROM + startleCause, 0);
@@ -163,7 +194,7 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
         // Harm since the last tick: whatever startled lately was worth it (unless this is that same event again).
         if (hurt > 0) startle.harmed(now, event);
         if (strongest && event) {
-          const edge = { alarm: options.alarmOf(ws), sore: body?.sore ?? 0, ...(options.surroundings?.(after) ?? { dark: 0, badPlace: 0 }) };
+          const edge = { alarm: options.alarmOf(ws), sore: defending ? 0 : (body?.sore ?? 0), ...(options.surroundings?.(after) ?? { dark: 0, badPlace: 0 }) };
           const judged = startle.judge(event, edge, hurt > 0, now);
           const { hit, by } = strongest;
           const eventToDecideMs = Math.max(0, Math.round(Date.now() - (now - (hit.msAgo ?? 0))));

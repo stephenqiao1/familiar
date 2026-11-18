@@ -129,4 +129,25 @@ describe("createMedullaRegion", () => {
       expect((await tick({ air: 0.5 })).trace?.urgeWhileAsleep).toEqual(["need_air"]);
     });
   });
+
+  describe("analgesia", () => {
+    it("scales only the shared pain: the reading, the urges and the other signs see the damage as it is", async () => {
+      let analgesia = 0.7;
+      const starving: ReflexRule = { name: "hurting", kind: "soft", check: (ws) => ((ws.state.data as Partial<Vitals>).health ?? 1) < 0.9 ? { action: { skill: "eat" }, urgency: 0.8, reason: "hurt" } : null };
+      const { tick, value } = medulla({ analgesiaOf: () => analgesia, urges: [starving] });
+      await tick();
+      const out = await tick({ health: 0.7 });
+      expect((out.trace?.vitals as { pain: number }).pain).toBeCloseTo(0.9);
+      expect(value("pain")).toBeCloseTo(0.9 * 0.3);
+      expect(out.trace?.painDulled).toMatchObject({ analgesia: 0.7 });
+      expect(value("hurt")).toBeCloseTo(0.3);
+      expect(out.proposals).toMatchObject([{ action: { skill: "eat" }, urgency: 0.8 }]);
+      // Once the analgesia has gone, what is left of the pain is felt in full.
+      analgesia = 0;
+      const after = await tick({ health: 0.7 }, 1000);
+      expect(value("pain")).toBeCloseTo((after.trace?.vitals as { pain: number }).pain);
+      expect(value("pain")).toBeGreaterThan(0.5);
+      expect(after.trace?.painDulled).toBeUndefined();
+    });
+  });
 });

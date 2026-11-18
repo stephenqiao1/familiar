@@ -241,11 +241,11 @@ const scenes: Record<string, () => Promise<Row>> = {
     const before = ticks.filter((t) => t.timestamp < at);
     const looming = Math.max(0, ...since.map((t) => t.signals.looming?.value ?? 0));
     const alarm = [Math.max(0, ...before.map((t) => t.signals.alarm?.value ?? 0)), Math.max(0, ...since.map((t) => t.signals.alarm?.value ?? 0))];
-    const fled = since.filter((t) => traceOf(t, "reflex").rules?.some((r) => r.rule === "threat_approaching"));
-    const beforeFled = before.filter((t) => traceOf(t, "reflex").rules?.some((r) => r.rule === "threat_approaching")).length;
+    const fled = since.filter((t) => traceOf(t, "reflex").rules?.some((r) => r.rule === "defence_flee"));
+    const beforeFled = before.filter((t) => traceOf(t, "reflex").rules?.some((r) => r.rule === "defence_flee")).length;
     const look = looksOf(since).find((l) => drawnBy(l.won) === "looming");
     const ok = looming > 0 && alarm[1]! > alarm[0]! + 0.3 && fled.length > 0 && beforeFled === 0;
-    return row("arrows from 12 blocks, a still skeleton at 14", ticks, ok, `looming up to ${looming.toFixed(2)}; alarm ${alarm[0]!.toFixed(2)} → ${alarm[1]!.toFixed(2)}; threat_approaching fired ${fled.length} ticks (${beforeFled} before the arrows); lowest health ${Math.min(...ticks.map((t) => selfOf(t).health))}`, describe(look?.won), look ? look.t.timestamp - at : null, look?.how ?? "");
+    return row("arrows from 12 blocks, a still skeleton at 14", ticks, ok, `looming up to ${looming.toFixed(2)}; alarm ${alarm[0]!.toFixed(2)} → ${alarm[1]!.toFixed(2)}; defence_flee fired ${fled.length} ticks (${beforeFled} before the arrows); lowest health ${Math.min(...ticks.map((t) => selfOf(t).health))}`, describe(look?.won), look ? look.t.timestamp - at : null, look?.how ?? "");
   },
 
   /** 7. Busy: during a demanding skill, a mild event is ignored and a looming one is not. */

@@ -61,7 +61,7 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `core` | The brain loop (runs regions, asks the arbiter, acts, logs), workspace, skill executor. |
 | `arbiter` | The pickers: `value-weighted` (used) and `highest-urgency`. |
 | `region-reflex` | Runs a list of rules, hard and soft, and logs each fired rule's kind, base urgency, gain and final urgency. |
-| `region-brainstem` | Supplies the reflex gains, a `brainstem` region (startle, loaded responses, the arousal gate), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
+| `region-brainstem` | Supplies the reflex gains, the defence circuit's choice of defence, a `brainstem` region (startle, loaded responses, the arousal gate, the defence signals), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
 | `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
 | `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
 | `neuromodulators` | Chemical dials, each a region that shares signals (see below). |
@@ -81,13 +81,12 @@ life-saving ones cannot be overruled. Each bot's settings are the `brainstem` bl
 
 **Reflexes** (`reflex` region, rules in `packages/minecraft/src/brain/reflexes.ts`):
 - Hard, always urgency 1: `in_lava_or_fire` (→ `escape_hazard`), `drowning` (air 6 or less, under
-  water → `surface`), `last_stand` (health 6 or less with a hostile within 4 blocks → `flee`).
-- Soft, defence by distance to the nearest hostile:
-  - far (9 to 16 blocks, or it cannot reach the bot): no reflex, only a look;
-  - approaching (4 to 8 blocks): `flee`, base urgency 0.7;
-  - contact (3 blocks or less): `attack` if armed and health is 10 or more, else `flee`; base 0.9.
-    Creepers and ranged mobs are always fled from.
-- Soft: `eat_when_starving`, base 0.9 (food 6 or less; not with a hostile in contact; a food
+  water → `surface`), `last_stand` (health 6 or less with a hostile within 4 blocks → `flee`; it goes by the game's own
+  hostile flag, whatever the bot has learned, and stays silent when the bot is cornered, so the
+  defence circuit fights instead of fleeing into a wall).
+- Soft, defence: `defence_freeze`, `defence_flee`, `defence_fight` and `recuperate`. At most one
+  fires each tick, chosen by the defence circuit (next section).
+- Soft: `eat_when_starving`, base 0.9 (food 6 or less; not with a threat on the bot; a food
   known to be bad is eaten only now, and only when there is nothing else).
 
 **Withdrawal and stretch reflexes** (the body's fastest protections; rules in
@@ -185,6 +184,95 @@ blocks known to hurt within 3 blocks.
   neuromodulators and memory never pause.
 - It also shares `stuck`, `sore` and `unsteady` (1 − balance; see Balance and posture). The
   body's vital signs are the medulla's job (below).
+
+## The defence circuit
+
+The bot does not defend by distance alone. Each tick it sizes up everything that might be a
+threat, then picks one kind of defence from how close the danger is in time, whether it has been
+noticed, and whether there is a way out. (In an animal this is the periaqueductal gray: it does
+not work out what the threat is, only which defence fits.) Each bot's settings are the `defence`
+block in `bots.json`.
+
+**Sizing up** (`packages/minecraft/src/defence/`, written into the state as `defence`):
+
+| Asked of each threat | How it is answered |
+|---|---|
+| noticed | It is itself coming toward the bot (0.5 blocks a second or more; the bot's own steps do not count), has faced it for a second, has hurt it in the last 10 seconds, or the bot has struck it. Remembered for 5 seconds. |
+| canReach | For the nearest two threats within 16 blocks: the pathfinder is asked whether a walking route exists from it to the bot (`locomotion/route-queries.ts`). Everything else, and until an answer arrives: the cheap guess (in line of sight, within 3 blocks of the bot's height). A kind that shoots can reach whenever it has a clear line. |
+| escapable | For the same two: is there a walking route to somewhere 16 blocks from the threat that never passes within 3 blocks of it? If not, the bot is cornered. |
+| danger | How dangerous this kind has been for this bot, 0 to 1 (learned; 0.5 for a kind never met). |
+| beatable | Whether the bot has beaten this kind more often than it has lost to it (learned). |
+| stage | `possible` (not in view), `seen` (in view), `coming` (noticed, able to reach, and inside the flight distance; or looming at any distance), `on_it` (within 3 blocks and able to reach, within 6 while the bot is fighting it, or it has just hurt the bot). |
+
+- **Flight distance** = 8 × (0.5 + danger) × (1.3 − 0.6 × bravery) blocks. A kind that has hurt
+  the bot badly sets it off from further away; a brave bot lets things closer.
+- **The route checks are capped** (`defence/routes.ts`): two threats, each question at most once
+  a second, about a millisecond of pathfinding each time the state is read, every answer kept
+  until a newer one replaces it. While a journey is being planned they are skipped. The cost of
+  sizing up is in the trace (`costMs`, `worstMs`).
+- With nothing in view, danger is still **possible** when it is dark, a bad memory is near,
+  something worrying was heard, or a threat is close but unseen.
+- A state made without the threat sense (tests, `--skill` runs) is sized up by the cheap rules
+  alone: the game's hostile mobs, middling danger, always a way out (`cheapDefence`).
+
+**Choosing** (`packages/region-brainstem/src/defence.ts`, pure and game-free), for the most
+pressing threat:
+
+| Situation | Mode | Does | Base |
+|---|---|---|---|
+| Danger possible; or seen but far off, already noticed and out of range, or unable to reach | `wary` | Nothing. Shares `wary`. | |
+| Seen, not noticed, within 1.5 flight distances, standing | `freeze` | `freeze`: stop, sneak, watch it | 0.5 |
+| The same while on a journey | `avoid` | Nothing: the journey is routed round a circle of the flight distance | |
+| Coming, with a way out | `flee` | `flee`, until twice the flight distance away or out of its sight | 0.7 |
+| Coming, cornered | `freeze` | `freeze` | 0.6 |
+| On it, with a way out, and unarmed, weak or not beatable | `flee` | `flee` (breaking away) | 0.9 |
+| On it, and cornered, or armed, healthy and beatable | `fight` | `attack` | 0.9 |
+
+- Weak is health below half, or three or more threats coming at once.
+- It is chosen afresh every tick, so a freeze ends the tick its threat notices and closes.
+- The reflexes are `defence_freeze`, `defence_flee` and `defence_fight`. The brainstem's gain
+  applies as to any soft reflex (flee leans away, fight toward, freeze neither), and a goal's
+  `holdBack` can name one of the three, or the skill (`flee`, `attack`) as before.
+- **The first tick is not damped.** The gain uses this tick's `threat` when that is above last
+  tick's alarm, so a threat that has just started coming is fled at 0.7 × 1.24, not 0.7 × 0.6.
+
+**What it shares** (set by the brainstem region, part g):
+
+| Signal | Meaning | Read by |
+|---|---|---|
+| `threat` | 0 none, 0.3 possible, 0.5 seen, 0.8 coming, 1 on it | The reflex gain |
+| `wary` | 1 while wary or avoiding | Locomotion (caution + 0.15) and the colliculus (threshold − 0.1) |
+| `analgesia` | Rises to 0.7 while fleeing or fighting (and while that skill still runs); fades over about 10 seconds after | The medulla: the shared `pain` is multiplied by (1 − analgesia). Soreness does not enlarge a startle meanwhile. |
+| `recovering` | 1 after a fight or flight that left health below half, with nothing coming, until health is above three quarters | The `recuperate` reflex (base 0.4): go home if it is within 48 blocks, then stay still |
+
+- Analgesia scales only the shared `pain`. The medulla's readings and urges, the hard reflexes
+  and the brainstem's own waking all see the damage as it is.
+- **Alarm agrees with defence** (`brain/alarm.ts`): `hostile_appeared` and "a threat is present"
+  count only a threat that can reach the bot and is coming or on it. One that cannot reach it,
+  or has not noticed it, raises no alarm.
+
+**Learning** (`defence/threat-record.ts`, saved in `data/<bot>/threats.json`, by kind; a player is
+`player:<name>`):
+
+| Learned | From |
+|---|---|
+| danger | Rises with each hurt (by how much health it cost) and with each death; falls a little with every encounter that did no harm, down to 0.1 |
+| beatable | Kills minus deaths and bad losses (an encounter that cost half the bot's health without a kill). An ordinary kind starts one ahead; a kind in `innateNeverFight` starts two behind |
+| it shoots | Two hurts from more than 4.5 blocks away |
+| a new threat | Anything the game does not flag hostile that hurts the bot (an angered animal, a golem). Another player needs two hits, 2 to 60 seconds apart. It is let go again if it stays harmless long enough |
+
+- Only damage the game itself ties to a creature counts (the attacker named in the damage
+  packet). A fall during a chase teaches nothing about the chaser.
+- A kill is the bot's if the creature died within 5 seconds of the bot striking it.
+- `innateThreats` is `"game"` (trust the game's hostile flag), or a list; `innateNeverFight` is
+  the usual 13. Empty both and the bot has to learn all of it by being hurt.
+- Each change of mind is printed and logged (`learned` in the trace).
+
+**In the log.** The brainstem's trace has `defence`: the mode and why, the flight distance,
+whether cornered, each threat as it was sized up, analgesia, recovering, anything learned and
+the cost. `pnpm brain-report` adds the time in each mode, freezes that worked and failed, the
+distance each flight began at, fights won and lost, cornered events, recoveries and what was
+learned. A death is printed with the modes of the 5 seconds before it (`defenceBeforeDeath`).
 
 ## The medulla: body upkeep
 
@@ -322,9 +410,10 @@ striking. At most one new look per second.
 - *Wakes the brain*: a new sound or a new sudden thing triggers a tick at once
   (`isSignificantChange`).
 - *Looming*: shares a `looming` signal (0 to 1). It raises alarm as it starts (`brain/alarm.ts`,
-  0.6 at full), and the `threat_approaching` reflex treats a looming thing as approaching
-  whatever its distance: it flees from the thing itself if that is a creature, else from the
-  nearest hostile in sight (most likely what threw it). There is no list of which mobs shoot.
+  0.6 at full), and the defence circuit treats a looming thing as coming whatever its
+  distance: the thing itself if that is a threat, else the nearest threat in sight (most likely
+  what threw it). There is no list of which mobs shoot. (The defence circuit reads looming from
+  the state, so it holds with `colliculus.looming` at 0 too.)
 - Shares `orienting` (1 on the tick of a new winner), as the brainstem did.
 
 **When nothing stands out** (`scanning`). Travelling, the head looks where the body is going.
@@ -496,8 +585,8 @@ else is built from, and the **single doorway** to the bot's body.
 Reflexes can always use primitives. They are off Jev's menu unless the bot runs with
 `--primitives`. `escape_hazard` and `surface` are reflex-only and never on the menu.
 
-If the bot dies soon after a soft defence reflex was held back or outvoted with a hostile within
-8 blocks, the run prints `!! DIED WITH DEFENCE OVERRULED` with the gain and what won, and the
+If the bot dies soon after a soft defence reflex was held back or outvoted with a threat coming
+or on it, the run prints `!! DIED WITH DEFENCE OVERRULED` with the gain and what won, and the
 tick's log line carries `defenceOverruledBeforeDeath`.
 
 ## Locomotion: one controller owns all travel
@@ -634,8 +723,16 @@ in `data/<name>/`.
 | Change how unsteady affects caution | `CAUTION_FROM_UNSTEADY` in `packages/minecraft/src/brain/locomotion.ts`; a bot's own strength is `posture.unsteady` |
 | Change how steady each kind of footing is | `STEADY` and `BY_EDGES` in `packages/minecraft/src/encode/balance.ts` |
 | Change how many sightings it takes to learn a surface | `SIGHTINGS_TO_LEARN` in `packages/minecraft/src/posture/surfaces.ts` |
+| Change which defence goes with which situation | `chooseDefence` in `packages/region-brainstem/src/defence.ts` (and its base urgencies, `BASE`) |
+| Change the flight distance | `flightDistance` in the same file; a bot's own strength is `defence.flightDistance`, and its bravery is `brainstem.bravery` |
+| Change what counts as "noticed", or where a stage begins | `sizeUp` in `packages/minecraft/src/defence/size-up.ts` |
+| Change what the bot is born knowing about threats | `bots.json`: `defence.innateThreats` (`"game"`, or a list; empty: it learns every threat by being hurt) and `defence.innateNeverFight` |
+| Change how danger is learned | `packages/minecraft/src/defence/threat-record.ts` (the steps, what a bad loss is, how many hits from afar make a shooter) |
+| Change how often, or for how many threats, routes are checked | `packages/minecraft/src/defence/routes.ts`; what is asked of the pathfinder is `packages/minecraft/src/locomotion/route-queries.ts` |
+| Add a defence | A new mode in `chooseDefence`, a rule in `packages/minecraft/src/brain/defence.ts`, and a skill for it |
+| Turn part of the defence circuit off | `bots.json`: set its strength in `defence` to 0 (`freeze`, `avoid`, `cornered`, `flightDistance`, `learnThreats`, `analgesia`, `recuperate`, `reachCheck`) |
 | Add a hard reflex | `packages/minecraft/src/brain/reflexes.ts` (write a rule with `"hard"`, add it to `playerReflexes`). Keep these to what saves the bot's life: nothing can overrule them. |
-| Add a soft reflex | Same file, with `"soft"` and a base urgency. If it defends the bot, add its name to `DEFENCE_REFLEXES`; if its skill moves toward or away from a threat, add the skill to `LEANINGS` in `brainstem.ts`. |
+| Add a soft reflex | Same file, with `"soft"` and a base urgency. (The defence reflexes are the defence circuit's: see the rows above.) If its skill moves toward or away from a threat, add the skill to `LEANINGS` in `brainstem.ts`. |
 | Add something that startles | `packages/minecraft/src/brain/startle.ts` (write a detector that returns an intensity from 0 to 1 and a source, add it to `createPlayerStartles`) |
 | Make a bot jumpier | `bots.json`: `brainstem.startle` (0 never startles, 1 normal, up to 1.5 jumpy) |
 | Change how fast it gets used to things | `HABITUATION_STEP` in `packages/region-brainstem/src/startle.ts` (startle) or `STEP` in `habituation.ts` (looks); a bot's own strength is `brainstem.habituation` |

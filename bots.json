@@ -138,6 +138,32 @@
       "habituation": 1,
       "scanning": 1,
       "fieldOfView": 0
+    },
+    "defence": {
+      "innateThreats": "game",
+      "innateNeverFight": [
+        "creeper",
+        "skeleton",
+        "stray",
+        "bogged",
+        "pillager",
+        "blaze",
+        "ghast",
+        "witch",
+        "shulker",
+        "breeze",
+        "drowned",
+        "guardian",
+        "elder_guardian"
+      ],
+      "freeze": 1,
+      "avoid": 1,
+      "cornered": 1,
+      "flightDistance": 1,
+      "learnThreats": 1,
+      "analgesia": 1,
+      "recuperate": 1,
+      "reachCheck": 1
     }
   },
   "Brave": {
@@ -163,11 +189,20 @@
     },
     "posture": {
       "innateLoose": []
+    },
+    "defence": {
+      "learnThreats": 0
     }
   },
   "Wary": {
     "colliculus": {
       "fieldOfView": 1
+    }
+  },
+  "Blank": {
+    "defence": {
+      "innateThreats": [],
+      "innateNeverFight": []
     }
   }
 }

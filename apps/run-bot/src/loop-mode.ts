@@ -7,6 +7,11 @@ import {
   createGut,
   createLocomotion,
   createPain,
+  createRouteChecks,
+  createRouteQueries,
+  createThreatRecord,
+  createThreatSense,
+  defenceMoment,
   createSleepClock,
   DEFENCE_REFLEXES,
   driveFrom,
@@ -72,6 +77,9 @@ import {
   saveSurfaces,
   loadSurfaces,
   surfacesFile,
+  loadThreats,
+  saveThreats,
+  threatsFile,
   saveMemories,
   saveNovelty,
   saveScorebook,
@@ -99,7 +107,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -174,12 +182,24 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     lastBang: () => bodyEvents.loud().at(-1)?.at ?? null,
     log: (msg) => console.log(`    ${msg}`),
   });
+  // Defence: what the bot has learned about each kind of threat, and the sense that sizes up
+  // whatever is near each tick (with real route checks for the nearest two).
+  const threatRecord = createThreatRecord(defence, await loadThreats(threatsFile(server.name)));
+  const threats = createThreatSense(bot, {
+    settings: defence,
+    bravery: brainstem.bravery,
+    record: threatRecord,
+    ...(defence.reachCheck > 0 ? { routes: createRouteChecks(createRouteQueries(bot)) } : {}),
+    locomotion,
+    log: (msg) => console.log(`    ${msg}`),
+  });
   const ctx: MinecraftCtx = {
     bot,
     base,
     locomotion,
     pain,
     gut,
+    threats,
     lastHurt: () => bodyEvents.lastHurt(),
     wants: () => workspace.goal()?.wants ?? [],
     chests: believedChests,
@@ -207,6 +227,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       medulla,
       posture: postureSettings,
       colliculus,
+      defence,
       postureNotes: () => posture.notes(),
       justLearnedBadFoods: () => gut.justLearned(),
       sore: () => pain.sore(Date.now()),
@@ -234,6 +255,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   );
   console.log(`Focus: resting ${focusSettings.resting}, trust in remembered things halves every ${focusSettings.trustHalfLifeMinutes} min.`);
   console.log(`Colliculus: threshold ${colliculus.threshold}, field of view ${colliculus.fieldOfView > 0 ? "on (the deciding layers are told only what is seen or heard)" : "off"}.`);
+  console.log(`Defence: innate threats ${defence.innateThreats === "game" ? "the game's hostile flag" : `[${defence.innateThreats.join(", ")}]`}, ${Object.keys(threatRecord.entries()).length} kinds learned about, route checks ${defence.reachCheck > 0 ? "on" : "off"}.`);
   console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}, arousal gate ${brainstem.arousalGate}.`);
   if (learned.skills.length) console.log(`Learned skills: ${learned.skills.map((s) => s.name).join(", ")}.`);
   console.log(`Logging to ${logPath}`);
@@ -309,6 +331,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   const firstSeen = createFirstSeenTracker();
   const defenceWatch = createDefenceWatch();
   let loggedDeaths = 0;
+  let diedDefending: ReturnType<typeof defenceWatch.recent> | null = null;
   /**
    * The cost of tunable defence, made visible: if the bot dies soon after a soft defence reflex
    * was held back or outvoted with a threat close, say so loudly, with the gain and what won.
@@ -318,12 +341,16 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     const winnerSkill = entry.winner && "skill" in entry.winner.action ? entry.winner.action.skill : null;
     const died = deaths > loggedDeaths;
     loggedDeaths = deaths;
+    // A death is reported with what the defence circuit was doing in the 5 seconds before it.
+    if (died) diedDefending = defenceWatch.recent(entry.timestamp);
+    const moment = defenceMoment(entry.state);
     return defenceWatch.observe({
       now: entry.timestamp,
       fired: fired.map((f) => ({ rule: f.rule, skill: f.skill, gain: f.gain, urgency: f.urgency, heldBack: isHeldBack(entry.goal, f.rule, f.skill), won: entry.winner?.region === "reflex" && winnerSkill === f.skill })),
       winner: entry.winner && { region: entry.winner.region, skill: winnerSkill, urgency: entry.winner.urgency, reason: entry.winner.reason },
       threatClose: threatPresent(entry.state),
       died,
+      ...(moment ? { defence: { mode: moment.mode, why: moment.why, threat: moment.threat as Record<string, unknown> | null } } : {}),
     });
   };
   let encoded = 0;
@@ -353,6 +380,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         displaced: posture.displaced(),
         locomotion: (({ moving, pattern, gait, stuck }) => ({ moving, pattern, gait, stuck }))(locomotion.status()),
         senses,
+        defence: threats.assess,
         memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
         narrow: noradrenaline.focus > 0 && alarm() > NARROW_ABOVE,
         limit,
@@ -373,9 +401,12 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       log(entry: TickLog) {
         const seen = firstSeen(entry.state);
         const overruled = overruledDefence(entry);
-        const full: TickLog = { ...entry, skillEvents: pendingEvents.splice(0), ...(seen.length ? { firstSeen: seen } : {}), ...(overruled ? { defenceOverruledBeforeDeath: overruled } : {}) };
+        const before = diedDefending;
+        diedDefending = null;
+        const full: TickLog = { ...entry, skillEvents: pendingEvents.splice(0), ...(seen.length ? { firstSeen: seen } : {}), ...(overruled ? { defenceOverruledBeforeDeath: overruled } : {}), ...(before ? { defenceBeforeDeath: before } : {}) };
         fileLogger.log(full);
         console.log(formatTick(full));
+        if (before) console.error(`!! DIED. Defence in the 5 seconds before: ${before.length ? before.map((m) => `${(m.msAgo / 1000).toFixed(1)}s ago ${m.mode}`).join(", ") : "nothing recorded"}.`);
         if (overruled) {
           const how = overruled.heldBack ? "held back by the goal" : "outvoted";
           const winner = overruled.winner ? `${overruled.winner.region} → ${overruled.winner.skill ?? "keep going"} (urgency ${overruled.winner.urgency.toFixed(2)}: ${overruled.winner.reason})` : "nothing";
@@ -394,6 +425,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       saveHurts(pain.entries(), hurtsFile(server.name)),
       saveHurts(gut.entries(), badFoodsFile(server.name)),
       saveSurfaces(posture.surfaces.entries(), surfacesFile(server.name)),
+      saveThreats(threatRecord.entries(), threatsFile(server.name)),
       saveBody({ sleptAtAge: sleepClock.sleptAtAge() }, bodyFile(server.name)),
       saveMemories(memory, memoriesFile(server.name)),
     ]).catch((error) => console.error(`Could not save what the bot learned: ${error}`));
