@@ -221,6 +221,7 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       ...(beside ? { alongside: beside } : {}),
       goal: workspace.goal(),
       signals: workspace.signals(),
+      attended: workspace.attended(),
     });
   }
 

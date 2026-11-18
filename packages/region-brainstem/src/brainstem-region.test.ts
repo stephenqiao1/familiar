@@ -25,8 +25,6 @@ function bot(settings: Partial<BrainstemSettings> = {}, over: Partial<BrainstemO
     alarmOf: (ws) => ws.signals.alarm?.value ?? 0,
     hardReflex: (ws) => (ws.signals.hard_reflex?.value ?? 0) > 0,
     startle: [{ name: "bang", check: ({ after }) => (world(after).bang ? { source: world(after).things?.[0] ?? null } : null) }],
-    novel: ({ before, after }) => (world(after).things ?? []).find((t) => !(world(before).things ?? []).some((b) => b.id === t.id)) ?? null,
-    mayOrient: (ws) => ws.current === null || ws.current.skill === "idle",
     thingsOf: (state) => world(state).things ?? [],
     responseProblem: (skill) => (skill === "flee" ? null : "unknown skill"),
     acceptsTarget: () => true,
@@ -34,7 +32,7 @@ function bot(settings: Partial<BrainstemSettings> = {}, over: Partial<BrainstemO
     asleep: (ws) => world(ws.state).asleep ?? false,
     drowsy: (ws) => world(ws.state).night ?? false,
     body: (state) => ({ health: world(state).health ?? 1 }),
-    skills: { brace: "brace", lookAt: "look_at" },
+    skills: { brace: "brace" },
     ...over,
   });
   let ms = 0;
@@ -77,40 +75,9 @@ describe("createBrainstemRegion", () => {
     });
   });
 
-  describe("orienting", () => {
-    it("proposes a weak look at something new, only when idle or doing nothing", async () => {
-      const { tick, value } = bot();
-      await tick();
-      const out = await tick({ things: [{ id: "entity:1", kind: "zombie" }] });
-      expect(value("orienting")).toBe(1);
-      expect(out.proposals).toEqual([{ action: { skill: "look_at", target: "entity:1" }, urgency: 0.35, reason: "something new: zombie" }]);
-      const idle = await tick({ things: [{ id: "entity:1", kind: "zombie" }, { id: "entity:2", kind: "cow" }] }, "idle");
-      expect(idle.proposals).toHaveLength(1);
-    });
-
-    it("stays quiet when a reflex, a startle or a loaded response has spoken this tick", async () => {
-      const reflex = bot({}, { reflexFired: () => true });
-      await reflex.tick();
-      expect((await reflex.tick({ things: [{ id: "entity:1", kind: "zombie" }] })).proposals).toEqual([]);
-      const startled = bot();
-      await startled.tick();
-      const out = await startled.tick({ bang: true, things: [{ id: "entity:1", kind: "zombie" }] });
-      expect(out.proposals.map((p) => ("skill" in p.action ? p.action.skill : ""))).toEqual(["brace"]);
-    });
-
-    it("never interrupts a running skill other than idle", async () => {
-      const { tick, value } = bot();
-      await tick({}, "go_to");
-      const out = await tick({ things: [{ id: "entity:1", kind: "zombie" }] }, "go_to");
-      expect(value("orienting")).toBe(1);
-      expect(out.proposals).toEqual([]);
-      expect(out.trace).toMatchObject({ orienting: { toward: "entity:1", proposed: false } });
-    });
-  });
-
   describe("loaded responses and hold-backs", () => {
     it("fires the goal's response the moment its thing appears, at 0.95, and stops when the goal changes", async () => {
-      const { store, tick } = bot({ orienting: 0 });
+      const { store, tick, value } = bot();
       await tick();
       store.viewFor("prefrontal").setGoal({ text: "explore", steps: [], reason: "", ifThen: [{ when: "creeper", skill: "flee" }] });
       const out = await tick({ things: [{ id: "entity:1", kind: "creeper" }] });
@@ -206,7 +173,7 @@ describe("createBrainstemRegion", () => {
   });
 
   it("with every strength at 0 it proposes nothing and shares nothing but arousal", async () => {
-    const off = { gains: 0, startle: 0, orienting: 0, loadedResponses: 0, holdBack: 0, arousalGate: 0, bodySignals: 0 };
+    const off = { gains: 0, startle: 0, loadedResponses: 0, holdBack: 0, arousalGate: 0, bodySignals: 0 };
     const { store, tick } = bot(off);
     store.viewFor("prefrontal").setGoal({ text: "g", steps: [], reason: "", ifThen: [{ when: "zombie", skill: "flee" }] });
     await tick({ asleep: true }, "sleep");

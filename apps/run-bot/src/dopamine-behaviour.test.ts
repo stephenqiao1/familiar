@@ -57,9 +57,10 @@ function state(p: Patch, timestamp: number): State {
       landing: null,
       displaced: false,
       balance: 1,
+      gaze: { id: null, yaw: 0 },
       locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
     },
-    nearby: { hazards: [], mobs: [], blocks: [{ id: CHEST, type: "chest", dist: 6 }], players: [], loud: [] },
+    nearby: { hazards: [], mobs: [], blocks: [{ id: CHEST, type: "chest", dist: 6 }], players: [], sudden: [], heard: [] },
     memory: null,
     current: null,
   };

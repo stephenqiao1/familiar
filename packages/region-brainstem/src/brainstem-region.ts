@@ -1,7 +1,7 @@
 import type { Proposal, Region, State, Workspace } from "@familiar/contracts";
 import { createLoadedResponses, LOADED_URGENCY, type Thing } from "./loaded.js";
 import type { BrainstemSettings } from "./settings.js";
-import { AROUSAL_SIGNAL, ORIENTING_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+import { AROUSAL_SIGNAL, LOADED_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
 
 /** What a detector looks at: the last tick's state, this tick's, and the workspace. */
 export interface BrainstemMoment {
@@ -32,18 +32,10 @@ export interface BrainstemOptions {
   settings: BrainstemSettings;
   /** Alarm as last shared, 0 to 1. */
   alarmOf(ws: Workspace): number;
-  /** Whether any reflex fired this tick (a look never competes with one). Default: never. */
-  reflexFired?(ws: Workspace): boolean;
   /** Whether a hard reflex fired this tick. Default: never. */
   hardReflex?(ws: Workspace): boolean;
   /** b: the sudden events that startle. */
   startle: StartleDetector[];
-  /** c: something new or sudden worth a look, or null. */
-  novel(moment: BrainstemMoment): Thing | null;
-  /** c: whether a look may take over right now (nothing running, or only idling). */
-  mayOrient(ws: Workspace): boolean;
-  /** c: whether a look would run alongside the running skill instead of competing with it. Default: never. */
-  looksAlongside?(ws: Workspace): boolean;
   /** d: everything in view, for matching loaded responses. */
   thingsOf(state: State): Thing[];
   /** d: why a loaded response may not use a skill (unknown, a primitive, reflex-only), or null if it may. */
@@ -60,10 +52,8 @@ export interface BrainstemOptions {
   body(state: State): Body | null;
   /** f: what the body's balance and posture did this tick, for the trace. Asked once a tick. Default: nothing. */
   postureNotes?(state: State): Record<string, unknown> | null;
-  /** The skills proposed for a startle and for a look. */
-  skills: { brace: string; lookAt: string };
-  /** The urgency of a look. Default: 0.35. */
-  orientUrgency?: number;
+  /** The skill proposed for a startle. (Turning to look at things is the colliculus's job.) */
+  skills: { brace: string };
   /** Default: "brainstem". */
   name?: string;
   /** Default: 0 (runs inside every tick). */
@@ -88,9 +78,8 @@ const STAY_ASLEEP_URGENCY = 0.5;
  * The brainstem: keeps the body going and reacts before the rest of the brain has noticed. It
  * proposes little; mostly it shares signals. (It also supplies the reflex gains: see `createReflexGain`.)
  *   b) startle: on a sudden event, shares `startle` for one tick and proposes bracing once
- *      (urgency 1), at most once per 5 s;
- *   c) orienting: proposes a look at something new or sudden, only when idle and only when
- *      nothing faster (a reflex, a startle, a loaded response) has spoken this tick;
+ *      (urgency 1) toward where it came from, at most once per 5 s;
+ *   (c, orienting, moved to the colliculus region);
  *   d) loaded responses: fires a response the goal loaded in advance the moment its thing appears;
  *      reports loaded responses and hold-backs it had to ignore;
  *   e) arousal gate: shares `arousal`; while asleep and undisturbed, shares `upper_paused` so the
@@ -99,7 +88,7 @@ const STAY_ASLEEP_URGENCY = 0.5;
  * Everything it does is in the trace.
  */
 export function createBrainstemRegion(options: BrainstemOptions): Region {
-  const { settings, skills, orientUrgency = 0.35, name = "brainstem", layer = 0 } = options;
+  const { settings, skills, name = "brainstem", layer = 0 } = options;
   const loaded = createLoadedResponses(options.responseProblem);
   let before: State | null = null;
   let pain = 0;
@@ -159,6 +148,7 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
       if (settings.loadedResponses > 0) {
         const { fire, dropped } = loaded.observe(ws.goal, options.thingsOf(after), now, startled?.source);
         if (dropped) trace.droppedResponses = dropped;
+        ws.setSignal(LOADED_SIGNAL, fire ? 1 : 0);
         if (fire) {
           const target = options.acceptsTarget(fire.rule.skill, fire.thing.id) ? { target: fire.thing.id } : {};
           trace.loadedResponse = { when: fire.rule.when, skill: fire.rule.skill, thing: fire.thing.id };
@@ -171,19 +161,6 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
         if (ignored.length) trace.ignoredHoldBack = ignored;
         const held = settings.holdBack > 0 ? ws.goal.holdBack.filter((n) => options.holdable.includes(n)) : [];
         if (held.length) trace.holdingBack = held;
-      }
-
-      // c) Orienting.
-      if (settings.orienting > 0) {
-        const thing = moment ? options.novel(moment) : null;
-        ws.setSignal(ORIENTING_SIGNAL, thing ? 1 : 0);
-        if (thing) {
-          // A look that runs alongside the running skill takes nothing from it, so it needs no clear field.
-          const beside = options.looksAlongside?.(ws) ?? false;
-          const free = beside || (options.mayOrient(ws) && proposals.length === 0 && !(options.reflexFired?.(ws) ?? false));
-          trace.orienting = { toward: thing.id, kind: thing.kind, proposed: free };
-          if (free) proposals.push({ action: { skill: skills.lookAt, target: thing.id }, urgency: orientUrgency, reason: `something new: ${thing.kind}` });
-        }
       }
 
       // e) Arousal gate.

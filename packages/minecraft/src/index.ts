@@ -25,3 +25,5 @@ export { setupBase } from "./setup-base.js";
 export type { MinecraftCtx } from "./skill-context.js";
 export { primitives } from "./primitives/index.js";
 export { menuSkills, minecraftSkills, tidyBody } from "./skills/index.js";
+export { trackSenses, headingFor, type HeardEvent, type Senses } from "./senses.js";
+export { bearingOf, FIELD, type Bearing } from "./encode/bearing.js";

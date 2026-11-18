@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FOCUS, DEFAULT_NORADRENALINE, DEFAULT_PATIENCE, DEFAULT_PERSONALITY } from "@familiar/neuromodulators";
 import { DEFAULT_LOCOMOTION, DEFAULT_MEDULLA, DEFAULT_POSTURE, DEFAULT_REFLEXES } from "@familiar/minecraft";
-import { DEFAULT_BRAINSTEM } from "@familiar/region-brainstem";
+import { DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS } from "@familiar/region-brainstem";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, memory: DEFAULT_MEMORY };
 
 let dir: string;
 let file: string;
@@ -71,6 +71,15 @@ describe("loadBotConfig", () => {
     // A hard reflex is on or off: nothing in between.
     await expect(loadBotConfig("Half", file)).rejects.toThrow(/reflexes.painWithdrawal must be 0 or 1/);
     await expect(loadBotConfig("List", file)).rejects.toThrow(/reflexes.innateHurts must be a list/);
+  });
+
+  it("reads the colliculus block: the weights, the threshold and each part's strength", async () => {
+    await writeFile(file, JSON.stringify({ Jumpy: { colliculus: { threshold: 0.2, weights: { looming: 2 }, fieldOfView: 1 } }, Bad: { colliculus: { hearing: 2 } }, Odd: { colliculus: { weights: { hostile: 1 } } } }));
+    // A bot may give only some weights: the rest keep their defaults.
+    expect((await loadBotConfig("Jumpy", file)).colliculus).toEqual({ ...DEFAULT_COLLICULUS, threshold: 0.2, fieldOfView: 1, weights: { ...DEFAULT_COLLICULUS.weights, looming: 2 } });
+    expect((await loadBotConfig("Nobody", file)).colliculus.fieldOfView).toBe(0);
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow(/colliculus.hearing must be 0 to 1/);
+    await expect(loadBotConfig("Odd", file)).rejects.toThrow(/colliculus.weights.hostile is not a feature/);
   });
 
   it("reads the posture block: what the bot is born knowing is loose, and each part's strength", async () => {

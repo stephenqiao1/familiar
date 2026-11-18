@@ -4,7 +4,7 @@ The bot's decisions come from **regions** (brain parts). Regions never call each
 share one **workspace** (shared memory), and one **arbiter** picks which proposal to act on.
 
 ```
-Workspace (state · goal · signals · recent events)
+Workspace (state · goal · signals · attended · recent events)
    ▲ read/write            ▲ read/write          ▲ read/write
 Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
 (layer 0, every tick)      Jev, every tick       LLM, every 15 s in the background
@@ -13,9 +13,11 @@ Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
  Medulla: vital signs and  │                     │ and hold reflexes back (holdBack)
    the urges of upkeep     │                     │
  Brainstem: reflex gains,  │                     │
-   startle, orienting,     │   ◄── paused while asleep and undisturbed ──►
-   loaded responses,
-   arousal gate
+   startle, loaded         │   ◄── paused while asleep and undisturbed ──►
+   responses, arousal gate
+ Colliculus: the map of
+   where things are; turns
+   the head (look_at)
    │ proposals             │
    ▼                       ▼
 Arbiter: urgency + 0.2 × learned value wins (value from the scorebook, weighed by DA),
@@ -39,7 +41,8 @@ same tick; a signal from a region listed later is read one tick late.
 |---|---|
 | Region | One brain part. Has a `name`, a `layer` (speed rank) and `everyMs` (0 = every tick). |
 | Proposal | A region's suggestion: an action, an `urgency` from 0 to 1, and a `reason`. |
-| Workspace | Shared memory. Holds the world state, the current goal, signals, and recent skill events. |
+| Workspace | Shared memory. Holds the world state, the current goal, signals, the one thing being attended to, and recent skill events. |
+| Attended | The one thing the bot is attending to right now: `{ id, kind, bearing, salience, since }`, or null. Set by the colliculus (`ws.setAttended`); logged each tick. |
 | Signal | A named level from 0 to 1 that one region shares with the others (e.g. `in_danger`, `dopamine`, `patience`, `alarm`). |
 | Goal | What the prefrontal cortex wants the bot working toward: text, steps (and how many are done), what to carry (`wants`), things to watch for (`watchFor`), responses loaded in advance (`ifThen`) and reflexes to hold back (`holdBack`). Instinct reads it each tick. |
 | Hard reflex | A life-saving rule. Always urgency 1; nothing learned, felt or planned can stop it. |
@@ -58,7 +61,7 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `core` | The brain loop (runs regions, asks the arbiter, acts, logs), workspace, skill executor. |
 | `arbiter` | The pickers: `value-weighted` (used) and `highest-urgency`. |
 | `region-reflex` | Runs a list of rules, hard and soft, and logs each fired rule's kind, base urgency, gain and final urgency. |
-| `region-brainstem` | Supplies the reflex gains, a `brainstem` region (startle, orienting, loaded responses, the arousal gate) and a `medulla` region (vital signs and the graded urges of upkeep). |
+| `region-brainstem` | Supplies the reflex gains, a `brainstem` region (startle, loaded responses, the arousal gate), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
 | `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
 | `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
 | `neuromodulators` | Chemical dials, each a region that shares signals (see below). |
@@ -137,11 +140,10 @@ blocks known to hurt within 3 blocks.
   gain = (0.6 + 0.8 × alarm) × bravery factor × hold-back factor, kept within 0.3 to 1.5. Brave
   bots flee less readily and fight more readily; timid bots the reverse. A reflex the goal holds
   back fires at 0.3 of its gain.
-- **Startle.** A hit from something unseen, a hostile first seen within 3 blocks, or an explosion
-  within 16: shares `startle` for one tick, proposes `brace` once (urgency 1) and raises alarm. At
-  most one per 5 seconds.
-- **Orienting.** Something new (a hostile or player coming into view, whoever just hurt the bot):
-  shares `orienting` and proposes `look_at`, only when the bot is idle and nothing faster spoke.
+- **Startle.** A hit from something unseen, a hostile first seen within 3 blocks, or something
+  loud within 16 (an explosion, thunder): shares `startle` for one tick, proposes `brace` once
+  (urgency 1) toward where it came from, and raises alarm. At most one per 5 seconds.
+- Turning to look at things is the colliculus's job (below), not the brainstem's.
 - **Loaded responses.** A goal's `ifThen` (up to 3, e.g. creeper → flee) fires at urgency 0.95 the
   moment the thing appears, without waiting for the planner. At most one per 3 seconds. A response
   naming an unknown skill, a primitive or a reflex-only skill is dropped and logged.
@@ -219,6 +221,101 @@ lowest air, food and health, time spent hurt but too hungry to heal, each upkeep
 often it won, was outvoted or was held back, foods learned as bad, and the vital signs in the 10
 seconds before each death.
 
+## The colliculus: where is it, and how sudden
+
+The colliculus (`colliculus` region, `packages/region-brainstem/src/colliculus-region.ts`;
+Minecraft settings in `packages/minecraft/src/brain/colliculus.ts`; per bot in `bots.json` under
+`colliculus`) turns the bot toward sights and sounds before the rest of the brain has worked out
+what they are. It runs every tick, never calls a model, and can be left out with `--regions`
+(then nothing turns the head, and `attended` stays null).
+
+**What the eyes and ears deliver** (state schema 15; `encode/perceive.ts`, `senses.ts`):
+
+| Field | What it says |
+|---|---|
+| `bearing` (on each nearby mob, player and listed block) | Which way it lies from where the head faces: `side` (ahead, left, right, behind) and `angle` in degrees, positive to the left |
+| `seen` | Within the field of view (110 degrees either side; 30 is the sharp middle) with nothing opaque in the way. Glass does not block sight. |
+| `closing`, `speed` | How fast it is coming nearer by its own movement, and how fast it is moving at all, in blocks per second. Walking up to a still thing does not make it close in. |
+| `nearby.sudden` | Things that just changed in view: `appeared`, `started_moving`, `changed` (a block placed, broken, opened or shut within 8 blocks) or `looming` (closing at 4 blocks a second or more, or a projectile heading this way) |
+| `nearby.heard` | Sounds in the last 2 seconds: `{ type, bearing, dist, position, loudness }`. It replaces `nearby.loud`. |
+| `self.gaze` | What the head is pointed at: the nearest seen thing within 12 degrees of straight ahead (or null), and the compass heading in degrees |
+
+*What can be heard.* On 1.21.11 Mineflayer names sounds wrongly (a cow's hurt arrives as
+"coral_block.step"), so nothing is told apart by its sound name. What arrives reliably is used:
+`explosion` (with its centre), `thunder` (a lightning bolt appearing), `hurt` (something nearby
+hurt), `door` (a door, gate or trapdoor opening or shutting), `shot` (a projectile appearing),
+and `sound` (anything else: only where it came from and how loud). Left out: which creature made
+a sound, footsteps as such, chest lids and note blocks. As a **stand-in** for footsteps and
+growls, a hostile within 8 blocks that is not seen is heard faintly, as `presence`, with its
+bearing. That is the one place where what a thing is leaks into the senses, and it is one
+function: `unseenHostileHeard` in `encode/perceive.ts`.
+
+**The map.** Everything seen, heard and felt is scored by physical features only:
+
+    salience = suddenness + motion + looming + nearness + loudness + touch   (each weighted)
+
+| Feature | From | Default weight |
+|---|---|---|
+| suddenness | Just appeared, started moving or changed; a sound that was not there last tick | 0.5 |
+| motion | Its speed (full at 4 blocks a second); in the sharp middle of the view it counts 0.6 as much | 0.3 |
+| looming | Closing at 4 blocks a second is 0.5, at 8 is 1; a projectile heading this way is 1 | 1 |
+| nearness | 1 at the bot, 0 at 16 blocks | 0.25 |
+| loudness | How loud a sound is here | 0.6 |
+| touch | Whatever hurt the bot in the last 0.7 s, or where a push came from | 3 |
+
+The weights are one table in `bots.json` (`colliculus.weights`). With the default threshold
+(0.45) a still thing never wins by being near; something that appears, starts to move, changes,
+comes fast or is loud does, and touch beats everything. **What a thing is never enters**: the
+arithmetic (`salience.ts`) takes the six features and nothing else, the Minecraft side builds
+them from physical facts only (`featuresOf`), and tests fail if a kind, type or hostile field
+reaches either.
+
+**Bias from above** (`topDown`). A kind named in the goal's `watchFor` gets 0.4 added. The
+threshold falls with alarm (by up to 0.25) and arousal, and rises by 0.3 during a skill that
+marks itself `demanding`. Asleep, only touch and sounds of loudness 0.5 or more get through.
+
+**Habituation** (`habituation`). A thing that wins a look and brings nothing (no damage, no
+reward) counts 0.8 as much next time, per thing and per kind-at-place (to 8 blocks). What was lost
+comes back over about a minute, and at once if the thing does something new (starts moving,
+comes fast, changes). The thing just looked at cannot win again for 3 seconds unless it looms or
+touches.
+
+**One winner.** The most striking thing above the threshold becomes `attended` in the
+workspace. It is held for at least 1 second and let go after 2 unless it is still the most
+striking. At most one new look per second.
+
+**What it does about it.**
+- *Turns to it*: proposes `look_at` at the winner, urgency 0.35 to 0.7 by salience. Beside a
+  skill that leaves the head free the look runs alongside (see "Different body parts at the same
+  time"). With nothing running it takes over at full urgency, unless a reflex, a startle or a
+  loaded response spoke that tick. Otherwise it competes in the arbiter.
+- *Never interrupts* a hard reflex's skill or a demanding skill, except for touch and looming.
+- *Wakes the brain*: a new sound or a new sudden thing triggers a tick at once
+  (`isSignificantChange`).
+- *Looming*: shares a `looming` signal (0 to 1). It raises alarm as it starts (`brain/alarm.ts`,
+  0.6 at full), and the `threat_approaching` reflex treats a looming thing as approaching
+  whatever its distance: it flees from the thing itself if that is a creature, else from the
+  nearest hostile in sight (most likely what threw it). There is no list of which mobs shoot.
+- Shares `orienting` (1 on the tick of a new winner), as the brainstem did.
+
+**When nothing stands out** (`scanning`). Travelling, the head looks where the body is going.
+Standing or idling, every 4 seconds it glances toward the compass direction looked at longest
+ago, so things behind get seen. The `idle` skill no longer looks around itself.
+
+**Seeing only what is in view** (`fieldOfView`, off by default; `brain/field-of-view.ts`). With
+it on, the deciding layers (instinct, planner) are told only about things that are seen, heard
+(a sound from where they stand, which is how the footsteps stand-in reports an unseen hostile)
+or within 2 blocks. A thing seen lately stays known for 10 seconds after it leaves view, marked
+`lastSeen: { msAgo, at }`. The reflexes, the medulla and the colliculus itself still read the
+full state. The bot `Wary` in `bots.json` has it on.
+
+**In the trace** (`colliculus`): `threshold`, `top` (the three most striking things, each with
+its parts), `winner` (and why), `look` (target, urgency, and `how`: alongside, takes over or
+competes), `scan`, `damped` and `worstMs` (the map should stay under 2 ms). `pnpm brain-report`
+has a COLLICULUS section: looks per minute, what drew them (sight, sound, touch, looming), the
+median time from event to head turned, how the looks ran, what was habituated to, and
+"blindsided" events (hurt by something not attended in the 5 seconds before).
+
 ## Balance and posture
 
 The vestibular part of the brainstem: the bot's sense of balance, and the adjustments that keep
@@ -226,7 +323,7 @@ it steady. It builds on `hold_ground`, `edge_guard` and the checks in `safety.ts
 `packages/minecraft/src/posture/` and `encode/balance.ts`; each bot's settings are the `posture`
 block in `bots.json` (`brain/posture.ts`).
 
-**The sense of balance** (state schema 14, read fresh every tick):
+**The sense of balance** (state schema 14 on, read fresh every tick):
 
 | Field | What it says |
 |---|---|
@@ -308,7 +405,8 @@ that hurt to touch is.
 
 **Being moved somewhere else.** When `displaced` is set: the journey stops and the locomotion
 controller forgets its stuck and avoid marks (`locomotion.forget()`); noradrenaline raises
-`replan` so the planner looks again; everything in view counts as new, so orienting can fire;
+`replan` so the planner looks again; the senses forget what they were tracking, so everything in
+view appears afresh and the colliculus can turn to it;
 and `hold_ground` does not. A death and respawn far away goes the same way.
 
 **In the trace** (`brainstem.posture`): `support`, `balance`, `landing` while falling,
@@ -351,14 +449,15 @@ else is built from, and the **single doorway** to the bot's body.
   reacts to it yet; the hook for a later prediction checker is marked in `primitive.ts`.
 - **A container stays open only for container work.** `open` leaves the container open for
   `move_item` and `close`. Any other primitive closes it first.
-- **Different body parts at the same time** (`--same-time`, off by default). A skill names the
-  parts it uses (`parts`); one that names none uses all three. With the flag on, one head-only
-  primitive (a look) may run alongside a running skill that leaves the head free: walking
-  (`go_to`, `return_to_base`, `flee`) and eating. The main action always wins. While walking, the
+- **Different body parts at the same time.** A skill names the parts it uses (`parts`); one that
+  names none uses all three. One head-only primitive (a look) may run alongside a running skill:
+  always beside one that uses no part at all (`idle`, whose `parts` is the empty list), and with
+  `--same-time` (off by default) beside any that leaves the head free: walking (`go_to`,
+  `return_to_base`, `flee`) and eating. The main action always wins. While walking, the
   look is held for a second: the head turns to the target and the legs keep their direction by
   pressing other keys, so the bot looks one way and walks another. `gaze.ts` decides where to
   look and which keys that takes; the locomotion controller knows whether the bot is walking
-  plainly and which way, and presses them. The brainstem's orienting look uses this.
+  plainly and which way, and presses them. The colliculus's look uses this.
 - **Learned skills** are chains of primitives kept as data, never code. The runner
   (`packages/core/src/chain.ts`) runs the steps in order, stops at the first failure, and returns
   each step's result and changes. Any chain in `data/<bot>/learned-skills.json`
@@ -495,6 +594,11 @@ in `data/<name>/`.
 | Add a vital sign | `Vitals` and a signal name in `packages/region-brainstem/src/` (`medulla-region.ts`, `signals.ts`), and its reading in `playerVitals` in `packages/minecraft/src/brain/medulla.ts` |
 | Add a cure, or change how sick an effect makes the bot | `CURES` and `SICKNESS` in `packages/minecraft/src/brain/medulla.ts` |
 | Change how many meals it takes to learn a food is bad | `MEALS_TO_LEARN` in `packages/minecraft/src/gut.ts` |
+| Change what makes something striking | `bots.json`: `colliculus.weights` (one bot), or `DEFAULT_COLLICULUS` in `packages/region-brainstem/src/colliculus-settings.ts`; how each feature is measured is `featuresOf` in `packages/minecraft/src/brain/colliculus.ts` |
+| Make a bot jumpier or calmer | `bots.json`: `colliculus.threshold` (low: jumpy; high: unbothered) |
+| Add a sound the bot can hear | `packages/minecraft/src/senses.ts`: listen for the event, call `hear("<type>", position)`, and give it a loudness in `LOUD` |
+| Replace the stand-in for footsteps | `unseenHostileHeard` in `packages/minecraft/src/encode/perceive.ts` |
+| Make the bot know only what it sees | `bots.json`: `colliculus.fieldOfView: 1` |
 | Add a reason to refuse an action | `packages/minecraft/src/posture/rules.ts` (`breakReason`, `placeReason` or `moveReason`: return a plain sentence, or null) |
 | Make something new ask the check | Call `postureCheck(bot, "<action>", { kind: "break" \| "place" \| "move", ... })` before acting, and return its reason as the failure |
 | Change what the bot is born knowing about surfaces | `bots.json`: `posture.innateLoose` (an empty list makes it learn every loose block by digging under it) |

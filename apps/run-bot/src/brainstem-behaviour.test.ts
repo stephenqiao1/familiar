@@ -15,17 +15,21 @@ import {
   DEFAULT_PATIENCE,
   DEFAULT_PERSONALITY,
 } from "@familiar/neuromodulators";
-import { DEFAULT_BRAINSTEM, type BrainstemSettings } from "@familiar/region-brainstem";
+import { DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
 import type { FiredReflex } from "@familiar/region-reflex";
 import { describe, expect, it } from "vitest";
 import { createArbiter, createBrain } from "./brain.js";
 
 const signal = new AbortController().signal;
-const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, orienting: 0, loadedResponses: 0, holdBack: 0, arousalGate: 0, bodySignals: 0 };
+const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, loadedResponses: 0, holdBack: 0, arousalGate: 0, bodySignals: 0 };
 type Mob = MinecraftStateData["nearby"]["mobs"][number];
 const mob = (type: string, dist: number, id = 1): Mob => ({ id: `entity:${id}`, type, dist, hostile: true, reachable: true });
 
-type Patch = { self?: Partial<MinecraftStateData["self"]>; mobs?: Mob[]; night?: boolean };
+type Near = MinecraftStateData["nearby"];
+type Patch = { self?: Partial<MinecraftStateData["self"]>; mobs?: Mob[]; night?: boolean; sudden?: Near["sudden"]; heard?: Near["heard"] };
+const LEFT = { side: "left" as const, angle: 60 };
+/** A mob that has just come into view: on the list, and among the things that suddenly changed. */
+const appears = (m: Mob, what: Near["sudden"][number]["what"] = "appeared"): Patch => ({ mobs: [m], sudden: [{ id: m.id, what, bearing: LEFT, dist: m.dist }] });
 
 /** Healthy, fed and alone by day, unless the patch says otherwise. */
 function state(p: Patch, ms: number): State {
@@ -68,10 +72,11 @@ function state(p: Patch, ms: number): State {
       landing: null,
       displaced: false,
       balance: 1,
+      gaze: { id: null, yaw: 0 },
       locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
       ...p.self,
     },
-    nearby: { hazards: [], mobs: p.mobs ?? [], blocks: [], players: [], loud: [] },
+    nearby: { hazards: [], mobs: p.mobs ?? [], blocks: [], players: [], sudden: p.sudden ?? [], heard: p.heard ?? [] },
     memory: null,
     current: null,
   };
@@ -90,9 +95,9 @@ const skills = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; only?: string[]; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; only?: string[]; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
   const store = createWorkspace();
-  const calls = { engine: 0, planner: 0, menus: [] as string[][] };
+  const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
   const engine: DecisionEngine = {
     name: "fake",
     async decide(_state, questions: Question[]): Promise<Answer[]> {
@@ -101,6 +106,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; only?: string[];
       const next = questions.find((q) => q.kind === "choice" && q.id === "next_action");
       if (next?.kind !== "choice") return [];
       calls.menus.push(next.options);
+      calls.shown.push(_state);
       const choice = store.viewFor("x").current?.skill ?? "idle";
       return [{ kind: "choice", id: "next_action", choice, probabilities: { [choice]: 0.9 }, confidence: 0.9 }];
     },
@@ -125,6 +131,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; only?: string[];
       noradrenaline: DEFAULT_NORADRENALINE,
       focus: DEFAULT_FOCUS,
       brainstem: { ...DEFAULT_BRAINSTEM, ...options.brainstem },
+      colliculus: { ...DEFAULT_COLLICULUS, ...options.colliculus },
       sameTime: options.sameTime ?? false,
       memory: createMemory(),
       persistence,
@@ -226,28 +233,29 @@ describe("reflex gains through the real brain", () => {
 
 describe("defence by distance through the real brain", () => {
   it("a far threat draws a look, not a retreat, and the look beats idling", async () => {
-    const { tick, value } = bot();
+    const { store, tick, value } = bot();
     await tick({}, "idle");
-    const out = await tick({ mobs: [mob("zombie", 12)] }, "idle");
+    const out = await tick(appears(mob("zombie", 12)), "idle");
     expect(out.reflexes).toEqual([]);
     expect(value("orienting")).toBe(1);
-    expect(out.winner).toMatchObject({ region: "brainstem", action: { skill: "look_at", target: "entity:1" } });
+    expect(out.winner).toMatchObject({ region: "colliculus", action: { skill: "look_at", target: "entity:1" } });
+    expect(store.attended()).toMatchObject({ id: "entity:1", kind: "zombie", bearing: "ahead" });
     expect(out.candidates.some((c) => "skill" in c.action && c.action.skill === "flee")).toBe(false);
   });
 
-  it("a look never competes with a reflex: a threat that appears close gets the reflex, not a look", async () => {
+  it("a look never takes over from a reflex: a threat that appears close gets the reflex, and the look only competes", async () => {
     const { tick } = bot({ brainstem: { startle: 0 } });
     await tick({}, "idle");
-    const out = await tick({ mobs: [mob("zombie", 6)] }, "idle");
-    expect(out.traces.brainstem?.orienting).toMatchObject({ proposed: false });
-    expect(out.candidates.some((c) => "skill" in c.action && c.action.skill === "look_at")).toBe(false);
+    const out = await tick(appears(mob("zombie", 6)), "idle");
+    expect(out.traces.colliculus?.look).toMatchObject({ how: "competes" });
+    expect(out.won).not.toBe("look_at");
   });
 
-  it("orienting never takes over from a running skill other than idle", async () => {
+  it("a look never takes over from a running skill other than idle: it competes, weakly", async () => {
     const { tick } = bot();
     await tick({}, "go_to");
-    const out = await tick({ mobs: [mob("zombie", 12)] }, "go_to");
-    expect(out.candidates.some((c) => c.region === "brainstem")).toBe(false);
+    const out = await tick(appears(mob("zombie", 12)), "go_to");
+    expect(out.candidates.find((c) => c.region === "colliculus")?.urgency).toBeLessThan(0.7);
     expect(out.won).toBe("go_to");
   });
 
@@ -424,44 +432,154 @@ describe("the decision menu", () => {
 });
 
 describe("looking while the hands are busy (the same-time flag)", () => {
-  it("off: no look is proposed while a skill other than idle runs", async () => {
+  const how = (out: { traces: Record<string, Record<string, unknown>> }) => (out.traces.colliculus?.look as { how: string } | undefined)?.how;
+
+  it("off: a look only competes while a skill other than idle runs", async () => {
     const { tick } = bot();
     await tick({}, "eat");
-    expect((await tick({ mobs: [mob("zombie", 12)] }, "eat")).candidates.some((c) => c.region === "brainstem")).toBe(false);
+    expect(how(await tick(appears(mob("zombie", 12)), "eat"))).toBe("competes");
   });
 
-  it("on: a look is proposed while eating (hands only), but not while a whole-body skill runs", async () => {
+  it("on: a look runs alongside eating (hands only), but only competes with a whole-body skill", async () => {
     const eating = bot({ sameTime: true });
     await eating.tick({}, "eat");
-    expect((await eating.tick({ mobs: [mob("zombie", 12)] }, "eat")).candidates).toContainEqual(expect.objectContaining({ region: "brainstem", action: { skill: "look_at", target: "entity:1" } }));
+    const out = await eating.tick(appears(mob("zombie", 12)), "eat");
+    expect(out.candidates).toContainEqual(expect.objectContaining({ region: "colliculus", action: { skill: "look_at", target: "entity:1" } }));
+    expect(how(out)).toBe("alongside");
     const walking = bot({ sameTime: true });
     await walking.tick({}, "go_to");
-    expect((await walking.tick({ mobs: [mob("zombie", 12)] }, "go_to")).candidates.some((c) => c.region === "brainstem")).toBe(false);
+    expect(how(await walking.tick(appears(mob("zombie", 12)), "go_to"))).toBe("competes");
   });
-});
 
-describe("a look alongside a reflex's own skill (the same-time flag)", () => {
-  it("is still proposed when the reflex that fired runs a skill that leaves the head free", async () => {
+  it("is still proposed alongside when the reflex that fired runs a skill that leaves the head free", async () => {
     const starving = { self: { food: 4, foodItems: 3 } };
     const eating = bot({ sameTime: true });
     await eating.tick(starving, "eat");
-    const out = await eating.tick({ ...starving, mobs: [mob("zombie", 12)] }, "eat");
+    const out = await eating.tick({ ...starving, ...appears(mob("zombie", 12)) }, "eat");
     expect(out.reflexes.map((r) => r.rule)).toEqual(["eat_when_starving"]);
-    expect(out.candidates).toContainEqual(expect.objectContaining({ region: "brainstem", action: { skill: "look_at", target: "entity:1" } }));
+    expect(how(out)).toBe("alongside");
   });
-});
 
-describe("looking while walking (the same-time flag)", () => {
-  it("on: a look is proposed while a walking skill runs, since walking leaves the head free", async () => {
+  it("on: a look runs alongside a walking skill, since walking leaves the head free", async () => {
     const walk = skill("walk", { parts: ["legs", "hands"] });
     skills.push(walk);
     try {
       const walking = bot({ sameTime: true });
       await walking.tick({}, "walk");
-      expect((await walking.tick({ mobs: [mob("zombie", 12)] }, "walk")).candidates).toContainEqual(expect.objectContaining({ region: "brainstem", action: { skill: "look_at", target: "entity:1" } }));
+      expect(how(await walking.tick(appears(mob("zombie", 12)), "walk"))).toBe("alongside");
     } finally {
       skills.pop();
     }
+  });
+
+  it("a skill that uses no part of the body (idling) always has looks beside it, flag or not", async () => {
+    const still = skill("stand", { parts: [] });
+    skills.push(still);
+    try {
+      const { tick } = bot();
+      await tick({}, "stand");
+      expect(how(await tick(appears(mob("zombie", 12)), "stand"))).toBe("alongside");
+    } finally {
+      skills.pop();
+    }
+  });
+});
+
+describe("the colliculus through the real brain", () => {
+  const BEHIND = { side: "behind" as const, angle: 180 };
+  const bang = { type: "explosion", bearing: BEHIND, dist: 9, position: { x: 0, y: 63, z: 9 }, loudness: 0.75 };
+
+  it("startle braces toward where the bang came from", async () => {
+    const { tick } = bot();
+    await tick();
+    const out = await tick({ heard: [bang] });
+    expect(out.winner).toMatchObject({ region: "brainstem", action: { skill: "brace", target: "pos:0,63,9" } });
+    // The look does not take over on the tick the startle spoke; the map still has the bang on top.
+    expect(out.traces.colliculus?.winner).toMatchObject({ id: "pos:0,63,9", via: "sound" });
+  });
+
+  it("looming raises alarm at once, and makes a far thing count as approaching in the defence reflexes", async () => {
+    const { tick, value } = bot({ brainstem: { startle: 0 } });
+    await tick({ mobs: [mob("skeleton", 14)] });
+    expect(value("alarm")).toBe(0);
+    const calm = await tick({ mobs: [mob("skeleton", 14)] });
+    expect(calm.reflexes).toEqual([]);
+    // An arrow heading this way: the far skeleton is now something to get away from.
+    const arrow = { id: "entity:9", what: "looming" as const, bearing: LEFT, dist: 12 };
+    const out = await tick({ mobs: [mob("skeleton", 14)], sudden: [arrow] });
+    expect(value("looming")).toBe(1);
+    expect(value("alarm")).toBeGreaterThanOrEqual(0.6);
+    expect(out.reflexes).toMatchObject([{ rule: "threat_approaching", skill: "flee" }]);
+    expect(out.candidates).toContainEqual(expect.objectContaining({ region: "reflex", action: { skill: "flee", target: "entity:1" } }));
+    expect(out.traces.colliculus?.winner).toMatchObject({ id: "entity:9", why: "sight: looming" });
+  });
+
+  it("with looming switched off, an arrow is just something sudden", async () => {
+    const { tick, value } = bot({ brainstem: { startle: 0 }, colliculus: { looming: 0 } });
+    await tick({ mobs: [mob("skeleton", 14)] });
+    const out = await tick({ mobs: [mob("skeleton", 14)], sudden: [{ id: "entity:9", what: "looming", bearing: LEFT, dist: 12 }] });
+    expect(value("looming")).toBeUndefined();
+    expect(out.reflexes).toEqual([]);
+  });
+
+  it("with the colliculus region off: no looks are proposed, attended stays null, and everything else runs", async () => {
+    const only = ["reflex", "medulla", "brainstem", "acetylcholine", "dopamine", "noradrenaline", "hippocampus", "instinct", "serotonin", "prefrontal"];
+    const { store, tick, value } = bot({ only });
+    await tick({}, "idle");
+    const out = await tick({ ...appears(mob("zombie", 12)), heard: [bang] }, "idle");
+    expect(out.candidates.some((c) => "skill" in c.action && c.action.skill === "look_at")).toBe(false);
+    expect(store.attended()).toBeNull();
+    expect(value("orienting")).toBeUndefined();
+    expect(out.errors).toEqual([]);
+    // Startle, the reflexes and Jev are all still there.
+    expect(out.winner).toMatchObject({ region: "brainstem", action: { skill: "brace" } });
+    const close = await tick({ mobs: [mob("zombie", 6)] }, "idle");
+    expect(close.reflexes.map((r) => r.rule)).toEqual(["threat_approaching"]);
+    // And without it, something looming is not a reason to retreat.
+    expect((await tick({ mobs: [mob("skeleton", 14)], sudden: [{ id: "entity:9", what: "looming", bearing: LEFT, dist: 12 }] })).reflexes).toEqual([]);
+  });
+
+  describe("with the field of view on", () => {
+    const seen = (m: Mob, yes: boolean): Mob => ({ ...m, seen: yes, bearing: yes ? LEFT : BEHIND, closing: 0 });
+    const toldOf = (state: State | undefined) => (state?.data as unknown as MinecraftStateData).nearby.mobs;
+
+    it("a thing behind and silent is not reported to the deciding layers; the reflexes still feel the real world", async () => {
+      const { tick, calls } = bot({ colliculus: { fieldOfView: 1 } });
+      await tick();
+      const cow = { ...seen(mob("cow", 12, 2), false), hostile: false };
+      const out = await tick({ mobs: [cow, seen(mob("zombie", 10, 3), true)] });
+      expect(toldOf(calls.shown.at(-1)).map((m) => m.id)).toEqual(["entity:3"]);
+      // The planner is told the same.
+      expect(out.errors).toEqual([]);
+      // Off: everything within range is told, as before.
+      const all = bot();
+      await all.tick({ mobs: [cow] });
+      expect(toldOf(all.calls.shown.at(-1)).map((m) => m.id)).toEqual(["entity:2"]);
+    });
+
+    it("it is reported once heard or looked at, and stays known for about 10 seconds after it leaves view", async () => {
+      const { tick, calls } = bot({ colliculus: { fieldOfView: 1 } });
+      const zombie = mob("zombie", 12);
+      await tick({ mobs: [seen(zombie, false)] });
+      expect(toldOf(calls.shown.at(-1))).toEqual([]);
+      // Looked at: in view now.
+      await tick({ mobs: [seen(zombie, true)] });
+      expect(toldOf(calls.shown.at(-1)).map((m) => m.id)).toEqual(["entity:1"]);
+      // Out of view again: remembered, marked with how long ago and where.
+      await tick({ mobs: [seen(zombie, false)] }, null, 4000);
+      expect(toldOf(calls.shown.at(-1))).toMatchObject([{ id: "entity:1", seen: false, lastSeen: { msAgo: 4000 } }]);
+      await tick({ mobs: [seen(zombie, false)] }, null, 7000);
+      expect(toldOf(calls.shown.at(-1))).toEqual([]);
+      // Heard: a sound from where it stands (behind, 12 blocks) makes it known again.
+      await tick({ mobs: [seen(zombie, false)], heard: [{ type: "sound", bearing: BEHIND, dist: 12, position: { x: 0, y: 63, z: 12 }, loudness: 0.3 }] });
+      expect(toldOf(calls.shown.at(-1)).map((m) => m.id)).toEqual(["entity:1"]);
+    });
+
+    it("anything within 2 blocks is felt, seen or not", async () => {
+      const { tick, calls } = bot({ colliculus: { fieldOfView: 1 } });
+      await tick({ mobs: [seen(mob("zombie", 2), false)] });
+      expect(toldOf(calls.shown.at(-1)).map((m) => m.id)).toEqual(["entity:1"]);
+    });
   });
 });
 
@@ -501,15 +619,6 @@ describe("balance and posture through the real brain", () => {
     expect(moved.traces.brainstem?.posture).toMatchObject({ displaced: true });
     await tick();
     expect(value("replan")).toBe(0);
-  });
-
-  it("moved somewhere else: whatever is in view there is new, so a look is proposed", async () => {
-    const { tick } = bot();
-    await tick({ mobs: [mob("zombie", 12)] });
-    const same = await tick({ mobs: [mob("zombie", 12)] });
-    expect(same.traces.brainstem?.orienting).toBeUndefined();
-    const moved = await tick({ mobs: [mob("zombie", 12)], self: { displaced: true } });
-    expect(moved.traces.brainstem?.orienting).toMatchObject({ kind: "zombie" });
   });
 });
 

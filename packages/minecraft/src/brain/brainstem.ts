@@ -9,12 +9,14 @@ import { postureTrace, unsteadyOf } from "./posture.js";
 import { minecraftDataOf } from "./read-state.js";
 import { CONTACT_DISTANCE, FAR_DISTANCE, playerReflexes } from "./reflexes.js";
 
-// The player's brainstem settings: what startles it, what draws its eye, how its body feels.
+// The player's brainstem settings: what startles it and how its body feels. (What draws its eye is in colliculus.ts.)
 // Add a startle detector: write one here and add it to playerStartles.
 
 const MAX = { health: 20 };
 /** A loud event this close startles. */
 const LOUD_WITHIN = 16;
+/** Only a sound this loud here startles (an explosion or thunder; not a door or a cow). */
+const LOUD_ENOUGH = 0.5;
 /** The skills a soft reflex may propose, and which way each takes the bot. */
 const LEANINGS: Record<string, Leaning> = { flee: "away", attack: "toward", eat: null, steady: null };
 const IDLE = "idle";
@@ -23,14 +25,6 @@ const IDLE = "idle";
 export function leaningOf(skill: string): Leaning {
   return LEANINGS[skill] ?? null;
 }
-
-/**
- * A look is proposed at full urgency. The spec's 0.35 never won in play: idling scores about 0.9
- * once its learned value and stay bonus are added. This is safe because the brainstem only
- * proposes a look when the bot is idle (or doing nothing) and no reflex, startle or loaded
- * response spoke on the same tick, and a look is over in a moment.
- */
-const LOOK_URGENCY = 1;
 
 /** A detector that reads two Minecraft states; silent before the first one arrives. */
 function detector(name: string, check: (before: MinecraftStateData, after: MinecraftStateData) => { source: Thing | null } | null): StartleDetector {
@@ -68,28 +62,18 @@ export const hostileUpClose = detector("hostile_up_close", (a, b) => {
   return mob ? { source: { id: mob.id, kind: mob.type } } : null;
 });
 
-/** An explosion close by. Its direction is not in the state, so there is nothing to face. */
+/**
+ * Something loud close by (an explosion, thunder). The source is where the sound came from, so
+ * the bot braces toward it.
+ */
 export const loudNearby = detector("loud_nearby", (a, b) => {
-  const loud = (d: MinecraftStateData) => d.nearby.loud.filter((e) => e.dist <= LOUD_WITHIN).length;
-  return loud(b) > loud(a) ? { source: null } : null;
+  const loud = (d: MinecraftStateData) => d.nearby.heard.filter((h) => h.dist <= LOUD_WITHIN && h.loudness >= LOUD_ENOUGH);
+  const bang = loud(b).sort((x, y) => y.loudness - x.loudness)[0];
+  return bang && loud(b).length > loud(a).length ? { source: { id: `pos:${bang.position.x},${bang.position.y},${bang.position.z}`, kind: bang.type } } : null;
 });
 
 /** Everything that startles the player, most telling first. */
 export const playerStartles: StartleDetector[] = [hostileUpClose, hurtUnseen, loudNearby];
-
-/**
- * Something new or sudden worth a look: whoever just hurt the bot, else a hostile or a player
- * that has just come into view (within 16 blocks).
- */
-export function somethingNew(before: MinecraftStateData, after: MinecraftStateData): Thing | null {
-  const by = hurtBy(before, after);
-  const attacker = by === null ? null : thingFor(after, by);
-  if (attacker) return attacker;
-  // Moved somewhere else all at once: nothing here has been seen before.
-  const known = new Set(after.self.displaced ? [] : [...before.nearby.mobs, ...before.nearby.players].map((t) => t.id));
-  const fresh = [...hostilesInView(after), ...after.nearby.players].filter((t) => !known.has(t.id)).sort((x, y) => x.dist - y.dist)[0];
-  return fresh ? { id: fresh.id, kind: fresh.type } : null;
-}
 
 /** Night, nothing hostile in view, and nothing to do: ready for bed. */
 export function drowsy(ws: Workspace): boolean {
@@ -101,11 +85,6 @@ export function drowsy(ws: Workspace): boolean {
 /** The names a goal may hold back: every soft reflex, and the skills they propose. */
 export const HOLDABLE = [...playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name), ...MEDULLA_URGES, ...Object.keys(LEANINGS)];
 
-/** Whether a skill leaves the head free (a skill that declares no parts uses the whole body). */
-export function headFree(skill: { parts?: string[] } | undefined): boolean {
-  return skill?.parts !== undefined && !skill.parts.includes("head");
-}
-
 /** One line for the planner: which reflexes it may hold back, and that some cannot be. */
 export const REFLEX_NOTE =
   `Reflexes you may hold back (holdBack): ${HOLDABLE.join(", ")}. ` +
@@ -115,25 +94,16 @@ export const REFLEX_NOTE =
 export function playerBrainstem<Ctx>(
   skills: Skill<Ctx>[],
   ctx: Ctx,
-  sameTime = false,
   sore: () => number = () => 0,
   /** How strongly unsteadiness is shared (0: not at all), and what the posture system did since last asked. */
   posture: { unsteady: number; notes?: () => PostureNotes } = { unsteady: 0 },
 ): Pick<
   BrainstemOptions,
-  "startle" | "novel" | "mayOrient" | "thingsOf" | "responseProblem" | "acceptsTarget" | "holdable" | "asleep" | "drowsy" | "body" | "postureNotes" | "skills" | "orientUrgency" | "looksAlongside"
+  "startle" | "thingsOf" | "responseProblem" | "acceptsTarget" | "holdable" | "asleep" | "drowsy" | "body" | "postureNotes" | "skills"
 > {
   const find = (name: string) => skills.find((s) => s.name === name);
   return {
     startle: playerStartles,
-    novel({ before, after }) {
-      const [a, b] = [minecraftDataOf(before), minecraftDataOf(after)];
-      return a && b ? somethingNew(a, b) : null;
-    },
-    // A look never interrupts real work: only idling, or nothing at all.
-    mayOrient: (ws) => ws.current === null || ws.current.skill === IDLE,
-    // With `sameTime` it may instead run alongside a skill that leaves the head free.
-    looksAlongside: (ws) => sameTime && ws.current !== null && headFree(find(ws.current.skill)),
     thingsOf: thingsInView,
     responseProblem(name) {
       const skill = find(name);
@@ -150,7 +120,6 @@ export function playerBrainstem<Ctx>(
       return self ? { health: self.health / MAX.health, stuck: self.locomotion.stuck, sore: sore(), ...(posture.unsteady > 0 ? { unsteady: unsteadyOf(state, posture.unsteady) } : {}) } : null;
     },
     postureNotes: (state) => postureTrace(state, posture.notes?.() ?? {}),
-    skills: { brace: "brace", lookAt: "look_at" },
-    orientUrgency: LOOK_URGENCY,
+    skills: { brace: "brace" },
   };
 }

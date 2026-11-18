@@ -43,7 +43,6 @@
       "bravery": 0.5,
       "gains": 1,
       "startle": 1,
-      "orienting": 1,
       "loadedResponses": 1,
       "holdBack": 1,
       "arousalGate": 1,
@@ -116,6 +115,24 @@
       "righting": 1,
       "displaced": 1,
       "learnSurfaces": 1
+    },
+    "colliculus": {
+      "weights": {
+        "suddenness": 0.5,
+        "motion": 0.3,
+        "looming": 1,
+        "nearness": 0.25,
+        "loudness": 0.6,
+        "touch": 3
+      },
+      "threshold": 0.45,
+      "sight": 1,
+      "hearing": 1,
+      "looming": 1,
+      "topDown": 1,
+      "habituation": 1,
+      "scanning": 1,
+      "fieldOfView": 0
     }
   },
   "Brave": {
@@ -141,6 +158,11 @@
     },
     "posture": {
       "innateLoose": []
+    }
+  },
+  "Wary": {
+    "colliculus": {
+      "fieldOfView": 1
     }
   }
 }

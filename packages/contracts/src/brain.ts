@@ -61,6 +61,20 @@ export interface Signal {
   at: number;
 }
 
+/** The one thing the agent is attending to right now. */
+export interface Attended {
+  /** A target string for the thing (or the place a sound came from). */
+  id: string;
+  /** What kind of thing, as far as anything has said ("zombie", "explosion", "unknown"). */
+  kind: string;
+  /** Which way it lies from where the head faces: "ahead", "left", "right" or "behind". */
+  bearing: string;
+  /** How striking it was when it won attention. */
+  salience: number;
+  /** When it won attention. */
+  since: number;
+}
+
 /** The brain's shared memory: the only way regions communicate. */
 export interface Workspace {
   /** The latest world state. */
@@ -69,6 +83,8 @@ export interface Workspace {
   readonly current: RunningSkill | null;
   readonly goal: Goal | null;
   readonly signals: Readonly<Record<string, Signal>>;
+  /** The one thing being attended to, or null. */
+  readonly attended: Attended | null;
   /** Skill lifecycle events, oldest first, at most the last 20. */
   readonly recentEvents: readonly SkillEvent[];
   /** Replaces the goal. `setBy` and `setAt` are filled in for you; the rest default to none. */
@@ -76,6 +92,8 @@ export interface Workspace {
   /** Drops the goal (e.g. when an alarm cancels the plan). */
   clearGoal(): void;
   setSignal(name: string, value: number): void;
+  /** Says what is being attended to (one thing at a time), or null for nothing. */
+  setAttended(attended: Attended | null): void;
 }
 
 /** What a region returns each time it runs. */

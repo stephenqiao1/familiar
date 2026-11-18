@@ -51,10 +51,11 @@ export function fakeData(p: StatePatch = {}): MinecraftStateData {
       landing: null,
       displaced: false,
       balance: 1,
+      gaze: { id: null, yaw: 0 },
       locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
       ...p.self,
     },
-    nearby: { hazards: [], mobs: [], blocks: [], players: [], loud: [], ...p.nearby },
+    nearby: { hazards: [], mobs: [], blocks: [], players: [], sudden: [], heard: [], ...p.nearby },
     memory: null,
     current: p.current ?? null,
   };
@@ -63,4 +64,9 @@ export function fakeData(p: StatePatch = {}): MinecraftStateData {
 /** For tests: `fakeData(p)` wrapped as a State. */
 export function fakeState(p: StatePatch = {}, timestamp = 0): State {
   return { schemaVersion: SCHEMA_VERSION, tick: 0, timestamp, data: { ...fakeData(p) } };
+}
+
+/** For tests: what the eyes add to a nearby thing, straight ahead and in view unless said otherwise. */
+export function inView(over: Partial<{ bearing: { side: "ahead" | "left" | "right" | "behind"; angle: number }; seen: boolean; closing: number }> = {}) {
+  return { bearing: { side: "ahead" as const, angle: 0 }, seen: true, closing: 0, ...over };
 }

@@ -1,7 +1,6 @@
 import type { Bot } from "mineflayer";
 import { Vec3 } from "vec3";
 import { resetBody } from "./body.js";
-import type { LoudEvent } from "./encode/encode-state.js";
 import { touchingOf } from "./encode/touching.js";
 import type { Hurt } from "./pain.js";
 
@@ -17,6 +16,13 @@ const PUSH = { windowMs: 300, blocks: 0.5 };
 const SLIDE_MS = 300;
 /** The direction of travel is taken over this long; slower than this (blocks) is standing still. */
 const MOTION = { windowMs: 150, blocks: 0.05 };
+
+/** A loud event the bot heard. */
+export interface LoudEvent {
+  type: string;
+  position: Vec3;
+  at: number;
+}
 
 /** A direction across the ground (a unit vector). */
 export interface Heading {

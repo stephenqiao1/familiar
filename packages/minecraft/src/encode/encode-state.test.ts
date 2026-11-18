@@ -74,7 +74,7 @@ describe("encodeState", () => {
     });
     const state = encodeState(bot, 7, { base, current: null, deaths: 2 });
 
-    expect(state).toMatchObject({ schemaVersion: 14, tick: 7 });
+    expect(state).toMatchObject({ schemaVersion: 15, tick: 7 });
     expect(state.data).toEqual({
       time: { isNight: false, lightLevel: 15 },
       self: {
@@ -109,6 +109,7 @@ describe("encodeState", () => {
         inBlock: false,
         pushed: null,
         motion: null,
+        gaze: { id: "entity:43", yaw: 0 },
         support: { on: "stone", kind: "solid", edges: 0, headroom: 3 },
         velocity: { x: 0, y: 0, z: 0, onGround: true },
         landing: null,
@@ -119,12 +120,13 @@ describe("encodeState", () => {
       nearby: {
         hazards: [{ id: "pos:0,62,5", type: "lava", dist: 5 }],
         mobs: [
-          { id: "entity:43", type: "cow", dist: 4, hostile: false, reachable: true },
-          { id: "entity:42", type: "zombie", dist: 6, hostile: true, reachable: true },
+          { id: "entity:43", type: "cow", dist: 4, hostile: false, reachable: true, bearing: { side: "ahead", angle: 0 }, seen: true, closing: 0 },
+          { id: "entity:42", type: "zombie", dist: 6, hostile: true, reachable: true, bearing: { side: "right", angle: -90 }, seen: true, closing: 0 },
         ],
         blocks: [],
         players: [],
-        loud: [],
+        sudden: [],
+        heard: [],
       },
       memory: null,
       current: null,
@@ -133,7 +135,7 @@ describe("encodeState", () => {
 
   it("gives empty lists, not missing keys, in an empty world", () => {
     const data = dataOf(fakeBot());
-    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [], loud: [] });
+    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [], sudden: [], heard: [] });
     expect(data.self).toMatchObject({ bestWeapon: null, foodItems: 0, inventoryFullPct: 0, inventory: {} });
     expect(data.current).toBeNull();
   });
@@ -195,7 +197,7 @@ describe("encodeState", () => {
   it("lists chests, bells and ripe crops, but not unripe ones", () => {
     const blocks = { "3,63,0": "chest", "0,63,6": "bell", "2,63,2": "wheat", "-2,63,2": "wheat" };
     const ages = { "2,63,2": 7, "-2,63,2": 3 };
-    expect(dataOf(fakeBot({ blocks, ages })).nearby.blocks).toEqual([
+    expect(dataOf(fakeBot({ blocks, ages })).nearby.blocks.map(({ id, type, dist }) => ({ id, type, dist }))).toEqual([
       { id: "pos:2,63,2", type: "wheat", dist: 2 },
       { id: "pos:3,63,0", type: "chest", dist: 3 },
       { id: "pos:0,63,6", type: "bell", dist: 6 },
@@ -209,7 +211,7 @@ describe("encodeState", () => {
         entities: [mob(5, "zombie", "hostile", 25, 0), mob(6, "Steve", "player", 2, 0), mob(7, "Alex", "player", 30, 0)],
       }),
     );
-    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [{ id: "entity:6", type: "player", dist: 2 }], loud: [] });
+    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [{ id: "entity:6", type: "player", dist: 2, bearing: { side: "right", angle: -90 }, seen: true, closing: 0 }], sudden: [], heard: [] });
   });
 
   it("dims the sky's light at night", () => {
@@ -247,13 +249,14 @@ describe("encodeState", () => {
     const items = Array.from({ length: 36 }, (_, i) => item(i === 0 ? "diamond_sword" : "cobblestone", 64, i, 10, 1561));
     const bot = fakeBot({ blocks, entities, items });
 
-    it("stays under 3 KB of JSON (and caps each list at 10)", () => {
+    it("stays under 4 KB of JSON (and caps each list at 10)", () => {
       const state = encodeState(bot, 123456, { base, current: { skill: "go_to", target: "pos:1,2,3", startedAt: Date.now() }, deaths: 0 });
       const json = JSON.stringify(state);
       const data = state.data as unknown as MinecraftStateData;
       expect(data.nearby.hazards).toHaveLength(10);
       expect(data.nearby.mobs).toHaveLength(10);
-      expect(json.length).toBeLessThan(3 * 1024);
+      // Each nearby thing now carries its bearing, whether it is seen and how fast it is closing.
+      expect(json.length).toBeLessThan(4 * 1024);
     });
 
     it("encodes in under 20 ms", () => {
@@ -313,17 +316,6 @@ describe("encodeState", () => {
       // No attacker: the game's own name for the damage, and where it happened.
       expect(self(fakeBot(), { lastHurt: hurt(now - 500, null, "cactus") }).lastHurt).toMatchObject({ by: null, kind: "cactus", at: { x: 3, y: 63, z: -2 } });
       expect(self(fakeBot(), { lastHurt: hurt(now - 120_000, "entity:9", "mob_attack") }).lastHurt).toBeNull();
-    });
-
-    it("lists loud events from the last 2 seconds, with their distance", () => {
-      const now = Date.now();
-      const loud = [
-        { type: "explosion", position: new Vec3(6.5, 63, 0.5), at: now - 300 },
-        { type: "thunder", position: new Vec3(6.5, 63, 0.5), at: now - 9000 },
-        { type: "explosion", position: new Vec3(90.5, 63, 0.5), at: now },
-      ];
-      const data = encodeState(fakeBot(), 0, { base, current: null, deaths: 0, loud }).data as unknown as MinecraftStateData;
-      expect(data.nearby.loud).toEqual([{ type: "explosion", dist: 6 }]);
     });
 
     it("feels what it is touching: at the feet, at the head, under the feet and on the four sides", () => {

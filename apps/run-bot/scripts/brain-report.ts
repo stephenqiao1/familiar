@@ -1,5 +1,5 @@
 // Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
-// surprises, reflexes and the brainstem, the medulla, balance and posture, memories, interrupts, warnings and region errors.
+// surprises, reflexes and the brainstem, the medulla, balance and posture, the colliculus, memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -230,6 +230,40 @@ console.log(`DISPLACEMENTS: ${postures.flatMap((p) => p.displaced ?? []).join(";
 console.log(`SURFACES LEARNED: ${postures.flatMap((p) => p.learned ?? []).join("; ") || "none"}`);
 const worstCheck = Math.max(0, ...postures.map((p) => p.worstCheckMs ?? 0));
 console.log(`SLOWEST POSTURE CHECK: ${worstCheck.toFixed(3)} ms${worstCheck > 2 ? " (!! over the 2 ms limit)" : ""}`);
+
+// The colliculus: what turned the head.
+type Look = { target: string; urgency: number; how: string };
+type Won = { id: string; kind: string; via: string; bearing: string; salience: number; why: string };
+const colliculus = ticks.map((t) => trace(t, "colliculus"));
+const looked = ticks.flatMap((t, i) => (colliculus[i]!.look && colliculus[i]!.winner ? [{ t, look: colliculus[i]!.look as Look, won: colliculus[i]!.winner as Won }] : []));
+const glances = colliculus.filter((c) => c.scan !== undefined).length;
+const minutes = Math.max(seconds / 60, 1 / 60);
+console.log(`\nCOLLICULUS: ${looked.length} looks (${(looked.length / minutes).toFixed(1)} a minute), plus ${glances} glances around`);
+const drawnBy = (w: Won) => (w.via === "touch" ? "touch" : w.why.endsWith("looming") ? "looming" : w.via);
+console.log(`DRAWN BY: ${list(count(looked, (l) => drawnBy(l.won)))}; kinds: ${list(count(looked, (l) => l.won.kind), 8)}`);
+const lookEnds = ticks.flatMap((t) => (t.skillEvents ?? []).filter((e) => e.skill === "look_at" && e.type === "done").map(() => t.timestamp));
+const turnTimes = looked.flatMap((l) => {
+  const done = lookEnds.find((at) => at >= l.t.timestamp);
+  return done !== undefined && done - l.t.timestamp <= 3000 ? [done - l.t.timestamp] : [];
+});
+console.log(`EVENT TO HEAD TURNED: ${turnTimes.length ? `median ${middle(turnTimes)} ms, slowest ${Math.max(...turnTimes)} ms (${turnTimes.length} timed, to the nearest tick)` : "none timed"}`);
+const tookOver = looked.filter((l) => l.look.how !== "alongside" && l.t.winner?.region === "colliculus").length;
+console.log(`HOW: ${list(count(looked, (l) => l.look.how))}; of those not alongside, ${tookOver} won and interrupted what was running`);
+const habituated = [...new Set(colliculus.flatMap((c) => Object.keys((c.damped as Record<string, number> | undefined) ?? {})))];
+console.log(`HABITUATED TO: ${habituated.slice(0, 10).join("; ") || "nothing"}${habituated.length > 10 ? ` (and ${habituated.length - 10} more)` : ""}`);
+type Hurt = { msAgo: number; by: string | null };
+const attendedAt = ticks.map((t, i) => ({ at: t.timestamp, id: ((t as Tick & { attended?: { id: string } | null }).attended?.id ?? (colliculus[i]!.attended as string | undefined)) ?? null }));
+const blindsided = ticks.flatMap((t, i) => {
+  const hurt = (bodyOf(t) as { lastHurt?: Hurt | null } | null)?.lastHurt;
+  const before = i > 0 ? (bodyOf(ticks[i - 1]!) as { lastHurt?: Hurt | null } | null)?.lastHurt : null;
+  const fresh = hurt && hurt.by !== null && (!before || hurt.msAgo < before.msAgo);
+  if (!fresh) return [];
+  const sawIt = attendedAt.some((a) => a.id === hurt.by && t.timestamp - a.at <= 5000 && a.at < t.timestamp);
+  return sawIt ? [] : [`tick ${t.tick} by ${hurt.by}`];
+});
+console.log(`BLINDSIDED (hurt by something not attended in the 5 s before): ${blindsided.length}${blindsided.length ? `: ${blindsided.slice(0, 8).join(", ")}` : ""}`);
+const worstMap = Math.max(0, ...colliculus.map((c) => (c.worstMs as number | undefined) ?? 0));
+console.log(`SLOWEST MAP: ${worstMap.toFixed(3)} ms${worstMap > 2 ? " (!! over the 2 ms limit)" : ""}; field of view: ${ticks.some((t) => JSON.stringify(trace(t, "instinct")).includes("lastSeen")) ? "on" : "not seen in use"}`);
 
 // Memory.
 type Recorded = { trigger: string; summary: string; strength: number; merged: boolean };

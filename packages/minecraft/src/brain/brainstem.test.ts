@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { fakeData, fakeState, type StatePatch } from "../encode/state.test-helper.js";
 import { menuSkills } from "../skills/index.js";
 import { startled } from "./alarm.js";
-import { drowsy, HOLDABLE, hostileUpClose, hurtUnseen, leaningOf, loudNearby, playerBrainstem, REFLEX_NOTE, somethingNew } from "./brainstem.js";
+import { drowsy, HOLDABLE, hostileUpClose, hurtUnseen, leaningOf, loudNearby, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
 
 const ws = createWorkspace().viewFor("brainstem");
 const zombie = (dist: number, id = 1) => ({ id: `entity:${id}`, type: "zombie", dist, hostile: true, reachable: true });
@@ -29,21 +29,12 @@ describe("player startle detectors", () => {
     expect(hurtUnseen.check(moment({ self: { lastHurt: { msAgo: 100, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } }, { self: { lastHurt: { msAgo: 600, by: "entity:9", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } }))).toBeNull();
   });
 
-  it("loud nearby: an explosion or thunder within 16 blocks", () => {
-    expect(loudNearby.check(moment({}, { nearby: { loud: [{ type: "explosion", dist: 9 }] } }))).toEqual({ source: null });
-    expect(loudNearby.check(moment({}, { nearby: { loud: [{ type: "explosion", dist: 30 }] } }))).toBeNull();
-  });
-});
-
-describe("somethingNew (orienting)", () => {
-  it("is whoever just hurt the bot, else a hostile or player that has just come into view", () => {
-    const data = (p: StatePatch) => fakeData(p);
-    expect(somethingNew(data({}), data({ nearby: { mobs: [zombie(12)] } }))).toEqual({ id: "entity:1", kind: "zombie" });
-    expect(somethingNew(data({}), data({ nearby: { players: [{ id: "entity:4", type: "player", dist: 9 }] } }))).toEqual({ id: "entity:4", kind: "player" });
-    expect(somethingNew(data({ nearby: { mobs: [zombie(12)] } }), data({ nearby: { mobs: [zombie(11)] } }))).toBeNull();
-    expect(somethingNew(data({}), data({ nearby: { mobs: [{ ...zombie(5), hostile: false, type: "cow" }] } }))).toBeNull();
-    const hurtBy = data({ self: { lastHurt: { msAgo: 5, by: "entity:2", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } }, nearby: { mobs: [zombie(12), zombie(14, 2)] } });
-    expect(somethingNew(data({ nearby: { mobs: [zombie(12), zombie(14, 2)] } }), hurtBy)).toEqual({ id: "entity:2", kind: "zombie" });
+  it("loud nearby: an explosion or thunder within 16 blocks, with where it came from to brace toward", () => {
+    const heard = (type: string, dist: number, loudness: number) => ({ nearby: { heard: [{ type, dist, loudness, bearing: { side: "behind" as const, angle: 180 }, position: { x: 0, y: 63, z: dist } }] } });
+    expect(loudNearby.check(moment({}, heard("explosion", 9, 0.8)))).toEqual({ source: { id: "pos:0,63,9", kind: "explosion" } });
+    expect(loudNearby.check(moment({}, heard("explosion", 30, 0.6)))).toBeNull();
+    // A door or a cow close by is heard, but does not startle.
+    expect(loudNearby.check(moment({}, heard("door", 3, 0.35)))).toBeNull();
   });
 });
 

@@ -1,5 +1,5 @@
 import type { Action } from "./action.js";
-import type { Candidate, Goal, Proposal, Signal } from "./brain.js";
+import type { Attended, Candidate, Goal, Proposal, Signal } from "./brain.js";
 import type { FirstSeen } from "./first-seen.js";
 import type { SkillEvent } from "./skill-event.js";
 import type { State } from "./state.js";
@@ -32,6 +32,8 @@ export interface TickLog {
   alongside?: Candidate;
   goal: Goal | null;
   signals: Record<string, Signal>;
+  /** What the agent was attending to at the end of the tick, if anything. */
+  attended?: Attended | null;
   /** Skill lifecycle events since the previous tick. */
   skillEvents?: SkillEvent[];
   /** Hostile mobs seen for the first time in this tick's state. */

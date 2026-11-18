@@ -50,7 +50,7 @@ describe("isSignificantChange", () => {
 });
 
 describe("isSignificantChange: the body", () => {
-  const state = (self: Partial<MinecraftStateData["self"]> = {}, loud: MinecraftStateData["nearby"]["loud"] = []) => fakeState({ self, nearby: { loud } });
+  const state = (self: Partial<MinecraftStateData["self"]> = {}, heard: MinecraftStateData["nearby"]["heard"] = []) => fakeState({ self, nearby: { heard } });
 
   it("is true when the bot is hurt again, catches fire, falls into lava or runs low on air", () => {
     expect(isSignificantChange(state(), state({ lastHurt: { msAgo: 10, by: null, kind: null, at: { x: 0, y: 63, z: 0 } } }))).toBe(true);
@@ -60,8 +60,17 @@ describe("isSignificantChange: the body", () => {
     expect(isSignificantChange(state({ air: 7 }), state({ air: 6 }))).toBe(true);
   });
 
-  it("is true when something loud happens", () => {
-    expect(isSignificantChange(state(), state({}, [{ type: "explosion", dist: 9 }]))).toBe(true);
+  it("is true when something new is heard, or something in view suddenly changes", () => {
+    const behind = { side: "behind" as const, angle: 180 };
+    const bang = { type: "explosion", dist: 9, loudness: 0.8, bearing: behind, position: { x: 0, y: 63, z: 9 } };
+    expect(isSignificantChange(state(), state({}, [bang]))).toBe(true);
+    expect(isSignificantChange(state({}, [bang]), state({}, [bang]))).toBe(false);
+    // The stand-in for footsteps is there for as long as the mob is: not news each tick.
+    expect(isSignificantChange(state(), state({}, [{ ...bang, type: "presence", loudness: 0.2 }]))).toBe(false);
+    const sudden = (what: "appeared" | "looming") => fakeState({ nearby: { sudden: [{ id: "entity:9", what, bearing: behind, dist: 12 }] } });
+    expect(isSignificantChange(fakeState(), sudden("appeared"))).toBe(true);
+    expect(isSignificantChange(sudden("appeared"), sudden("appeared"))).toBe(false);
+    expect(isSignificantChange(sudden("appeared"), sudden("looming"))).toBe(true);
   });
 
   it("is false while those simply continue", () => {

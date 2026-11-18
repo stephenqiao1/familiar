@@ -20,6 +20,9 @@ import {
   createPlayerReflexes,
   DEFAULT_MEDULLA,
   medullaUrges,
+  createFieldOfView,
+  playerColliculus,
+  toldView,
   DEFAULT_POSTURE,
   wasDisplaced,
   type PostureNotes,
@@ -69,7 +72,20 @@ import {
   type Scorebook,
   type Thing,
 } from "@familiar/neuromodulators";
-import { createBrainstemRegion, createMedullaRegion, createReflexGain, UPPER_PAUSED_SIGNAL, URGE_SIGNAL, type BrainstemSettings } from "@familiar/region-brainstem";
+import {
+  AROUSAL_SIGNAL,
+  createBrainstemRegion,
+  createColliculusRegion,
+  createMedullaRegion,
+  createReflexGain,
+  DEFAULT_COLLICULUS,
+  LOADED_SIGNAL,
+  STARTLE_SIGNAL,
+  UPPER_PAUSED_SIGNAL,
+  URGE_SIGNAL,
+  type BrainstemSettings,
+  type ColliculusSettings,
+} from "@familiar/region-brainstem";
 import { createInstinctRegion } from "@familiar/region-instinct";
 import { createPrefrontalRegion } from "@familiar/region-prefrontal";
 import { createReflexRegion, REFLEX_SIGNAL } from "@familiar/region-reflex";
@@ -111,6 +127,8 @@ export interface BrainParts<Ctx> {
   posture?: PostureSettings;
   /** What the posture system did since last asked (refusals, stance holds, falls, things learned), for the trace. Default: nothing. */
   postureNotes?: () => PostureNotes;
+  /** This bot's colliculus: what makes something striking, and how easily it turns its head (from bots.json). Default: the usual weights, field of view off. */
+  colliculus?: ColliculusSettings;
   /** The foods the bot has just learned are bad, for remembering. Default: it learns none. */
   justLearnedBadFoods?: () => string[];
   /** How sore the bot is right now (1 just after pulling away from pain, fading to 0). Default: never. */
@@ -147,28 +165,41 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const menu = menuSkills(skills, parts.showPrimitives);
   // With the brainstem lesioned (--regions), reflex gains stay at 1 and nothing is ever paused.
   const hasBrainstem = !only || only.includes("brainstem");
+  const hasColliculus = !only || only.includes("colliculus");
   const alarmOf = (ws: Workspace) => ws.signals[ALARM_SIGNAL]?.value ?? 0;
   const medulla = parts.medulla ?? DEFAULT_MEDULLA;
   const posture = parts.posture ?? DEFAULT_POSTURE;
+  const colliculus = parts.colliculus ?? DEFAULT_COLLICULUS;
+  // With the field of view on, the deciding layers are told only what the bot sees, hears or just saw.
+  const view = colliculus.fieldOfView > 0 ? createFieldOfView() : null;
+  const told = (ws: Workspace) => (view ? toldView(ws, view.tell(ws.state)) : ws);
   // The brainstem sets how strongly each soft reflex and each upkeep urge fires (alarm, bravery, the goal's hold-backs).
   // The upkeep urges take a goal's hold-backs, but not alarm or bravery: needing air is no weaker for being calm.
   const upkeepGain = hasBrainstem && brainstem.holdBack > 0 ? createReflexGain({ settings: brainstem, alarmOf: () => NEUTRAL_ALARM, leaningOf: () => null }) : undefined;
   const gainOf = hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? createReflexGain({ settings: brainstem, alarmOf, leaningOf }) : undefined;
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
+  const instinct = playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE, parts.showPrimitives);
   const all: Region[] = [
     createReflexRegion({
-      rules: createPlayerReflexes(parts.reflexes, posture.righting),
+      rules: createPlayerReflexes(parts.reflexes, posture.righting, hasColliculus ? colliculus.looming : 0),
       ...(gainOf ? { gainOf } : {}),
     }), //                                                                                  layer 0, every tick
     // The medulla: vital signs, and the graded urges of upkeep. Left out (--regions), the hard reflexes above still fire.
     createMedullaRegion({ vitals: playerVitals, share: medulla.vitals, urges: medullaUrges(medulla), asleep, ...(upkeepGain ? { gainOf: upkeepGain } : {}) }), // layer 0, every tick
     createBrainstemRegion({
-      ...playerBrainstem(skills, ctx, parts.sameTime, parts.sore, { unsteady: posture.unsteady, ...(parts.postureNotes ? { notes: parts.postureNotes } : {}) }),
+      ...playerBrainstem(skills, ctx, parts.sore, { unsteady: posture.unsteady, ...(parts.postureNotes ? { notes: parts.postureNotes } : {}) }),
       settings: brainstem,
       alarmOf,
-      reflexFired: (ws) => up(ws, REFLEX_SIGNAL),
       hardReflex: (ws) => level(ws, REFLEX_SIGNAL) >= 1,
+    }), //                                                                                  layer 0, every tick
+    // The colliculus: the fast map of where things are and how sudden. It turns the head; left out (--regions), nothing does.
+    createColliculusRegion({
+      ...playerColliculus(skills, parts.sameTime),
+      settings: colliculus,
+      alarmOf,
+      arousalOf: (ws) => level(ws, AROUSAL_SIGNAL, 0.5),
+      spoken: (ws) => up(ws, REFLEX_SIGNAL) || up(ws, STARTLE_SIGNAL) || up(ws, LOADED_SIGNAL),
     }), //                                                                                  layer 0, every tick
     createFocusRegion({
       inputs: playerFocus(memory, skills),
@@ -204,8 +235,10 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       ...(focus.consolidation > 0 ? { resting: (ws: Workspace) => level(ws, FOCUS_SIGNAL, focus.resting) < LOW_FOCUS && level(ws, ALARM_SIGNAL) < CALM_ALARM } : {}),
     }), //                                                                                  layer 0, every tick
     createInstinctRegion({
-      engine,
-      ...playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE, parts.showPrimitives),
+      // Jev is asked about, and shown, only what the bot is told (everything, unless the field of view is on).
+      engine: view ? { ...engine, decide: (state, questions) => engine.decide(view.tell(state), questions) } : engine,
+      questions: (ws) => instinct.questions(told(ws)),
+      toProposals: instinct.toProposals,
       // Asleep and undisturbed: the brainstem pauses the deciding layers, so no engine calls are made.
       paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL),
     }), //                                                                                  layer 1, every tick
@@ -219,7 +252,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createPrefrontalRegion({
       planner,
       describe: (ws) =>
-        describeSituation(ws, menu, storage, [
+        describeSituation(told(ws), menu, storage, [
           ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, parts.memoriesForPlanner?.() ?? NEUTRAL_BUDGET.remembered),
           ...(hasBrainstem && brainstem.holdBack > 0 ? [REFLEX_NOTE] : []),
         ]),

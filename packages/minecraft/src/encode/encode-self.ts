@@ -13,7 +13,7 @@ const INVENTORY_SLOTS = 36;
 const HURT_MEMORY_MS = 60_000;
 const BURNING = new Set(["fire", "soul_fire"]);
 
-export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHurt: Hurt | null = null, now = Date.now()): Omit<MinecraftStateData["self"], "locomotion" | "touching" | "inBlock" | "pushed" | "motion" | "sinceSleepMinutes" | "healing" | "support" | "velocity" | "landing" | "displaced" | "balance"> {
+export function encodeSelf(bot: EncodableBot, base: Vec3, deaths: number, lastHurt: Hurt | null = null, now = Date.now()): Omit<MinecraftStateData["self"], "locomotion" | "touching" | "inBlock" | "pushed" | "motion" | "sinceSleepMinutes" | "healing" | "support" | "velocity" | "landing" | "displaced" | "balance" | "gaze"> {
   const items = bot.inventory.items();
   const here = bot.blockAt(bot.entity.position.floored());
   const feet = bot.entity.position.floored();

@@ -75,14 +75,34 @@ export const lastStand = rule("last_stand", "hard", (data) => {
   return { action: { skill: "flee", target: mob.id }, urgency: 1, reason: `health ${data.self.health}, ${mob.type} ${mob.dist} blocks away` };
 });
 
-// Soft reflexes: defence by distance. A far threat gets no reflex at all, only a look (orienting).
+// Soft reflexes: defence by distance. A far threat gets no reflex at all, only a look (the colliculus),
+// unless something is coming at the bot fast.
 
-/** A hostile is closing in (4 to 8 blocks): retreat. */
-export const threatApproaching = rule("threat_approaching", "soft", (data) => {
-  const mob = closestIn(data, "approaching");
-  if (!mob || closestIn(data, "contact")) return null;
-  return { action: { skill: "flee", target: mob.id }, urgency: 0.7, reason: `${mob.type} approaching, ${mob.dist} blocks away` };
-});
+/**
+ * What to get away from when something looms (closes fast, or a projectile heads this way),
+ * whatever its distance: the thing itself if it is a creature, else the nearest hostile that can
+ * be seen from afar (most likely what threw it), else nothing. No list of which mobs shoot.
+ */
+export function loomingThreat(data: MinecraftStateData): { id: string; what: string } | null {
+  const looming = data.nearby.sudden.find((s) => s.what === "looming");
+  if (!looming) return null;
+  const itself = data.nearby.mobs.find((m) => m.id === looming.id);
+  if (itself) return { id: itself.id, what: `${itself.type} coming fast` };
+  const behindIt = data.nearby.mobs.filter((m) => m.hostile && m.dist < FAR_DISTANCE && m.seen !== false).sort((a, b) => a.dist - b.dist)[0];
+  return behindIt ? { id: behindIt.id, what: `something coming fast, ${behindIt.type} ${behindIt.dist} blocks away` } : null;
+}
+
+/** A hostile is closing in (4 to 8 blocks), or something looms from any distance (with `looming` on): retreat. */
+export function threatApproachingRule(looming: boolean): ReflexRule {
+  return rule("threat_approaching", "soft", (data) => {
+    if (closestIn(data, "contact")) return null;
+    const mob = closestIn(data, "approaching");
+    if (mob) return { action: { skill: "flee", target: mob.id }, urgency: 0.7, reason: `${mob.type} approaching, ${mob.dist} blocks away` };
+    const threat = looming ? loomingThreat(data) : null;
+    return threat ? { action: { skill: "flee", target: threat.id }, urgency: 0.7, reason: threat.what } : null;
+  });
+}
+export const threatApproaching = threatApproachingRule(true);
 
 /** A hostile is on top of the bot (3 blocks or less): fight if armed and healthy, else break away. */
 export const threatContact = rule("threat_contact", "soft", (data) => {
@@ -108,9 +128,9 @@ export const eatWhenStarving = rule("eat_when_starving", "soft", (data) => {
  * Every reflex for a bot with these settings, checked every tick: the hard ones (the three that
  * were always there, then withdrawal, buried and about-to-touch), then the soft ones.
  */
-export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1): ReflexRule[] {
+export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1, looming = 1): ReflexRule[] {
   const protective = protectiveReflexes(settings, righting);
-  return [inLavaOrFire, drowning, lastStand, ...protective.hard, threatContact, threatApproaching, ...protective.soft, eatWhenStarving];
+  return [inLavaOrFire, drowning, lastStand, ...protective.hard, threatContact, threatApproachingRule(looming > 0), ...protective.soft, eatWhenStarving];
 }
 
 /** Every player reflex with the default settings. */

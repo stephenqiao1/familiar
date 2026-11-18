@@ -3,6 +3,103 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-18: the colliculus
+
+*Found by running the real bot on the test server with `pnpm colliculus-check`. No Jev and no
+planner calls except in the field-of-view scene, which needs Jev.*
+
+| Scene | What won | Event to head turned | How |
+|---|---|---|---|
+| Bang 10 blocks behind | The explosion (sound, salience 1.13) | 0.4 to 0.5 s | Startle braced toward it |
+| Walking glance (`--same-time`): a pig appears to the side | The pig (sight, 0.67) | 1.6 s | Alongside; the journey finished |
+| A still cow close by, a pig running in from 18 blocks | The pig (looming, 1.41, against the cow's 0.20) | 0.4 s | Competes |
+| The same penned cow for two minutes | Cow, 2 looks in all: 1, 0, 0, 1 per half minute; 26 glances around meanwhile | | Alongside idling |
+| A goal that watches for a pig; a cow and a pig appear at once, same distance | The pig (0.57) | 0.2 s | Takes over |
+| Arrows from 12 blocks, a still skeleton at 14 | The arrow (looming, 1.06); alarm 0 → 1; `threat_approaching` fired | 0.4 s | Competes |
+| Busy attacking: a pig appears, then an arrow comes from the side | The pig drew no look; the arrow did (looming, 1.13) | 0.2 s | Competes |
+| Field of view on and off: a husk 16 blocks behind, with Jev | Off: Jev told at once, at 16 blocks. On: 4.5 s later, at 8 blocks (twice the same) | | |
+
+The times are to the nearest tick. The map itself took under 1.2 ms in all but two ticks of
+some sixty runs; those two took 3.3 and 7.3 ms with one or two things on it, on ticks where the
+whole region call was slow (most likely the runtime pausing, not the map). The limit is 2 ms.
+
+**Found and fixed.**
+
+- **Arrows never loomed.** Mineflayer reports a spawned projectile's speed 8000 times too small
+  on 1.21.11 (the same old-packet scale as the knockback bug), so every arrow looked as if it
+  were standing still. The speed is now read from the server's own packet (`senses.ts`).
+- **Glass blocked sight.** The first line-of-sight check counted any solid block, so a mob
+  behind the test plaza's glass wall was never seen. See-through blocks no longer block it.
+- **Sound names cannot be trusted on this version**, as an earlier finding guessed. A probe
+  showed a cow's hurt arriving as "coral_block.step" and an arrow landing as
+  "armor_stand.place". What is reliable is where a sound came from, its category and its volume,
+  and five events with no sound name at all (explosion, lightning bolt, something hurt, a door
+  changing, a projectile appearing). Hearing uses only those.
+- **The spec's look urgency (0.35 to 0.7) never wins against idling**, as the old orienting
+  finding already said (idling scores about 0.9). Two things were done: `idle` now uses no part
+  of the body, so a look always runs beside it without interrupting it; and with nothing
+  running at all, a look takes over at full urgency. Beside real work it competes at 0.35 to 0.7
+  and usually loses, unless `--same-time` lets it run alongside.
+
+**Seen, left as it is.**
+
+- **With the field of view on, the bot learnt of the husk when it came within 8 blocks**, by the
+  stand-in for footsteps, in both runs: its glances had not found it first. It was hit once or
+  twice either way, and died in one of four runs (with it on). Two runs each way are too few to
+  say whether the option costs lives.
+- **"Blindsided" overcounts.** The report counts a hit as blindsided unless the attacker itself
+  was attended. A bot that turned to the *sound* of an unseen mob attended a place, not the mob,
+  so the hit still counts. Both field-of-view runs show 1 for that reason.
+- **Fleeing took the bot off the sky plaza once.** In an earlier run it ran from a zombie to the
+  plaza's corner, fell to the ground far below and died of the fall. Routes on a journey are not
+  held to the posture check's "nothing to stand on" the way a single step is.
+- **Getting used to the cow was hard to show**: penned and mostly still, it drew only two looks
+  in two minutes to begin with. The scene passes, but it shows little; the unit tests carry this.
+- **One event is often seen and heard at once**, and whichever scores higher wins the look. A
+  pig that appears is on the map twice (its arrival makes a sound at the same spot). The head
+  ends up in the same place either way, but the log may say "sound" where you expect "pig".
+- **Standing with nothing to do, the bot's head is rarely where a scene put it**: it glances
+  around every 4 seconds. Scenes that need it to face one way have to allow for that.
+
+## The colliculus: limits of this first version
+
+- **`closing` is the thing's own movement toward the bot, not the gap shrinking.** That stops a
+  still cow from "looming" when the bot runs at it, but a thing the bot is carried toward (a
+  minecart ride, a fall) does not loom either.
+- **Movement is sampled four times a second.** Something that crosses the view in under a
+  quarter of a second is seen only by where it started and ended. A projectile is caught at the
+  moment it appears instead, by a straight-line guess from its first speed: one lobbed high is
+  judged by where it points, not where it will land.
+- **Looming flees from "the nearest hostile in sight"** when the looming thing is a projectile,
+  on the guess that it threw it. With two skeletons it may run from the wrong one; with none in
+  sight (a dispenser, a shooter behind a wall) it does nothing but look and take alarm.
+- **Anything fast is looming, friend or not.** A wolf or a player sprinting at the bot (over 4
+  blocks a second) raises alarm and can set off a retreat. That is the price of not knowing what
+  things are; a soft reflex and habituation are what temper it.
+- **The stand-in for footsteps knows what is hostile.** It is the one identity leak, kept in one
+  function. A silent, unseen friendly mob is not heard; a hostile behind a wall within 8 blocks is.
+- **"Seen" is a ray to the middle of the thing.** A mob whose feet show under a ledge is unseen;
+  one whose middle is visible through a one-block gap is seen. Leaves and other see-through
+  blocks do not block sight at all. Darkness does not reduce it.
+- **`changed` covers blocks placed or broken and doors within 8 blocks**, including the bot's
+  own digging and placing, which then draw its own eye for a moment (it is usually looking there
+  already). Crops growing, levers and redstone are not changes.
+- **Habituation's "nothing followed" is only damage or a reward** while the thing was attended.
+  A thing that led to something useful in a way dopamine did not reward is got used to all the
+  same. Kind-at-place uses 8-block squares worked out from bearing and distance, so it is rough.
+- **Glances are to eight fixed compass directions at eye level.** The bot never looks up or
+  down on its own, and does not glance while travelling.
+- **The field of view filters only mobs, players and listed blocks.** Hazards, the base, the
+  inventory and memory are told as before. "Heard" means a sound within a block of where the
+  thing stands. With it on, Jev's target list shrinks, which changes what it picks; the planner
+  is told less too. Nothing else was tuned for it, which is why it is off by default.
+- **A look beside a skill still shows only as `attended`**: its skill events are not in the
+  workspace (the earlier finding).
+- **The state is bigger.** Each nearby thing now carries its bearing, sight and speed; the busy
+  world test's budget went from 3 KB to 4 KB. Jev is sent the whole state.
+- **`brainstem.orienting` is gone from `bots.json`.** Use `colliculus.sight`, `hearing` and
+  `scanning` instead; `--regions` without `colliculus` turns all looking off.
+
 ## Live testing, 2026-11-17: balance and posture
 
 *Found by running the real bot on the test server with `pnpm posture-check`. No Jev and no
@@ -503,7 +600,7 @@ runs would be read as the first one ending.
 
 **What would fix it.** Teach episodes and persistence about side movements, once one matters.
 
-**Status.** Open.
+**Status.** Partly closed 2026-11-18. What the bot is looking at is now in the workspace as `attended` (set by the colliculus), so the rest of the brain can read it. The look's own skill events are still not added: dopamine does not learn from a side movement and patience does not time it.
 
 ## Primitives: what `changes` cannot see
 
@@ -696,7 +793,7 @@ flee, never attack).
 
 **What would fix it.** Give ranged mobs a wider "approaching" zone, as far as they can shoot.
 
-**Status.** Open.
+**Status.** Closed 2026-11-18, without a list of ranged mobs. Something coming at the bot fast (a projectile heading its way, or anything closing at 4 blocks a second or more) is "looming": it raises alarm and makes `threat_approaching` fire whatever the distance. Live: with a still skeleton 14 blocks off, the first arrow raised alarm from 0 to 1 and fired the reflex. A far mob that has not shot yet still gets only a look.
 
 ## Brainstem: an unreachable mob close by still keeps alarm up
 
@@ -790,7 +887,7 @@ alarm it adds).
 **What would fix it.** Add the explosion's position to `nearby.loud`; add thunder once sound names
 can be trusted on this version.
 
-**Status.** Open.
+**Status.** Mostly closed 2026-11-18 by the colliculus. An explosion and thunder now carry where they came from, and the bot braces toward it (live: facing a bang behind it 0.4 s after it went off). Other sounds are heard by where they came from (not by name: see the colliculus findings). Anything that appears, moves or changes in view can draw a look, friendly mobs and blocks included. Still open: damage with no attacker does not startle.
 
 ## Brainstem: a cue can wake a sleeping bot
 

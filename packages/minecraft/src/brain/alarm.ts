@@ -1,6 +1,6 @@
 import type { State } from "@familiar/contracts";
 import { BAD_SURPRISE_SIGNAL, BIG_SURPRISE, changedThreshold, FOCUS_SIGNAL, type AlarmTrigger } from "@familiar/neuromodulators";
-import { STARTLE_SIGNAL } from "@familiar/region-brainstem";
+import { LOOMING_SIGNAL, STARTLE_SIGNAL } from "@familiar/region-brainstem";
 import { minecraftDataOf, nearestThreat } from "./read-state.js";
 
 // What raises the player's alarm. Each trigger says how much to add right now (0 to 1).
@@ -13,6 +13,8 @@ const DAMAGE_FOR_FULL_ALARM = MAX_HEALTH / 3;
 const HOSTILE_APPEARED = 0.6;
 /** A startle adds this on top of whatever caused it (a hit, a mob appearing). */
 const STARTLED = 0.3;
+/** Something looming at full strength adds this. */
+const LOOMED = 0.6;
 /** A mob seen as a threat within this long is the same threat coming back, not a new one. */
 const SAME_THREAT_MS = 30_000;
 
@@ -70,12 +72,26 @@ export const startled: AlarmTrigger = {
   check: ({ ws }) => ((ws.signals[STARTLE_SIGNAL]?.value ?? 0) > 0 ? STARTLED : 0),
 };
 
+/** Something is coming at the bot fast (the colliculus's `looming` signal): once, as it starts. Enough on its own to count as a sudden jump. */
+export function looming(): AlarmTrigger {
+  let was = 0;
+  return {
+    name: "looming",
+    check({ ws }) {
+      const level = ws.signals[LOOMING_SIGNAL]?.value ?? 0;
+      const rose = level > 0 && was === 0;
+      was = level;
+      return rose ? LOOMED * level : 0;
+    },
+  };
+}
+
 // TODO(alarm): a hostile mob targeting the bot (the state doesn't say who a mob is after).
 // TODO(alarm): another player being attacked (not sensed yet). Explosions and thunder reach alarm through startle.
 
 /** Everything that raises the player's alarm. `surpriseByFocus`: let focus set how big a surprise counts. */
 export function playerAlarms(surpriseByFocus = false): AlarmTrigger[] {
-  return [damage, hostileAppeared(), startled, bigSurprise(surpriseByFocus)];
+  return [damage, hostileAppeared(), startled, looming(), bigSurprise(surpriseByFocus)];
 }
 
 /** A threat is present (alarm does not fade): a hostile mob close by. */

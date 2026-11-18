@@ -1,18 +1,19 @@
 import type { RunningSkill, State } from "@familiar/contracts";
 import type { Base } from "../base.js";
 import type { EncodableBot } from "./encodable-bot.js";
-import type { Vec3 } from "vec3";
 import type { Heading } from "../body-events.js";
 import type { Hurt } from "../pain.js";
 import { balanceSense } from "./balance.js";
 import { encodeSelf } from "./encode-self.js";
+import { gazeOf, heardThings, positionOf, sighted, suddenThings, unseenHostileHeard } from "./perceive.js";
+import type { Senses } from "../senses.js";
 import { dangerAlong, headInBlock, touchingOf } from "./touching.js";
 import { scanHazards } from "./scan-hazards.js";
 import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 export interface EncodeContext {
   base: Base;
@@ -38,8 +39,8 @@ export interface EncodeContext {
   displaced?: boolean;
   /** What the locomotion controller reports. Default: standing still. */
   locomotion?: MinecraftStateData["self"]["locomotion"];
-  /** Loud events heard lately (explosions, thunder). Default: none. */
-  loud?: LoudEvent[];
+  /** What the eyes and ears picked up between states (movement, changes, sounds). Default: nothing. */
+  senses?: Senses;
   /** How many of each kind of nearby thing to keep (focus sets it). Default: 10. */
   limit?: number;
   /** Narrow attention (high alarm): keep threats, drop friendly mobs and useful blocks. Default: false. */
@@ -49,21 +50,15 @@ export interface EncodeContext {
 /** Not travelling. */
 const STANDING: MinecraftStateData["self"]["locomotion"] = { moving: false, pattern: null, gait: "walk", stuck: false };
 
-/** A loud event the bot heard. */
-export interface LoudEvent {
-  type: string;
-  position: Vec3;
-  at: number;
-}
-
-/** A loud event is reported for this long, and only this close. */
-const LOUD_FOR_MS = 2000;
-const LOUD_RADIUS = 32;
-
 /** Turns the bot's view of the world into a compact, game-agnostic State. */
 export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext): State {
   const now = Date.now();
   const limit = ctx.limit ?? DEFAULT_LIMIT;
+  const { senses } = ctx;
+  const mobs = scanMobs(bot, limit).filter((m) => !ctx.narrow || m.hostile).map((m) => sighted(bot, m, senses));
+  const blocks = (ctx.narrow ? [] : scanUsefulBlocks(bot, limit)).map((b) => sighted(bot, b, senses));
+  const players = scanPlayers(bot, limit).map((p) => sighted(bot, p, senses));
+  const things = [...mobs, ...players, ...blocks];
   const data: MinecraftStateData = {
     time: { isNight: !bot.time.isDay, lightLevel: lightLevel(bot) },
     self: {
@@ -78,16 +73,15 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
       healing: ctx.healing ?? false,
       ...balanceSense(bot, ctx.fallen ?? 0),
       displaced: ctx.displaced ?? false,
+      gaze: gazeOf(bot, things),
     },
     nearby: {
       hazards: scanHazards(bot, limit),
-      mobs: ctx.narrow ? scanMobs(bot, limit).filter((m) => m.hostile) : scanMobs(bot, limit),
-      blocks: ctx.narrow ? [] : scanUsefulBlocks(bot, limit),
-      players: scanPlayers(bot, limit),
-      loud: (ctx.loud ?? [])
-        .filter((e) => now - e.at <= LOUD_FOR_MS)
-        .map((e) => ({ type: e.type, dist: Math.round(e.position.distanceTo(bot.entity.position)) }))
-        .filter((e) => e.dist <= LOUD_RADIUS),
+      mobs,
+      blocks,
+      players,
+      sudden: senses ? suddenThings(bot, things, senses, now) : [],
+      heard: [...(senses ? heardThings(bot, senses, now) : []), ...unseenHostileHeard(mobs, (id) => positionOf(bot, id))],
     },
     memory: ctx.memory ?? null,
     current: ctx.current && {

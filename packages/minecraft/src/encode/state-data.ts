@@ -1,4 +1,4 @@
-/** What a schemaVersion 14 Minecraft State carries in `data`. Distances are whole blocks. */
+/** What a schemaVersion 15 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
   time: { isNight: boolean; lightLevel: number };
   self: {
@@ -67,6 +67,8 @@ export interface MinecraftStateData {
     displaced: boolean;
     /** How steady the body is, 0 to 1: 1 on flat solid ground with room around, 0 in the air over a landing that would hurt. */
     balance: number;
+    /** What the head is pointed at: the nearest seen thing close to straight ahead (or null), and the compass heading in degrees (0 north, growing to the left). */
+    gaze: { id: string | null; yaw: number };
     /** What the locomotion controller is doing: travelling or not, the pattern and gait, and whether it is stuck. */
     locomotion: { moving: boolean; pattern: "walk" | "swim" | "dash" | null; gait: "walk" | "jog" | "sprint"; stuck: boolean };
     /**
@@ -92,13 +94,23 @@ export interface MinecraftStateData {
     /** Lava, fire and drops of 3 or more within 8 blocks, and other blocks the bot knows hurt within 3. */
     hazards: Nearby[];
     /** `reachable`: in line of sight and within 3 blocks of the bot's height (a cheap stand-in for "can get to me"). */
-    mobs: (Nearby & { hostile: boolean; reachable: boolean })[];
+    mobs: (Nearby & Partial<Sighted> & { hostile: boolean; reachable: boolean })[];
     /** Chests, ripe crops and bells within 16 blocks. */
-    blocks: Nearby[];
+    blocks: (Nearby & Partial<Sighted>)[];
     /** Other players within 24 blocks (`type` is "player"). */
-    players: Nearby[];
-    /** Loud events heard in the last 2 seconds (explosions for now), with no target id. */
-    loud: { type: string; dist: number }[];
+    players: (Nearby & Partial<Sighted>)[];
+    /**
+     * Things that just changed in view: one that appeared, started moving, a block that changed
+     * (placed, broken, a door) or something looming (closing faster than about 4 blocks a second,
+     * or a projectile heading this way).
+     */
+    sudden: { id: string; what: "appeared" | "started_moving" | "changed" | "looming"; bearing: Bearing; dist: number }[];
+    /**
+     * Sounds heard in the last 2 seconds: "explosion", "thunder", "hurt", "door", "shot", "sound"
+     * (anything else), or "presence" (an unseen hostile close by, a stand-in for footsteps).
+     * `loudness` is how loud it is here, 0 to 1.
+     */
+    heard: { type: string; bearing: Bearing; dist: number; position: { x: number; y: number; z: number }; loudness: number }[];
   };
   /** How this place feels from memory (the strongest good or bad memory close by), or null. */
   memory: { nearby: "good" | "bad"; kind: string } | null;
@@ -109,6 +121,29 @@ export interface MinecraftStateData {
 export interface Danger {
   what: string;
   blocks: number;
+}
+
+/** Which way something lies from where the head faces: a side, and the angle in degrees (positive to the left, 0 straight ahead). */
+export interface Bearing {
+  side: "ahead" | "left" | "right" | "behind";
+  angle: number;
+}
+
+/**
+ * What the eyes add to a nearby thing. The encoder always fills these in; a state made without
+ * eyes (an old log, a test) may leave them out, and such a thing counts as seen, straight ahead
+ * and still (`sightedOf` in brain/read-state.ts).
+ */
+export interface Sighted {
+  bearing: Bearing;
+  /** Within the field of view (110 degrees either side) with a clear line of sight. */
+  seen: boolean;
+  /** How fast it is coming nearer by its own movement, in blocks per second (negative: moving away). */
+  closing: number;
+  /** How fast it is moving at all, in blocks per second. */
+  speed?: number;
+  /** Set when the thing is out of view but was seen lately: how long ago, and where (only with the field of view switched on). */
+  lastSeen?: { msAgo: number; at: { x: number; y: number; z: number } };
 }
 
 /** `id` is a target string (pos:x,y,z or entity:<id>) that can be handed straight to a skill. */

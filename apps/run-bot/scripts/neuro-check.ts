@@ -482,7 +482,7 @@ const scenes: Scene[] = [
     ],
     after: CLEAR_PLAZA,
     checks: (run) => {
-      const heard = run.ticks.filter((t) => ((t.state.data.nearby as unknown as { loud: { type: string; dist: number }[] }).loud ?? []).length > 0);
+      const heard = run.ticks.filter((t) => ((t.state.data.nearby as unknown as { heard: { type: string }[] }).heard ?? []).some((h) => h.type === "explosion"));
       const startles = run.ticks.flatMap((t) => (run.trace(t, "brainstem").startle ? [{ t, by: (run.trace(t, "brainstem").startle as { by: string }).by }] : []));
       const first = startles[0];
       const raised = first ? (run.trace(first.t, "noradrenaline").raisedBy as Record<string, number> | undefined) : undefined;

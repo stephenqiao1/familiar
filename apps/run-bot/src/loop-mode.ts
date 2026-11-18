@@ -12,6 +12,7 @@ import {
   driveFrom,
   encodeState,
   headFree,
+  usesNothing,
   isHarmful,
   isSignificantChange,
   minecraftSkills,
@@ -21,6 +22,7 @@ import {
   setKnownHurts,
   setUpPosture,
   trackGut,
+  trackSenses,
   tidyBody,
   posId,
   situationOf,
@@ -97,7 +99,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -161,6 +163,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   trackGut(bot, gut, isHarmful, (msg) => console.log(`    medulla: ${msg}`));
   const sleepClock = createSleepClock(bot, (await loadBody(bodyFile(server.name))).sleptAtAge);
   const bodyEvents = trackBodyEvents(bot, () => locomotion.status().moving);
+  // The eyes and ears between states: how things move, what changes, what is heard.
+  const senses = trackSenses(bot);
   // Balance and posture: what the bot knows about surfaces (born knowing some loose blocks,
   // learning the rest), the check before acting, and the senses for falling and being moved.
   const posture = setUpPosture(bot, {
@@ -201,6 +205,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       reflexes,
       medulla,
       posture: postureSettings,
+      colliculus,
       postureNotes: () => posture.notes(),
       justLearnedBadFoods: () => gut.justLearned(),
       sore: () => pain.sore(Date.now()),
@@ -227,6 +232,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     `Alarm: gain ${noradrenaline.alarmGain}, fades in ${noradrenaline.alarmDecaySeconds}s. Search: resting ${noradrenaline.searchResting}. Memories: ${memory.entries().memories.length} remembered.`,
   );
   console.log(`Focus: resting ${focusSettings.resting}, trust in remembered things halves every ${focusSettings.trustHalfLifeMinutes} min.`);
+  console.log(`Colliculus: threshold ${colliculus.threshold}, field of view ${colliculus.fieldOfView > 0 ? "on (the deciding layers are told only what is seen or heard)" : "off"}.`);
   console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}, arousal gate ${brainstem.arousalGate}.`);
   if (learned.skills.length) console.log(`Learned skills: ${learned.skills.map((s) => s.name).join(", ")}.`);
   console.log(`Logging to ${logPath}`);
@@ -249,12 +255,14 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     logEvent(event);
   };
   const executor = createSkillExecutor({ skills, ctx, onEvent, onSideEvent, defaultTimeoutMs: persistence.backstopMs() });
-  /** With --same-time: a head-only movement runs alongside a running skill that leaves the head free. */
+  /** A head-only movement runs alongside idling, and (with --same-time) alongside any running skill that leaves the head free. */
   const skillNamed = (name: string | undefined) => skills.find((s) => s.name === name);
   const runsAlongside = (c: Candidate) => {
     if (!("skill" in c.action)) return false;
     const parts = skillNamed(c.action.skill)?.parts;
-    return parts?.length === 1 && parts[0] === "head" && headFree(skillNamed(executor.current()?.skill));
+    const running = skillNamed(executor.current()?.skill);
+    // Beside a skill that uses no part of the body (idling) always; beside one that leaves the head free with --same-time.
+    return parts?.length === 1 && parts[0] === "head" && (usesNothing(running) || ((brainArgs.sameTime ?? false) && headFree(running)));
   };
 
   const alarm = () => view.signals[ALARM_SIGNAL]?.value ?? 0;
@@ -323,9 +331,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     regions,
     workspace,
     arbiter: createArbiter({ scorebook, personality, patience, persistence, skills }),
-    ...(brainArgs.sameTime
-      ? { alongside: { isSide: runsAlongside, onAction: (action: Action) => ("skill" in action ? executor.startAlongside(action.skill, action.target) : undefined) } }
-      : {}),
+    alongside: { isSide: runsAlongside, onAction: (action: Action) => ("skill" in action ? executor.startAlongside(action.skill, action.target) : undefined) },
     getState: () => {
       const { x, y, z } = bot.entity.position.floored();
       const limit = budget().nearby;
@@ -342,7 +348,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         fallen: posture.fallen(),
         displaced: posture.displaced(),
         locomotion: (({ moving, pattern, gait, stuck }) => ({ moving, pattern, gait, stuck }))(locomotion.status()),
-        loud: bodyEvents.loud(),
+        senses,
         memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
         narrow: noradrenaline.focus > 0 && alarm() > NARROW_ABOVE,
         limit,

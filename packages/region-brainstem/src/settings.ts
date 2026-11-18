@@ -6,8 +6,6 @@ export interface BrainstemSettings {
   gains: number;
   /** b: startle: brace and raise alarm on a sudden event. On above 0. */
   startle: number;
-  /** c: orienting: turn to look at something new or sudden. On above 0. */
-  orienting: number;
   /** d: responses the goal loaded in advance fire on sight. On above 0. */
   loadedResponses: number;
   /** d: how far a goal can hold a soft reflex back (0 = not at all, 1 = down to 0.3 of its gain). */
@@ -22,14 +20,13 @@ export const DEFAULT_BRAINSTEM: BrainstemSettings = {
   bravery: 0.5,
   gains: 1,
   startle: 1,
-  orienting: 1,
   loadedResponses: 1,
   holdBack: 1,
   arousalGate: 1,
   bodySignals: 1,
 };
 
-const KEYS = ["bravery", "gains", "startle", "orienting", "loadedResponses", "holdBack", "arousalGate", "bodySignals"] as const;
+const KEYS = ["bravery", "gains", "startle", "loadedResponses", "holdBack", "arousalGate", "bodySignals"] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function brainstemProblem(s: BrainstemSettings): string | null {

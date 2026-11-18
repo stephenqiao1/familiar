@@ -36,3 +36,7 @@ export const SORE_SIGNAL = "sore";
 export const HUNGER_SIGNAL = "hunger";
 /** How unsteady the body is, 0 (firm on its feet) to 1 (in the air over a fall that would hurt). */
 export const UNSTEADY_SIGNAL = "unsteady";
+/** How fast something is coming at the body, 0 to 1 (the colliculus shares it; alarm and the defence reflexes read it). */
+export const LOOMING_SIGNAL = "looming";
+/** 1 on a tick when a response the goal loaded in advance fired. */
+export const LOADED_SIGNAL = "loaded_response";

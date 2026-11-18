@@ -5,3 +5,8 @@ export { createMedullaRegion, overall, type MedullaOptions, type Vitals } from "
 export { createLoadedResponses, LOADED_URGENCY, type LoadedResponses, type Thing } from "./loaded.js";
 export { brainstemProblem, DEFAULT_BRAINSTEM, type BrainstemSettings } from "./settings.js";
 export { AIR_SIGNAL, AROUSAL_SIGNAL, COLD_SIGNAL, HUNGER_SIGNAL, HURT_SIGNAL, RESERVE_SIGNAL, SICK_SIGNAL, TIRED_SIGNAL, URGE_SIGNAL, VITALS_SIGNAL, ORIENTING_SIGNAL, PAIN_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+export { createColliculusRegion, COLLICULUS_LIMIT_MS, type ColliculusOptions, type Percept } from "./colliculus-region.js";
+export { colliculusProblem, DEFAULT_COLLICULUS, FEATURES, type ColliculusSettings, type Feature, type Features } from "./colliculus-settings.js";
+export { partsOf, salienceOf, type Sense } from "./salience.js";
+export { createHabituation } from "./habituation.js";
+export { LOADED_SIGNAL, LOOMING_SIGNAL } from "./signals.js";
