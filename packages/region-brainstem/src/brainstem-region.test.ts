@@ -33,8 +33,6 @@ function bot(settings: Partial<BrainstemSettings> = {}, over: Partial<BrainstemO
     responseProblem: (skill) => (skill === "flee" ? null : "unknown skill"),
     acceptsTarget: () => true,
     holdable: ["flee", "defend"],
-    asleep: (ws) => world(ws.state).asleep ?? false,
-    drowsy: (ws) => world(ws.state).night ?? false,
     body: (state) => ({ health: world(state).health ?? 1 }),
     skills: { brace: "brace", flinch: "flinch" },
     surroundings: (state) => ({ dark: world(state).dark ?? 0, badPlace: 0 }),
@@ -228,56 +226,6 @@ describe("createBrainstemRegion", () => {
     });
   });
 
-  describe("arousal gate", () => {
-    it("asleep and calm: arousal is at its floor and the upper layers are paused", async () => {
-      const { tick, value } = bot();
-      await tick({ asleep: true }, "sleep");
-      const out = await tick({ asleep: true }, "sleep");
-      expect(value("arousal")).toBeCloseTo(0.05);
-      expect(value("upper_paused")).toBe(1);
-      // With the deciding layers quiet, the brainstem speaks for staying asleep.
-      expect(out.proposals).toEqual([{ action: { skill: "sleep" }, urgency: 0.5, reason: "asleep and undisturbed" }]);
-    });
-
-    it("damage, a startle, a hard reflex or alarm each end the pause on the same tick", async () => {
-      const wakes: [string, (b: ReturnType<typeof bot>) => Promise<unknown>][] = [
-        ["damage", (b) => b.tick({ asleep: true, health: 0.8 }, "sleep")],
-        ["startle", (b) => b.tick({ asleep: true, bang: true }, "sleep")],
-        ["hard reflex", (b) => (b.store.viewFor("reflex").setSignal("hard_reflex", 1), b.tick({ asleep: true }, "sleep"))],
-        ["alarm", (b) => (b.store.viewFor("noradrenaline").setSignal("alarm", 0.6), b.tick({ asleep: true }, "sleep"))],
-      ];
-      for (const [why, wake] of wakes) {
-        const b = bot();
-        await b.tick({ asleep: true }, "sleep");
-        expect(b.value("upper_paused")).toBe(1);
-        const out = (await wake(b)) as { trace: Record<string, unknown> };
-        expect(b.value("upper_paused"), why).toBe(0);
-        expect(out.trace.woken, why).toBe(why);
-      }
-    });
-
-    it("stays unpaused while the pain lasts, then lets the bot settle again", async () => {
-      const { tick, value } = bot();
-      await tick({ asleep: true }, "sleep");
-      await tick({ asleep: true, health: 0.8 }, "sleep");
-      await tick({ asleep: true, health: 0.8 }, "sleep", 2000);
-      expect(value("upper_paused")).toBe(0);
-      await tick({ asleep: true, health: 0.8 }, "sleep", 15_000);
-      expect(value("upper_paused")).toBe(1);
-    });
-
-    it("is about 0.3 when drowsy, 0.5 awake, and rises toward 1 with alarm", async () => {
-      const { store, tick, value } = bot();
-      await tick({ night: true });
-      expect(value("arousal")).toBeCloseTo(0.3);
-      await tick();
-      expect(value("arousal")).toBeCloseTo(0.5);
-      store.viewFor("noradrenaline").setSignal("alarm", 1);
-      await tick();
-      expect(value("arousal")).toBeCloseTo(1);
-    });
-  });
-
   describe("body signals", () => {
     it("shares stuck and sore, and leaves the vital signs to the medulla", async () => {
       const { tick, value } = bot();
@@ -302,14 +250,14 @@ describe("createBrainstemRegion", () => {
     expect(value("stuck")).toBeLessThan(0.05);
   });
 
-  it("with every strength at 0 it proposes nothing and shares nothing but arousal", async () => {
-    const off = { gains: 0, startle: 0, loadedResponses: 0, holdBack: 0, arousalGate: 0, bodySignals: 0 };
+  it("with every strength at 0 it proposes nothing and shares nothing", async () => {
+    const off = { gains: 0, startle: 0, loadedResponses: 0, holdBack: 0, bodySignals: 0 };
     const { store, tick } = bot(off);
     store.viewFor("prefrontal").setGoal({ text: "g", steps: [], reason: "", ifThen: [{ when: "zombie", skill: "flee" }] });
     await tick({ asleep: true }, "sleep");
     const out = await tick({ asleep: true, bang: true, health: 0.5, things: [{ id: "entity:1", kind: "zombie" }] }, "sleep");
     expect(out.proposals).toEqual([]);
-    expect(Object.keys(store.signals())).toEqual(["arousal"]);
+    expect(Object.keys(store.signals())).toEqual([]);
   });
 
   describe("g) defence signals", () => {
@@ -376,6 +324,24 @@ describe("createBrainstemRegion", () => {
       const { tick, value } = bot();
       await tick();
       expect([value("threat"), value("wary"), value("analgesia")]).toEqual([undefined, undefined, undefined]);
+    });
+  });
+
+  describe("arousal and startle", () => {
+    const magnitude = async (arousal: number, arousalStartle = 1) => {
+      const { tick } = bot({ arousalStartle }, { arousalOf: () => arousal });
+      await tick();
+      const out = await tick({ bang: 0.5 });
+      return ((out.trace?.startle ?? out.trace?.startleQuiet) as { magnitude: number }).magnitude;
+    };
+    it("a drowsy body startles a little less, an over-aroused one a little more", async () => {
+      const [drowsy, awake, alert, over] = [await magnitude(0.3), await magnitude(0.5), await magnitude(0.8), await magnitude(1)];
+      expect(drowsy).toBeCloseTo(awake * 0.8, 1);
+      expect(alert).toBe(awake);
+      expect(over).toBeCloseTo(awake * 1.1, 1);
+    });
+    it("not at all with the strength at 0", async () => {
+      expect(await magnitude(0.2, 0)).toBe(await magnitude(0.5, 0));
     });
   });
 });

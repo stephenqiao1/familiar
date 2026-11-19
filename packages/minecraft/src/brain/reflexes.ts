@@ -1,7 +1,7 @@
 import type { ReflexRule } from "@familiar/region-reflex";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { DEFAULT_REFLEXES, protectiveReflexes, type ReflexSettings } from "./protective-reflexes.js";
-import { defenceOf, defenceReflexes, onIt } from "./defence.js";
+import { defenceOf, defenceReflexes } from "./defence.js";
 import { minecraftDataOf } from "./read-state.js";
 
 // The player's wired-in reactions, in two classes.
@@ -55,16 +55,7 @@ export const lastStand = rule("last_stand", "hard", (data) => {
 });
 
 // Soft reflexes. Defence (freeze, flee, fight, and resting after) is the defence circuit's: see defence.ts.
-
-/**
- * Very hungry and carrying food: eat. With nothing else to hand it will eat food it knows to be
- * bad. It does not stop to eat with a hostile on top of it.
- */
-export const eatWhenStarving = rule("eat_when_starving", "soft", (data) => {
-  const { self } = data;
-  if (self.food > STARVING_FOOD || (self.foodItems === 0 && self.badFoodItems === 0) || onIt(data)) return null;
-  return { action: { skill: "eat" }, urgency: 0.9, reason: `food ${self.food}/20${self.foodItems === 0 ? ", with only bad food to eat" : ""}` };
-});
+// Eating when starving is an upkeep urge: see medulla.ts.
 
 /**
  * Every reflex for a bot with these settings, checked every tick: the hard ones (the three that
@@ -72,7 +63,7 @@ export const eatWhenStarving = rule("eat_when_starving", "soft", (data) => {
  */
 export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1, defence: { recuperate: number } = { recuperate: 1 }): ReflexRule[] {
   const protective = protectiveReflexes(settings, righting);
-  return [inLavaOrFire, drowning, lastStand, ...protective.hard, ...defenceReflexes(defence), ...protective.soft, eatWhenStarving];
+  return [inLavaOrFire, drowning, lastStand, ...protective.hard, ...defenceReflexes(defence), ...protective.soft];
 }
 
 /** Every player reflex with the default settings. */

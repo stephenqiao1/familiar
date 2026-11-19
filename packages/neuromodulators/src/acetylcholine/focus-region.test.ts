@@ -77,6 +77,14 @@ describe("createFocusRegion", () => {
       expect((await wait(6, () => ({ chest: true }))).proposals).toEqual([]);
     });
 
+    it("asleep, a cue proposes nothing: it is not a wake event", async () => {
+      const { tick, value } = setup(watching);
+      await tick({ chest: true, asleep: true });
+      const fired = await tick({ chest: true, asleep: true });
+      expect(value("cue")).toBe(1);
+      expect(fired.proposals).toEqual([]);
+    });
+
     it("drops the boost as soon as the thing leaves view", async () => {
       const { tick } = setup(watching);
       await tick({ chest: true });

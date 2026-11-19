@@ -1,8 +1,9 @@
 import type { Choice } from "@familiar/region-brainstem";
 import type { ThreatView } from "../defence/size-up.js";
-/** What a schemaVersion 17 Minecraft State carries in `data`. Distances are whole blocks. */
+/** What a schemaVersion 18 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
-  time: { isNight: boolean; lightLevel: number };
+  /** `nightProgress`: at night, how far through it is, 0 (dusk) to 1 (dawn); left out by day and by a state made without a clock. */
+  time: { isNight: boolean; lightLevel: number; nightProgress?: number };
   self: {
     /** Whole-block position. */
     position: { x: number; y: number; z: number };

@@ -546,7 +546,8 @@ const scenes: Scene[] = [
       const engineCalls = run.ticks.filter((t) => run.trace(t, "instinct").engine !== undefined).length;
       const hit = run.ticks.find((t, i) => i > 0 && selfOf(t).health < selfOf(run.ticks[i - 1]!).health && run.at(t) > 250);
       const backAsleep = hit ? run.ticks.some((t) => t.timestamp > hit.timestamp + 5000 && (t.signals.upper_paused?.value ?? 0) > 0) : false;
-      const woke = run.ticks.flatMap((t) => (run.trace(t, "brainstem").woken ? [`${String(run.trace(t, "brainstem").woken)} at ${run.at(t).toFixed(0)} s`] : []));
+      const wakingOf = (t: Tick) => (run.trace(t, "reticular").waking as { by: string } | undefined)?.by;
+      const woke = run.ticks.flatMap((t) => (wakingOf(t) ? [`${wakingOf(t)} at ${run.at(t).toFixed(0)} s`] : []));
       const stops = run.events().filter((e) => e.skill === "sleep" && e.type !== "started" && e.type !== "done").map((e) => `${e.type}${e.reason ? ` (${e.reason})` : ""}`);
       return [
         ["the bot slept most of the night", asleepSeconds > 300, `${asleepSeconds.toFixed(0)} s asleep, upper layers paused ${pausedSeconds.toFixed(0)} s`],

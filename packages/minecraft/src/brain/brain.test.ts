@@ -7,7 +7,7 @@ import { fakeData } from "../encode/state.test-helper.js";
 import { createChestMemory } from "../chest-memory.js";
 import { describeSituation } from "./situation.js";
 import type { ReflexRule } from "@familiar/region-reflex";
-import { drowning, eatWhenStarving, inLavaOrFire, lastStand, playerReflexes } from "./reflexes.js";
+import { drowning, inLavaOrFire, lastStand, playerReflexes } from "./reflexes.js";
 import { withGoal } from "./instinct.js";
 
 /** A bot 12 blocks from base carrying a sword and bread. */
@@ -49,18 +49,7 @@ describe("hard reflexes", () => {
 
   it("are the only hard rules, and every other rule is soft", () => {
     expect(playerReflexes.filter((r) => r.kind === "hard").map((r) => r.name)).toEqual(["in_lava_or_fire", "drowning", "last_stand", "pain_withdrawal", "buried", "about_to_touch", "falling_right"]);
-    expect(playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name)).toEqual(["defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard", "eat_when_starving"]);
-  });
-});
-
-describe("eatWhenStarving", () => {
-  it("eats when starving and carrying food", () => {
-    expect(eatWhenStarving.check(workspace(data({ self: { food: 5 } })).viewFor("r"))).toMatchObject({ action: { skill: "eat" }, urgency: 0.9 });
-  });
-
-  it("does nothing when fed or without food", () => {
-    expect(eatWhenStarving.check(workspace(data()).viewFor("r"))).toBeNull();
-    expect(eatWhenStarving.check(workspace(data({ self: { food: 3, foodItems: 0 } })).viewFor("r"))).toBeNull();
+    expect(playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name)).toEqual(["defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard"]);
   });
 });
 

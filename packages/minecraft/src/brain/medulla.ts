@@ -6,7 +6,7 @@ import { INNATE_BAD_FOODS } from "../foods.js";
 import { REFLEX_SKILLS } from "./protective-reflexes.js";
 import { minecraftDataOf } from "./read-state.js";
 import { onIt } from "./defence.js";
-import { LOW_AIR } from "./reflexes.js";
+import { LOW_AIR, STARVING_FOOD } from "./reflexes.js";
 
 // The player's medulla: the body's automatic upkeep. What its vital signs are read from, and the
 // graded urges that keep it breathing, fed enough to heal, and clear of what makes it sick.
@@ -22,15 +22,17 @@ export interface MedullaSettings {
   eatToHeal: number;
   /** Taking a cure when sick (scales its urgency). */
   cure: number;
+  /** Eating when starving (scales its urgency). */
+  starving: number;
   /** Learn which foods make it ill. */
   learnBadFoods: number;
   /** Share the vital signs as signals. */
   vitals: number;
 }
 
-export const DEFAULT_MEDULLA: MedullaSettings = { innateBadFoods: INNATE_BAD_FOODS, needAir: 1, eatToHeal: 1, cure: 1, learnBadFoods: 1, vitals: 1 };
+export const DEFAULT_MEDULLA: MedullaSettings = { innateBadFoods: INNATE_BAD_FOODS, needAir: 1, eatToHeal: 1, cure: 1, starving: 1, learnBadFoods: 1, vitals: 1 };
 
-const STRENGTHS = ["needAir", "eatToHeal", "cure", "learnBadFoods", "vitals"] as const;
+const STRENGTHS = ["needAir", "eatToHeal", "cure", "starving", "learnBadFoods", "vitals"] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function medullaProblem(s: MedullaSettings): string | null {
@@ -46,6 +48,7 @@ export const HEALING_FOOD = 18;
 const NEED_AIR = { from: 12, urgencyAtStart: 0.3, urgencyAtLimit: 0.9 };
 const EAT_TO_HEAL = 0.5;
 const CURE = 0.7;
+const STARVING = 0.9;
 /** Three game days without sleep is as tired as it gets. */
 const TIRED_AFTER_MINUTES = 3 * 1440;
 
@@ -130,10 +133,23 @@ export function cure(strength: number): ReflexRule {
   });
 }
 
+/**
+ * Very hungry and carrying food: eat. With nothing else to hand it will eat food it knows to be
+ * bad. It does not stop to eat with a threat on it. An urge, so it counts toward the body's
+ * `urge` signal: a sleeping bot is woken by it before starving hurts.
+ */
+export function eatWhenStarving(strength: number): ReflexRule {
+  return urge("eat_when_starving", (data) => {
+    const { self } = data;
+    if (self.food > STARVING_FOOD || (self.foodItems === 0 && self.badFoodItems === 0) || onIt(data)) return null;
+    return { action: { skill: "eat" }, urgency: STARVING * strength, reason: `food ${self.food}/20${self.foodItems === 0 ? ", with only bad food to eat" : ""}` };
+  });
+}
+
 /** The graded urges of upkeep this bot has switched on. */
 export function medullaUrges(settings: MedullaSettings): ReflexRule[] {
-  return [...(settings.needAir > 0 ? [needAir(settings.needAir)] : []), ...(settings.eatToHeal > 0 ? [eatToHeal(settings.eatToHeal)] : []), ...(settings.cure > 0 ? [cure(settings.cure)] : [])];
+  return [...(settings.needAir > 0 ? [needAir(settings.needAir)] : []), ...(settings.eatToHeal > 0 ? [eatToHeal(settings.eatToHeal)] : []), ...(settings.cure > 0 ? [cure(settings.cure)] : []), ...(settings.starving > 0 ? [eatWhenStarving(settings.starving)] : [])];
 }
 
 /** The names of every upkeep urge, for goals that hold one back. */
-export const MEDULLA_URGES = ["need_air", "eat_to_heal", "cure"];
+export const MEDULLA_URGES = ["need_air", "eat_to_heal", "cure", "eat_when_starving"];

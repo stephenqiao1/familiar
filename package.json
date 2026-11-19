@@ -19,6 +19,7 @@
     "colliculus-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/colliculus-check.ts",
     "startle-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/startle-check.ts",
     "defence-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/defence-check.ts",
+    "arousal-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/arousal-check.ts",
     "reflex-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/reflex-check.ts",
     "locomotion-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/locomotion-check.ts",
     "skill-check:skills": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/skill-check.ts",

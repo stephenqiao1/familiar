@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FOCUS, DEFAULT_NORADRENALINE, DEFAULT_PATIENCE, DEFAULT_PERSONALITY } from "@familiar/neuromodulators";
 import { DEFAULT_DEFENCE, DEFAULT_LOCOMOTION, DEFAULT_MEDULLA, DEFAULT_POSTURE, DEFAULT_REFLEXES } from "@familiar/minecraft";
-import { DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS } from "@familiar/region-brainstem";
+import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS } from "@familiar/region-brainstem";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, memory: DEFAULT_MEMORY };
 
 let dir: string;
 let file: string;
@@ -115,6 +115,25 @@ describe("loadBotConfig", () => {
     expect((await loadBotConfig("Naive", file)).defence).toEqual({ ...DEFAULT_DEFENCE, innateThreats: [], innateNeverFight: [], freeze: 0.5 });
     await expect(loadBotConfig("Bad", file)).rejects.toThrow(/defence.reachCheck must be 0 to 1/);
     await expect(loadBotConfig("Worse", file)).rejects.toThrow(/defence.innateThreats/);
+  });
+
+  it("reads arousal settings, rejects a bad one, and still loads the old brainstem.arousalGate", async () => {
+    await writeFile(file, JSON.stringify({ Heavy: { arousal: { wakeThreshold: 0.9 } }, Bad: { arousal: { bedtime: 3 } }, Old: { brainstem: { arousalGate: 0, bravery: 0.7 } }, Both: { brainstem: { arousalGate: 0 }, arousal: { gate: 0.5 } } }));
+    expect((await loadBotConfig("Heavy", file)).arousal).toEqual({ ...DEFAULT_AROUSAL, wakeThreshold: 0.9 });
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow(/arousal.bedtime must be 0 to 1/);
+    const warned: string[] = [];
+    const warn = console.warn;
+    console.warn = (msg: string) => void warned.push(msg);
+    try {
+      const old = await loadBotConfig("Old", file);
+      expect(old.arousal.gate).toBe(0);
+      expect(old.brainstem).toEqual({ ...DEFAULT_BRAINSTEM, bravery: 0.7 });
+      expect((await loadBotConfig("Both", file)).arousal.gate).toBe(0.5);
+    } finally {
+      console.warn = warn;
+    }
+    expect(warned[0]).toMatch(/brainstem.arousalGate is now arousal.gate/);
+    expect(warned).toHaveLength(2);
   });
 
   it("reads brainstem settings and rejects a bad one", async () => {

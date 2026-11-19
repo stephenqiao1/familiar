@@ -4,8 +4,8 @@ import { fireRules, type ReflexRule } from "@familiar/region-reflex";
 import { describe, expect, it } from "vitest";
 import { fakeState, type StatePatch } from "../encode/state.test-helper.js";
 import { leaningOf } from "./brainstem.js";
-import { cure, DEFAULT_MEDULLA, eatToHeal, HEALING_FOOD, isHarmful, medullaProblem, medullaUrges, needAir, playerVitals, sickOf } from "./medulla.js";
-import { drowning, eatWhenStarving } from "./reflexes.js";
+import { cure, DEFAULT_MEDULLA, eatToHeal, eatWhenStarving, HEALING_FOOD, isHarmful, medullaProblem, medullaUrges, needAir, playerVitals, sickOf } from "./medulla.js";
+import { drowning } from "./reflexes.js";
 
 const zombie = (dist: number) => ({ id: "entity:1", type: "zombie", dist, hostile: true, reachable: true });
 type Scene = { self?: StatePatch["self"]; mobs?: ReturnType<typeof zombie>[]; running?: string };
@@ -80,15 +80,22 @@ describe("eat_to_heal", () => {
 });
 
 describe("eat_when_starving", () => {
+  const starving = eatWhenStarving(1);
+  it("eats when starving and carrying food, and not when fed or without food", () => {
+    expect(check(starving, { self: { food: 5, foodItems: 2 } })).toMatchObject({ action: { skill: "eat" }, urgency: 0.9 });
+    expect(check(starving, { self: { food: 12, foodItems: 2 } })).toBeNull();
+    expect(check(starving, { self: { food: 3, foodItems: 0 } })).toBeNull();
+  });
+
   it("eats food known to be bad only when starving with nothing else", () => {
-    expect(check(eatWhenStarving, { self: { food: 5, foodItems: 0, badFoodItems: 2 } })).toMatchObject({ action: { skill: "eat" }, reason: "food 5/20, with only bad food to eat" });
-    expect(check(eatWhenStarving, { self: { food: 5, foodItems: 0, badFoodItems: 0 } })).toBeNull();
-    expect(check(eatWhenStarving, { self: { food: 7, foodItems: 0, badFoodItems: 2 } })).toBeNull();
+    expect(check(starving, { self: { food: 5, foodItems: 0, badFoodItems: 2 } })).toMatchObject({ action: { skill: "eat" }, reason: "food 5/20, with only bad food to eat" });
+    expect(check(starving, { self: { food: 5, foodItems: 0, badFoodItems: 0 } })).toBeNull();
+    expect(check(starving, { self: { food: 7, foodItems: 0, badFoodItems: 2 } })).toBeNull();
   });
 
   it("does not stop to eat with a hostile in contact", () => {
-    expect(check(eatWhenStarving, { self: { food: 3, foodItems: 2 }, mobs: [zombie(2)] })).toBeNull();
-    expect(check(eatWhenStarving, { self: { food: 3, foodItems: 2 } })).toMatchObject({ urgency: 0.9 });
+    expect(check(starving, { self: { food: 3, foodItems: 2 }, mobs: [zombie(2)] })).toBeNull();
+    expect(check(starving, { self: { food: 3, foodItems: 2 } })).toMatchObject({ urgency: 0.9 });
   });
 });
 
@@ -126,9 +133,9 @@ describe("vital signs", () => {
 });
 
 describe("the medulla's settings", () => {
-  it("has the three urges, each switched off by its strength", () => {
-    expect(medullaUrges(DEFAULT_MEDULLA).map((r) => `${r.name}:${r.kind}`)).toEqual(["need_air:soft", "eat_to_heal:soft", "cure:soft"]);
-    expect(medullaUrges({ ...DEFAULT_MEDULLA, needAir: 0, eatToHeal: 0, cure: 0 })).toEqual([]);
+  it("has the four urges, each switched off by its strength", () => {
+    expect(medullaUrges(DEFAULT_MEDULLA).map((r) => `${r.name}:${r.kind}`)).toEqual(["need_air:soft", "eat_to_heal:soft", "cure:soft", "eat_when_starving:soft"]);
+    expect(medullaUrges({ ...DEFAULT_MEDULLA, needAir: 0, eatToHeal: 0, cure: 0, starving: 0 })).toEqual([]);
   });
 
   it("validates: a list of foods, and strengths from 0 to 1", () => {

@@ -15,13 +15,14 @@ import {
   DEFAULT_PATIENCE,
   DEFAULT_PERSONALITY,
 } from "@familiar/neuromodulators";
-import { DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
+import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type ArousalSettings, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
 import type { FiredReflex } from "@familiar/region-reflex";
 import { describe, expect, it } from "vitest";
 import { createArbiter, createBrain } from "./brain.js";
 
 const signal = new AbortController().signal;
-const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, potentiation: 0, warning: 0, habituation: 0, selfCaused: 0, startReact: 0, loadedResponses: 0, holdBack: 0, arousalGate: 0, bodySignals: 0 };
+const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, potentiation: 0, warning: 0, habituation: 0, selfCaused: 0, startReact: 0, loadedResponses: 0, holdBack: 0, arousalStartle: 0, bodySignals: 0 };
+const AROUSAL_OFF: ArousalSettings = { resting: 0.5, sleepPressure: 0, bedtime: 0, wakeThreshold: 0.5, inertia: 0, gate: 0, quietRest: 0, frazzled: 0 };
 type Mob = MinecraftStateData["nearby"]["mobs"][number];
 const mob = (type: string, dist: number, id = 1): Mob => ({ id: `entity:${id}`, type, dist, hostile: true, reachable: true });
 
@@ -97,7 +98,7 @@ const skills = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; defence?: Partial<DefenceSettings>; only?: string[]; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
   const store = createWorkspace();
   const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
   const engine: DecisionEngine = {
@@ -110,7 +111,8 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       calls.menus.push(next.options);
       calls.shown.push(_state);
       const choice = store.viewFor("x").current?.skill ?? "idle";
-      return [{ kind: "choice", id: "next_action", choice, probabilities: { [choice]: 0.9 }, confidence: 0.9 }];
+      // `spread`: an engine in two or three minds, to show how many options get proposed.
+      return [{ kind: "choice", id: "next_action", choice, probabilities: options.spread ?? { [choice]: 0.9 }, confidence: 0.9 }];
     },
   };
   const planner: Planner = {
@@ -135,6 +137,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       brainstem: { ...DEFAULT_BRAINSTEM, ...options.brainstem },
       colliculus: { ...DEFAULT_COLLICULUS, ...options.colliculus },
       defence: { ...DEFAULT_DEFENCE, ...options.defence },
+      arousal: { ...DEFAULT_AROUSAL, ...options.arousal },
       sameTime: options.sameTime ?? false,
       memory: createMemory(),
       persistence,
@@ -431,7 +434,7 @@ describe("loaded responses", () => {
   });
 });
 
-describe("arousal gate", () => {
+describe("the reticular formation through the real brain", () => {
   const inBed = { night: true, self: { asleep: true } };
 
   it("asleep and calm: no engine or planner calls; reflexes, dials and memory keep running", async () => {
@@ -449,7 +452,8 @@ describe("arousal gate", () => {
     expect(calls.engine).toBe(before.engine);
     expect(calls.planner).toBe(before.planner);
     expect(value("upper_paused")).toBe(1);
-    expect(value("arousal")).toBeCloseTo(0.05);
+    expect(value("arousal")).toBeLessThan(0.15);
+    expect(value("upper_rate")).toBe(0);
   });
 
   it("damage resumes instinct and the planner on the same tick", async () => {
@@ -461,7 +465,7 @@ describe("arousal gate", () => {
     expect(value("upper_paused")).toBe(0);
     expect(calls.engine).toBe(before.engine + 1);
     expect(calls.planner).toBe(before.planner + 1);
-    expect(out.traces.brainstem?.woken).toBe("damage");
+    expect(out.traces.reticular?.waking).toMatchObject({ by: "a hurt", calm: false });
   });
 
   it("a hard reflex wakes it too", async () => {
@@ -502,8 +506,8 @@ describe("with the engine failing every call", () => {
 
 describe("with every brainstem strength at 0", () => {
   it("decisions match a brain with the brainstem lesioned", async () => {
-    const off = bot({ brainstem: ALL_OFF });
-    const lesioned = bot({ only: ["reflex", "acetylcholine", "dopamine", "noradrenaline", "hippocampus", "instinct", "serotonin", "prefrontal"] });
+    const off = bot({ brainstem: ALL_OFF, arousal: AROUSAL_OFF });
+    const lesioned = bot({ only: ["reflex", "medulla", "acetylcholine", "dopamine", "noradrenaline", "hippocampus", "instinct", "serotonin", "prefrontal"] });
     const script: [Patch, string | null][] = [
       [{}, null],
       [{ mobs: [mob("zombie", 12)] }, "idle"],
@@ -523,7 +527,7 @@ describe("with every brainstem strength at 0", () => {
       for (const r of a.reflexes) expect(r.gain).toBe(1);
       expect(a.reflexes).toEqual(b.reflexes);
     }
-    expect(off.value("upper_paused")).toBeUndefined();
+    expect(off.value("upper_paused")).toBe(0);
     expect(off.calls.engine).toBe(lesioned.calls.engine);
   });
 });
@@ -556,12 +560,12 @@ describe("looking while the hands are busy (the same-time flag)", () => {
     expect(how(await walking.tick(appears(mob("zombie", 12)), "go_to"))).toBe("competes");
   });
 
-  it("is still proposed alongside when the reflex that fired runs a skill that leaves the head free", async () => {
+  it("is still proposed alongside when the urge that fired runs a skill that leaves the head free", async () => {
     const starving = { self: { food: 4, foodItems: 3 } };
     const eating = bot({ sameTime: true });
     await eating.tick(starving, "eat");
     const out = await eating.tick({ ...starving, ...appears(mob("zombie", 12)) }, "eat");
-    expect(out.reflexes.map((r) => r.rule)).toEqual(["eat_when_starving"]);
+    expect((out.traces.medulla?.urges as { rule: string }[]).map((r) => r.rule)).toEqual(["eat_when_starving"]);
     expect(how(out)).toBe("alongside");
   });
 
@@ -922,5 +926,83 @@ describe("the defence circuit through the real brain", () => {
     await tick({ self: { health: 8 } });
     expect((await tick({ self: { health: 16 } })).reflexes).toEqual([]);
     expect(value("recovering")).toBe(0);
+  });
+});
+
+describe("arousal through the real brain", () => {
+  const inBed = { night: true, self: { asleep: true } };
+  const awake = async (b: ReturnType<typeof bot>, n = 3) => {
+    for (let i = 0; i < n; i++) await b.tick();
+  };
+
+  it("with the reticular region left out, arousal is never shared, nothing pauses, and everything else runs", async () => {
+    const only = ["reflex", "medulla", "brainstem", "colliculus", "acetylcholine", "dopamine", "noradrenaline", "hippocampus", "instinct", "serotonin", "prefrontal"];
+    const { tick, calls, value } = bot({ only });
+    await tick(inBed, "sleep");
+    const before = calls.engine;
+    for (let i = 0; i < 5; i++) {
+      const out = await tick(inBed, "sleep");
+      expect(out.errors).toEqual([]);
+      expect(out.traces.instinct?.paused).toBeUndefined();
+    }
+    expect(calls.engine).toBe(before + 5);
+    expect([value("arousal"), value("upper_paused"), value("upper_rate")]).toEqual([undefined, undefined, undefined]);
+    // The colliculus reads a missing arousal as 0.5, and an ambush is still answered.
+    expect((await tick({ mobs: [mob("zombie", 6)] })).won).toBe("flee");
+  });
+
+  it("goes to bed by itself when tired at night; not when it has just slept", async () => {
+    const tired = bot();
+    await tired.tick({ night: true, self: { sinceSleepMinutes: 1440 } });
+    const out = await tired.tick({ night: true, self: { sinceSleepMinutes: 1440 } });
+    expect(tired.value("sleepy")).toBeCloseTo(0.68, 1);
+    expect(out.candidates).toContainEqual(expect.objectContaining({ region: "reticular", action: { skill: "sleep" } }));
+    const fresh = bot();
+    await fresh.tick({ night: true });
+    expect((await fresh.tick({ night: true })).candidates.some((c) => c.region === "reticular")).toBe(false);
+  });
+
+  it("a starving sleeper is woken by the urge, before it is hurt, and eats", async () => {
+    const { tick, value } = bot();
+    for (let i = 0; i < 4; i++) await tick(inBed, "sleep");
+    expect(value("upper_paused")).toBe(1);
+    const out = await tick({ night: true, self: { asleep: true, food: 6, foodItems: 2 } }, "sleep");
+    expect(out.traces.reticular?.waking).toMatchObject({ by: "urge", strength: 0.9, calm: false });
+    expect(value("upper_paused")).toBe(0);
+    expect(out.won).toBe("eat");
+  });
+
+  it("drowsy, instinct is asked less often; a threat brings every call straight back", async () => {
+    // Tired at night with nowhere to sleep (bedtime off): arousal sinks and the gate narrows.
+    const { tick, calls, value } = bot({ arousal: { bedtime: 0 } });
+    const tiredNight = { night: true, self: { sinceSleepMinutes: 2000 } };
+    for (let i = 0; i < 120; i++) await tick(tiredNight, "idle");
+    expect(value("arousal")).toBeLessThan(0.35);
+    expect(value("upper_rate")).toBeLessThan(0.4);
+    const before = calls.engine;
+    let saved = 0;
+    for (let i = 0; i < 40; i++) saved += (await tick(tiredNight, "idle")).traces.instinct?.paused ? 1 : 0;
+    expect(calls.engine - before).toBeLessThan(20);
+    expect(calls.engine - before).toBeGreaterThan(0);
+    expect(saved).toBe(40 - (calls.engine - before));
+    const then = calls.engine;
+    for (let i = 0; i < 4; i++) await tick({ ...tiredNight, mobs: [mob("zombie", 6)] }, "idle");
+    expect(calls.engine - then).toBe(4);
+    expect(value("upper_rate")).toBe(1);
+  });
+
+  it("frazzled above 0.9: instinct proposes fewer options", async () => {
+    const options = (out: Awaited<ReturnType<ReturnType<typeof bot>["tick"]>>) => out.candidates.filter((c) => c.region === "instinct").length;
+    const calm = bot({ spread: { idle: 0.4, go_to: 0.3, eat: 0.3 } });
+    await awake(calm);
+    expect(options(await calm.tick())).toBe(3);
+    const { tick, value } = bot({ spread: { idle: 0.4, go_to: 0.3, eat: 0.3 } });
+    await awake({ tick } as never);
+    const swarm = { self: { bestWeapon: "stone_sword" }, mobs: [mob("zombie", 2, 1), mob("zombie", 3, 2), mob("zombie", 5, 3)] };
+    let out = await tick(swarm);
+    for (let i = 0; i < 8; i++) out = await tick(swarm);
+    expect(value("arousal")).toBeGreaterThan(0.9);
+    expect(value("frazzled")).toBe(1);
+    expect(options(out)).toBe(2);
   });
 });

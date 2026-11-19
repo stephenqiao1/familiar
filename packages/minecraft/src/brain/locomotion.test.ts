@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_LOCOMOTION, driveFrom, locomotionProblem, RESTING_DRIVE } from "./locomotion.js";
 
 const signals = (levels: Record<string, number>): Record<string, Signal> => Object.fromEntries(Object.entries(levels).map(([name, value]) => [name, { value, source: "test", at: 0 }]));
-const OFF = { speedFromAlarm: 0, speedFromDopamine: 0, cautionFromFocus: 0 };
+const OFF = { speedFromAlarm: 0, speedFromDopamine: 0, cautionFromFocus: 0, slowWhenDrowsy: 0 };
 
 describe("driveFrom", () => {
   it("with nothing shared, uses each signal's resting value", () => {
@@ -61,6 +61,17 @@ describe("driveFrom", () => {
     expect(driveFrom(all, { ...OFF, speedFromAlarm: 1 })).toEqual({ speed: 0.65, caution: 0.3 });
     expect(driveFrom(all, { ...OFF, speedFromDopamine: 0.5 })).toEqual({ speed: expect.closeTo(0.46), caution: 0.3 });
     expect(driveFrom(all, { ...OFF, cautionFromFocus: 1 })).toEqual({ speed: 0.4, caution: 0.6 });
+  });
+});
+
+describe("drowsiness", () => {
+  it("a drowsy bot travels a little slower; arousal above resting changes nothing (alarm does that)", () => {
+    const speed = (arousal: number) => driveFrom(signals({ arousal }), { ...OFF, slowWhenDrowsy: 1 }).speed;
+    expect(speed(0.5)).toBe(0.4);
+    expect(speed(0.3)).toBeCloseTo(0.4 - 0.15 * (0.2 / 0.35));
+    expect(speed(0.1)).toBeCloseTo(0.25);
+    expect(speed(1)).toBe(0.4);
+    expect(driveFrom(signals({ arousal: 0.1 }), OFF).speed).toBe(0.4);
   });
 });
 

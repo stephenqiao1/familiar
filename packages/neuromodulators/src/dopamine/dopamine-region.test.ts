@@ -106,6 +106,7 @@ describe("createDopamineRegion", () => {
   });
 
   it("learns what a skill was aimed at, then proposes heading to that kind of thing when it is in view", async () => {
+    let sleeping = false;
     const store = createWorkspace();
     const scorebook = createScorebook();
     const region = createDopamineRegion({
@@ -114,6 +115,7 @@ describe("createDopamineRegion", () => {
       scorebook,
       thingsOf: () => [{ id: "pos:1,2,3", kind: "chest" }],
       skillsToward: () => ["go_to"],
+      asleep: () => sleeping,
     });
     const tick = (n: number) => {
       store.update(state(n), null);
@@ -128,6 +130,11 @@ describe("createDopamineRegion", () => {
     expect(scorebook.get("day", "go_to→chest").expected).toBeCloseTo(0.5);
     expect(out.proposals).toMatchObject([{ action: { skill: "go_to", target: "pos:1,2,3" }, reason: expect.stringMatching(/^wants the chest/) }]);
     expect(out.trace?.cues).toMatchObject([{ thing: { kind: "chest" }, skill: "go_to" }]);
+    // Asleep, the cue is still noticed but proposes nothing: it is not a wake event.
+    sleeping = true;
+    const asleep = await tick(5);
+    expect(asleep.proposals).toEqual([]);
+    expect(asleep.trace?.cues).toHaveLength(1);
   });
 
   it("shrinks repeated rewards from the same rule, and logs the raw amount", async () => {

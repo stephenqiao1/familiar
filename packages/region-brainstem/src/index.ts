@@ -1,4 +1,4 @@
-export { createBrainstemRegion, type Body, type BrainstemMoment, type BrainstemOptions, type StartleDetector, type StartleHit } from "./brainstem-region.js";
+export { arousalStartleFactor, createBrainstemRegion, type Body, type BrainstemMoment, type BrainstemOptions, type StartleDetector, type StartleHit } from "./brainstem-region.js";
 export { createDefenceWatch, type DefenceTick, type OverruledDefence } from "./defence-watch.js";
 export { createReflexGain, HELD_BACK, isHeldBack, MAX_GAIN, MIN_GAIN, reflexGain, type GainInputs, type Leaning, type ReflexGainOptions } from "./gain.js";
 export { createMedullaRegion, overall, type MedullaOptions, type Vitals } from "./medulla-region.js";
@@ -17,3 +17,9 @@ export { createDefenceState, MAX_ANALGESIA, RECOVER, type DefenceState } from ".
 export { summariseDefence, type DefenceRow, type DefenceSummary } from "./defence-stats.js";
 export type { DefenceMoment } from "./defence-watch.js";
 export { ANALGESIA_SIGNAL, RECOVERING_SIGNAL, THREAT_SIGNAL, WARY_SIGNAL } from "./signals.js";
+export { asleepLevel, bandOf, BANDS, depthOf, rateOf, restful, sleepDrive, sleepyOf, stepArousal, targetOf, URGENT as URGENT_WAKE, wakeDrive, wakes, type Band, type WakeInputs } from "./arousal.js";
+export { arousalProblem, DEFAULT_AROUSAL, type ArousalSettings } from "./arousal-settings.js";
+export { BEDTIME, createBedtime, REFUSED_MS, type Bed } from "./bedtime.js";
+export { createRateGate, type RateGate } from "./gate.js";
+export { createReticularRegion, type Moment, type ReticularOptions } from "./reticular-region.js";
+export { DEPTH_SIGNAL, FRAZZLED_SIGNAL, QUIET_SIGNAL, SLEEPY_SIGNAL, UPPER_RATE_SIGNAL } from "./signals.js";

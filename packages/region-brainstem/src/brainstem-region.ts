@@ -4,7 +4,7 @@ import type { Choice, Threat } from "./defence.js";
 import { createDefenceState } from "./defence-state.js";
 import { createStartle } from "./startle.js";
 import type { BrainstemSettings } from "./settings.js";
-import { ANALGESIA_SIGNAL, AROUSAL_SIGNAL, LOADED_SIGNAL, RECOVERING_SIGNAL, THREAT_SIGNAL, WARY_SIGNAL, SORE_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
+import { ANALGESIA_SIGNAL, LOADED_SIGNAL, RECOVERING_SIGNAL, THREAT_SIGNAL, WARY_SIGNAL, SORE_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL } from "./signals.js";
 
 /** What a detector looks at: the last tick's state, this tick's, and the workspace. */
 export interface BrainstemMoment {
@@ -71,10 +71,8 @@ export interface BrainstemOptions {
   acceptsTarget(skill: string, target: string): boolean;
   /** d: the names a goal may hold back (soft reflexes and the skills they propose). */
   holdable: string[];
-  /** e: in bed, asleep. */
-  asleep(ws: Workspace): boolean;
-  /** e: night, safe and idle. */
-  drowsy(ws: Workspace): boolean;
+  /** b: how awake the body is, 0 to 1 (the reticular formation's arousal, as last shared): a drowsy body startles a little less, an over-aroused one a little more. Default: 0.5. */
+  arousalOf?(ws: Workspace): number;
   /** f: the body's levels, or null before the first state. */
   body(state: State): Body | null;
   /** f: what the body's balance and posture did this tick, for the trace. Asked once a tick. Default: nothing. */
@@ -98,17 +96,17 @@ export interface BrainstemOptions {
 
 /** A flinch is proposed below 1, so it can never take over from a hard reflex's skill. */
 const FLINCH_URGENCY = 0.9;
-/** Pain fades with this time constant: about gone after 10 seconds. */
-const PAIN_TAU_SECONDS = 3.3;
 /** Being stuck fades from the signal with this time constant: about gone after 5 seconds. */
 const STUCK_TAU_SECONDS = 1.7;
-/** Losing this share of full health at once is full pain. */
-const FULL_PAIN = 1 / 3;
-/** Below these, the bot is undisturbed enough to stay asleep with the upper layers paused. */
-const CALM = { pain: 0.05, alarm: 0.2 };
-const AROUSAL = { asleep: 0.05, drowsy: 0.3, awake: 0.5 };
-/** While the upper layers are paused, staying with the running skill (sleep) is proposed at this urgency. */
-const STAY_ASLEEP_URGENCY = 0.5;
+/** How far arousal moves a startle's strength: down to this much less when drowsy, and this much more when over-aroused. */
+const AROUSAL_STARTLE = { drowsy: 0.2, overAroused: 0.1, drowsyBelow: 0.35, overAbove: 0.9, resting: 0.5 };
+
+/** A startle's strength is scaled by how awake the body is. Alarm already enlarges a startle (potentiation), so the upper side is small and starts only above 0.9. */
+export function arousalStartleFactor(arousal: number, strength = 1): number {
+  const { drowsy, overAroused, drowsyBelow, overAbove, resting } = AROUSAL_STARTLE;
+  if (arousal < resting) return 1 - strength * drowsy * Math.min(1, (resting - arousal) / (resting - drowsyBelow));
+  return arousal > overAbove ? 1 + strength * overAroused * Math.min(1, (arousal - overAbove) / (1 - overAbove)) : 1;
+}
 
 /**
  * The brainstem: keeps the body going and reacts before the rest of the brain has noticed. It
@@ -120,8 +118,7 @@ const STAY_ASLEEP_URGENCY = 0.5;
  *   (c, orienting, moved to the colliculus region);
  *   d) loaded responses: fires a response the goal loaded in advance the moment its thing appears;
  *      reports loaded responses and hold-backs it had to ignore;
- *   e) arousal gate: shares `arousal`; while asleep and undisturbed, shares `upper_paused` so the
- *      deciding layers above make no calls. A startle, damage, a hard reflex or alarm ends it at once;
+ *   (e, the arousal gate, moved to the reticular region);
  *   f) body signals: shares `stuck`, `sore` and `unsteady` (the vital signs are the medulla's);
  *   g) defence signals: shares `threat` and `wary` from the defence chosen this tick (the defence
  *      reflexes themselves fire in the reflex region), `analgesia` while fleeing or fighting, and
@@ -132,7 +129,6 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
   const { settings, skills, name = "brainstem", layer = 0 } = options;
   const loaded = createLoadedResponses(options.responseProblem);
   let before: State | null = null;
-  let pain = 0;
   let stuck = 0;
   const startle = createStartle(settings);
   const defence = createDefenceState(options.defenceStrengths);
@@ -150,12 +146,11 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
       const proposals: Proposal[] = [];
       const trace: Record<string, unknown> = {};
 
-      // f) Body. Recent pain is tracked here only for the arousal gate; the medulla shares the vital signs.
+      // f) Body. (The medulla shares the vital signs.)
       const body = options.body(after);
       const was = before ? options.body(before) : null;
       const dt = before ? Math.max(0, now - before.timestamp) / 1000 : 0;
       const hurt = body && was ? Math.max(0, was.health - body.health) : 0;
-      pain = Math.min(1, pain * Math.exp(-dt / PAIN_TAU_SECONDS) + hurt / FULL_PAIN);
       if (settings.bodySignals > 0 && body) {
         // 1 while the legs are stuck, then fading.
         stuck = body.stuck ? 1 : stuck * Math.exp(-dt / STUCK_TAU_SECONDS);
@@ -190,7 +185,8 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
       if (settings.startle > 0) {
         const hits = moment ? options.startle.flatMap((detector) => { const hit = detector.check(moment); return hit ? [{ by: detector.name, hit }] : []; }) : [];
         const strongest = hits.sort((a, b) => b.hit.intensity - a.hit.intensity)[0];
-        const event = strongest && { kind: strongest.hit.kind ?? strongest.hit.source?.kind ?? strongest.by, intensity: strongest.hit.intensity, ...(strongest.hit.place ? { place: strongest.hit.place } : {}), foreseen: strongest.hit.foreseen ?? 0, selfCaused: strongest.hit.selfCaused ?? false };
+        const awake = arousalStartleFactor(options.arousalOf?.(ws) ?? 0.5, settings.arousalStartle);
+        const event = strongest && { kind: strongest.hit.kind ?? strongest.hit.source?.kind ?? strongest.by, intensity: Math.min(1, strongest.hit.intensity * awake), ...(strongest.hit.place ? { place: strongest.hit.place } : {}), foreseen: strongest.hit.foreseen ?? 0, selfCaused: strongest.hit.selfCaused ?? false };
         // Harm since the last tick: whatever startled lately was worth it (unless this is that same event again).
         if (hurt > 0) startle.harmed(now, event);
         if (strongest && event) {
@@ -198,7 +194,7 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
           const judged = startle.judge(event, edge, hurt > 0, now);
           const { hit, by } = strongest;
           const eventToDecideMs = Math.max(0, Math.round(Date.now() - (now - (hit.msAgo ?? 0))));
-          const report = { by, kind: event.kind, source: hit.source, intensity: round(hit.intensity), potentiation: round(judged.potentiation), warning: round(judged.warning), habituated: round(judged.habituated), selfCaused: judged.selfCaused, magnitude: round(judged.magnitude), ...(hit.cause ? { cause: hit.cause } : {}), eventAt: now - (hit.msAgo ?? 0), eventToDecideMs };
+          const report = { by, kind: event.kind, source: hit.source, intensity: round(hit.intensity), ...(awake === 1 ? {} : { arousal: round(awake) }), potentiation: round(judged.potentiation), warning: round(judged.warning), habituated: round(judged.habituated), selfCaused: judged.selfCaused, magnitude: round(judged.magnitude), ...(hit.cause ? { cause: hit.cause } : {}), eventAt: now - (hit.msAgo ?? 0), eventToDecideMs };
           // A flinch never cuts across a hard reflex's skill.
           const flinchBarred = judged.size === "flinch" && (options.hardReflex?.(ws) ?? false);
           if (judged.size === "none" || flinchBarred) trace.startleQuiet = { ...report, why: flinchBarred ? "a hard reflex is acting" : judged.silenced };
@@ -237,27 +233,6 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
         if (ignored.length) trace.ignoredHoldBack = ignored;
         const held = settings.holdBack > 0 ? ws.goal.holdBack.filter((n) => options.holdable.includes(n)) : [];
         if (held.length) trace.holdingBack = held;
-      }
-
-      // e) Arousal gate.
-      const alarm = options.alarmOf(ws);
-      const disturbed = startled !== null || hurt > 0 || pain > CALM.pain || alarm >= CALM.alarm || (options.hardReflex?.(ws) ?? false);
-      const asleep = options.asleep(ws) && !disturbed;
-      const rest = asleep ? AROUSAL.asleep : options.drowsy(ws) ? AROUSAL.drowsy : AROUSAL.awake;
-      const arousal = rest + (1 - rest) * alarm;
-      ws.setSignal(AROUSAL_SIGNAL, arousal);
-      trace.arousal = arousal;
-      if (settings.arousalGate > 0) {
-        ws.setSignal(UPPER_PAUSED_SIGNAL, asleep ? 1 : 0);
-        if (asleep) {
-          trace.upperPaused = true;
-          // With the deciding layers quiet, nothing else would speak for staying asleep.
-          if (ws.current) {
-            proposals.push({ action: { skill: ws.current.skill, ...(ws.current.target ? { target: ws.current.target } : {}) }, urgency: STAY_ASLEEP_URGENCY, reason: "asleep and undisturbed" });
-          }
-        } else if (options.asleep(ws)) {
-          trace.woken = startled ? "startle" : hurt > 0 || pain > CALM.pain ? "damage" : alarm >= CALM.alarm ? "alarm" : "hard reflex";
-        }
       }
 
       before = after;

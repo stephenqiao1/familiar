@@ -16,14 +16,17 @@ export interface PlayerInstinct {
 const GOAL_COUNTS_FULLY = 0.75;
 /** With options widened, this many of the engine's options are proposed, down to this probability. */
 const WIDE = { maxOptions: 5, minProbability: 0.05 };
+/** Narrowed (frazzled): only this many, and only likely ones. */
+const NARROW = { maxOptions: 2, minProbability: 0.2 };
 
 /**
  * The player's questions each tick: the usual set, with the current goal (if any) added to the
  * next_action context, as far as the planner's weight allows. The next_action answers become the
- * proposals; `widen` says when to offer more of them (e.g. when search is high). Reflex-only
+ * proposals; `widen` says when to offer more of them (e.g. when search is high), and `narrow`
+ * when to offer fewer (too wound up to think widely); narrow wins. Reflex-only
  * skills are never on the menu, and primitives only with `showPrimitives`.
  */
-export function playerInstinct<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, widen: (ws: Workspace) => boolean = () => false, showPrimitives = false): PlayerInstinct {
+export function playerInstinct<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, widen: (ws: Workspace) => boolean = () => false, showPrimitives = false, narrow: (ws: Workspace) => boolean = () => false): PlayerInstinct {
   const menu = menuSkills(skills, showPrimitives);
   const acceptsTarget = (skill: string, target: string) => skills.find((s) => s.name === skill)?.canRun(ctx, target) ?? false;
   return {
@@ -34,7 +37,7 @@ export function playerInstinct<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, widen: (ws: 
         target: buildTargetQuestion(thingsInView(ws.state).map((t) => t.id)),
       });
     },
-    toProposals: (answers, ws) => actionProposal(answers, { acceptsTarget, ...(widen(ws) ? WIDE : {}) }),
+    toProposals: (answers, ws) => actionProposal(answers, { acceptsTarget, ...(narrow(ws) ? NARROW : widen(ws) ? WIDE : {}) }),
   };
 }
 

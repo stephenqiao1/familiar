@@ -13,7 +13,7 @@ import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { Defence, MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export interface EncodeContext {
   base: Base;
@@ -62,7 +62,7 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
   const players = scanPlayers(bot, limit).map((p) => sighted(bot, p, senses));
   const things = [...mobs, ...players, ...blocks];
   const data: MinecraftStateData = {
-    time: { isNight: !bot.time.isDay, lightLevel: lightLevel(bot) },
+    time: { isNight: !bot.time.isDay, lightLevel: lightLevel(bot), ...nightProgress(bot) },
     self: {
       ...encodeSelf(bot, ctx.base.chest, ctx.deaths, ctx.lastHurt ?? null, now),
       locomotion: ctx.locomotion ?? STANDING,
@@ -94,6 +94,16 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
   };
   if (ctx.defence) data.defence = ctx.defence(data, now);
   return { schemaVersion: SCHEMA_VERSION, tick, timestamp: now, data: { ...data } };
+}
+
+/** Roughly when the night starts and ends, in the game's ticks of the day (it runs 0 to 24000). */
+const NIGHT = { from: 12_500, to: 23_500 };
+
+/** At night, how far through it is (0 at dusk, 1 at dawn). */
+function nightProgress(bot: EncodableBot): { nightProgress?: number } {
+  const t = bot.time.timeOfDay;
+  if (bot.time.isDay || t === undefined) return {};
+  return { nightProgress: Math.round(Math.min(1, Math.max(0, (t - NIGHT.from) / (NIGHT.to - NIGHT.from))) * 100) / 100 };
 }
 
 /** How much darker the sky is at night: the game dims sky light by this much. */

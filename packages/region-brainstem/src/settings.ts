@@ -20,8 +20,8 @@ export interface BrainstemSettings {
   loadedResponses: number;
   /** d: how far a goal can hold a soft reflex back (0 = not at all, 1 = down to 0.3 of its gain). */
   holdBack: number;
-  /** e: while asleep and undisturbed, the deciding layers above are paused. On above 0. */
-  arousalGate: number;
+  /** b: how far arousal moves a startle (drowsy: a little less; over-aroused: a little more). */
+  arousalStartle: number;
   /** f: share stuck and sore as signals. On above 0. */
   bodySignals: number;
 }
@@ -37,13 +37,13 @@ export const DEFAULT_BRAINSTEM: BrainstemSettings = {
   startReact: 1,
   loadedResponses: 1,
   holdBack: 1,
-  arousalGate: 1,
+  arousalStartle: 1,
   bodySignals: 1,
 };
 
 /** A jumpy bot startles this much harder than a normal one. */
 const MAX_STARTLE = 1.5;
-const KEYS = ["bravery", "gains", "potentiation", "warning", "habituation", "selfCaused", "startReact", "loadedResponses", "holdBack", "arousalGate", "bodySignals"] as const;
+const KEYS = ["bravery", "gains", "potentiation", "warning", "habituation", "selfCaused", "startReact", "loadedResponses", "holdBack", "arousalStartle", "bodySignals"] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function brainstemProblem(s: BrainstemSettings): string | null {

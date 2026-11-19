@@ -50,3 +50,13 @@ export const WARY_SIGNAL = "wary";
 export const ANALGESIA_SIGNAL = "analgesia";
 /** 1 while the body is resting to recover after a fight or flight, else 0. */
 export const RECOVERING_SIGNAL = "recovering";
+/** Sleep pressure, 0 to 1: tiredness, raised at night and lowered by day; none while danger is coming. */
+export const SLEEPY_SIGNAL = "sleepy";
+/** While asleep, how deep the sleep is: about 0.9 early in the night, easing to about 0.4 by morning. 0 awake. */
+export const DEPTH_SIGNAL = "depth";
+/** How often the deciding layers above may be called, as a share of their usual rate: 0 asleep, about 0.3 drowsy, 1 awake. */
+export const UPPER_RATE_SIGNAL = "upper_rate";
+/** 1 while the body has been drowsy, safe and still for a minute: rest without sleep. */
+export const QUIET_SIGNAL = "quiet";
+/** 1 while over-aroused (arousal above 0.9): too wound up to think widely. */
+export const FRAZZLED_SIGNAL = "frazzled";

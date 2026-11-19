@@ -13,8 +13,10 @@ Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
  Medulla: vital signs and  │                     │ and hold reflexes back (holdBack)
    the urges of upkeep     │                     │
  Brainstem: reflex gains,  │                     │
-   startle, loaded         │   ◄── paused while asleep and undisturbed ──►
-   responses, arousal gate
+   startle, loaded         │   ◄── called less often when drowsy, ──►
+   responses               │       not at all while asleep
+ Reticular: arousal, bed-
+   time, waking, the gate
  Colliculus: the map of
    where things are; turns
    the head (look_at)
@@ -61,7 +63,7 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `core` | The brain loop (runs regions, asks the arbiter, acts, logs), workspace, skill executor. |
 | `arbiter` | The pickers: `value-weighted` (used) and `highest-urgency`. |
 | `region-reflex` | Runs a list of rules, hard and soft, and logs each fired rule's kind, base urgency, gain and final urgency. |
-| `region-brainstem` | Supplies the reflex gains, the defence circuit's choice of defence, a `brainstem` region (startle, loaded responses, the arousal gate, the defence signals), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
+| `region-brainstem` | Supplies the reflex gains, the defence circuit's choice of defence, a `brainstem` region (startle, loaded responses, the defence signals), a `reticular` region (arousal, bedtime, waking and the graded gate), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
 | `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
 | `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
 | `neuromodulators` | Chemical dials, each a region that shares signals (see below). |
@@ -86,8 +88,7 @@ life-saving ones cannot be overruled. Each bot's settings are the `brainstem` bl
   defence circuit fights instead of fleeing into a wall).
 - Soft, defence: `defence_freeze`, `defence_flee`, `defence_fight` and `recuperate`. At most one
   fires each tick, chosen by the defence circuit (next section).
-- Soft: `eat_when_starving`, base 0.9 (food 6 or less; not with a threat on the bot; a food
-  known to be bad is eaten only now, and only when there is nothing else).
+- Eating when starving is an upkeep urge now (the medulla, below), so that it can wake a sleeper.
 
 **Withdrawal and stretch reflexes** (the body's fastest protections; rules in
 `packages/minecraft/src/brain/protective-reflexes.ts`, switched per bot in `bots.json` under `reflexes`):
@@ -178,10 +179,10 @@ blocks known to hurt within 3 blocks.
 - **Hold back.** A goal's `holdBack` names soft reflexes (or the skills they propose) to damp.
   Hard reflex names are ignored and logged. A goal with `ifThen` or `holdBack` survives an alarm
   interrupt.
-- **Arousal gate.** Shares `arousal` (about 0.05 asleep, 0.3 drowsy, toward 1 with alarm). While
-  asleep and undisturbed it shares `upper_paused`: instinct and the prefrontal cortex make no
-  calls. A startle, damage, a hard reflex or alarm ends the pause on the same tick. Reflexes, the
-  neuromodulators and memory never pause.
+- **Arousal gate.** Moved to the reticular formation (below).
+- **Arousal and startle.** A drowsy body startles a little less (down to × 0.8 at arousal 0.35
+  or under); an over-aroused one a little more (up to × 1.1 above 0.9). Alarm already enlarges
+  a startle, so the upper side is small. Strength: `brainstem.arousalStartle`.
 - It also shares `stuck`, `sore` and `unsteady` (1 − balance; see Balance and posture). The
   body's vital signs are the medulla's job (below).
 
@@ -274,6 +275,117 @@ the cost. `pnpm brain-report` adds the time in each mode, freezes that worked an
 distance each flight began at, fights won and lost, cornered events, recoveries and what was
 learned. A death is printed with the modes of the 5 seconds before it (`defenceBeforeDeath`).
 
+## The reticular formation: how awake
+
+One continuous arousal level says how awake the bot is. It decides when the bot sleeps and
+wakes, and how hard the deciding layers work. The `reticular` region
+(`packages/region-brainstem/src/reticular-region.ts`; the maths is `arousal.ts`, pure and
+game-free) runs every tick, after the brainstem, so it hears this tick's threat and startle.
+The player's side (what counts as night, safe, idle, in bed; which skill is bed) is
+`packages/minecraft/src/brain/reticular.ts`. Each bot's settings are the `arousal` block in
+`bots.json`. Left out (`--regions`), arousal reads as 0.5 everywhere and nothing is ever paused.
+
+**The two drives.**
+
+| Drive | Made from |
+|---|---|
+| Wake, 0 to 1 | The largest of alarm, `threat`, `startle`, `pain` and the medulla's `urge`; plus 0.15 for something that has just drawn the attention and 0.15 for a demanding skill under way |
+| Sleep, 0 to 1 | `sleepy` × how restful the moment is. Restful: a quarter each for night, safe, nothing to do and recovering, and a quarter more for safe and idle together |
+
+- Target = resting (0.5) + 0.5 × wake − 0.45 × sleep, kept within 0 to 1. Asleep, the target is
+  low inside the asleep band, lower the deeper the sleep.
+- Arousal moves toward the target fast going up (about a second) and slowly coming down (about 20).
+
+**The bands** (for the trace and the report):
+
+| Band | Arousal |
+|---|---|
+| asleep | under 0.15 |
+| drowsy | under 0.35 |
+| awake | 0.35 to 0.7 |
+| alert | over 0.7 |
+| over-aroused | over 0.9 |
+
+The band changes at most once in 3 seconds, except upward for danger.
+
+**What it shares.**
+
+| Signal | 0 means | 1 means |
+|---|---|---|
+| `arousal` | deep sleep | over-aroused (0.5 is quietly awake) |
+| `sleepy` | no sleep pressure | as sleepy as it gets |
+| `depth` | awake | (0.9 is deep sleep, 0.4 light) |
+| `upper_rate` | the deciding layers are not called | they are called as usual |
+| `upper_paused` | the rate is above 0 | the rate is 0 (asleep) |
+| `quiet` | | drowsy, safe and still for a minute |
+| `frazzled` | | over-aroused |
+
+**Sleepy and bedtime** (`bedtime.ts`).
+
+- `sleepy` = the medulla's `tired` + 0.35 at night, − 0.2 by day; 0 while a threat is coming or
+  on the bot. A bot awake since morning is about 0.68 at night; one that has just slept, 0.35.
+- Above 0.5, with nothing pressing, it proposes the bed skill (`sleep`) at 0.2, rising to 0.6
+  fully sleepy. Soft: Jev and the planner can still choose sleep, or outvote it.
+- **Flip-flop.** Once heading to bed it keeps on until `sleepy` falls below 0.3 or the wake
+  drive rises above 0.5. Once up, it does not head back until `sleepy` is above 0.5 again.
+- Never with a threat seen or worse, or a risky skill under way.
+- **After a refusal** (the sleep skill failed: too close to dawn, monsters near, no way to the
+  bed) it proposes nothing for 30 seconds. The sleep skill itself also refuses to start for 30
+  seconds after the game says no, so Jev cannot retry it either.
+- **No bed in reach** (further than 64 blocks, or it is day): `sleepy` is still shared, nothing
+  is proposed, and the trace says why (`bedtime.delayed`).
+
+**Asleep.**
+
+- `depth` is shared: 0.9 for the first third of the night, easing to 0.4 by morning.
+- **Waking is by strength, not by a list.** An event wakes the bot when its strength is above
+  depth × 0.6 (× `wakeThreshold` ÷ 0.5). Strength is the largest of startle, pain, alarm, threat
+  and urge. So early in the night it takes 0.54; near morning 0.24.
+- A hurt, a full startle or a hard reflex always wakes, on the same tick, whatever the depth.
+- A starving bot is woken by its urge (0.9) before starving hurts.
+- **A cue is not a wake event.** Asleep, focus's cue pulse and dopamine's cues propose nothing.
+- With the deciding layers silent, the region speaks for staying asleep at 0.3 + 0.4 × depth:
+  a light sleeper is easier to rouse than a deep one.
+- **Sleep inertia.** After a calm waking arousal starts at 0.25 and takes about 10 seconds to
+  climb back. Woken by danger, it jumps straight up.
+- Each waking is logged with what woke it, its strength, the depth, and how long the bot slept.
+  "Waking" means the gate opens and nothing speaks for sleep any more; whether the bot gets out
+  of bed is up to what is proposed next. If nothing is, it sleeps on.
+
+**The graded gate.** `upper_rate` (0 to 1) says how often the deciding layers may be called:
+0 asleep, about 0.3 drowsy (arousal 0.35), 1 once awake, smooth in between. `upper_paused` is
+"the rate is 0", as before.
+
+- Instinct is called no more often than 500 ms ÷ rate; the planner no more often than 15 s ÷ rate
+  (`createRateGate`, wired in `apps/run-bot/src/brain.ts`).
+- A wake drive above 0.5 sets the rate to 1 at once. An alarm interrupt (instinct) or a call for
+  a new plan (the planner) is never held.
+- Reflexes, the medulla, the neuromodulators and memory are never gated.
+- The give-up clock keeps restarting while asleep.
+- `pnpm brain-report` prints the calls saved, asleep and drowsy.
+
+**What reads arousal.**
+
+| Reader | Effect | Strength |
+|---|---|---|
+| Colliculus | The threshold falls as arousal rises (as before) | `colliculus.topDown` |
+| Startle | × 0.8 when drowsy, × 1.1 when over-aroused | `brainstem.arousalStartle` |
+| Locomotion | Speed − 0.15 when fully drowsy; nothing above the resting level | `locomotion.slowWhenDrowsy` |
+| Memory | `quiet` (drowsy, safe and still for 60 seconds) counts as rest: memories are consolidated, as in sleep | `arousal.quietRest` |
+| Instinct | `frazzled` (over-aroused, above 0.9): at most 2 options are proposed, none under 0.2 | `arousal.frazzled` |
+| Planner | While `frazzled` it is told in one line to keep the plan short and put safety first | `arousal.frazzled` |
+
+**Arousal and alarm overlap.** Alarm is the largest part of the wake drive, so high arousal
+mostly is high alarm. Where a part already reads alarm (reflex gains, locomotion's speed-up and
+its "no tiptoeing when frightened", the colliculus's threshold, startle potentiation, the tick
+rate), arousal adds nothing on the upper side. Arousal is used alone only on the drowsy side
+(startle, speed, the gate, quiet rest), and for `frazzled`.
+
+**In the log.** The region's trace has, each tick: `wake` (value and what set it), `sleep`
+(value, sleepy, restful), `target`, `arousal`, `band`, `sleepy`, `rate`, and when they apply
+`asleep`, `depth`, `groggy`, `waking`, `bedtime` (proposed, or what delayed it), `quiet`,
+`frazzled`.
+
 ## The medulla: body upkeep
 
 The medulla (`medulla` region, `packages/region-brainstem/src/medulla-region.ts`; Minecraft
@@ -296,8 +408,8 @@ sleeps. It is listed right after `reflex`, so every later region sees its signal
 | `tired` | just slept | 3 game days awake | time since the bot last woke from a bed (kept across restarts) |
 | `vitals` | (1 is all well) | | one overall number: 1 − (0.8 × the worst sign + 0.2 × their average), over air, hunger, hurt, sick, cold and tired |
 
-A later drives region will read these (`HOOK(drives)` in the region file). Nothing acts on
-`cold`, `tired`, `reserve` or `vitals` yet.
+A later drives region will read these (`HOOK(drives)` in the region file). `tired` feeds the
+reticular formation's `sleepy`. Nothing acts on `cold`, `reserve` or `vitals` yet.
 
 **Upkeep, by urgency.** The hard limit stays a hard reflex in the `reflex` region; before it,
 the medulla's urges are soft and graded, so the layers above can outvote them:
@@ -305,7 +417,7 @@ the medulla's urges are soft and graded, so the layers above can outvote them:
 | Need | Soft urge (medulla) | Hard or last-resort reflex |
 |---|---|---|
 | Air | `need_air` → `surface`: under water, from 0.3 at air 12 rising to 0.9 at air 7 | `drowning` at air 6 or less (hard, urgency 1) |
-| Food | `eat_to_heal` → `eat level:18`, base 0.5: hurt, food under 18 (the level at which the body heals itself), safe food to hand, no hostile in contact. It eats only up to 18, then stops. | `eat_when_starving` at food 6 or less (soft, base 0.9) |
+| Food | `eat_to_heal` → `eat level:18`, base 0.5: hurt, food under 18 (the level at which the body heals itself), safe food to hand, no hostile in contact. It eats only up to 18, then stops. | `eat_when_starving` → `eat`, base 0.9, at food 6 or less: also an urge of the medulla (it was a reflex), so it counts toward `urge` and wakes a sleeper before starving hurts. Not with a threat on the bot; a food known to be bad is eaten only now, and only when there is nothing else. |
 | Sickness | `cure` → `consume item:milk_bucket`, base 0.7: has an effect that a carried cure clears (`CURES` table; `HOOK(learn-cures)`) | none |
 
 - The urges take only one part of the brainstem's gain: a goal's `holdBack`. Naming `need_air`
@@ -749,6 +861,12 @@ in `data/<name>/`.
 | Add a target format | `packages/minecraft/src/target.ts` (parse) and `resolve-target.ts` (resolve) |
 | Change what `changes` reports | `packages/minecraft/src/primitives/snapshot.ts` |
 | Add a learned skill by hand | `data/<bot>/learned-skills.json` |
+| Make a bot a heavier sleeper | `bots.json`: `arousal.wakeThreshold` (0.5 is usual; higher takes more to wake) |
+| Change when it goes to bed | `BEDTIME` and `URGENCY` in `packages/region-brainstem/src/bedtime.ts`; how sleepy night and tiredness make it is `SLEEPY` in `arousal.ts`; a bot's strengths are `arousal.bedtime` and `arousal.sleepPressure` |
+| Add something that wakes it | Nothing to list: anything that raises `startle`, `pain`, alarm, `threat` or the medulla's `urge` wakes it once it is stronger than depth × 0.6. To add a new kind, add it to `wakeDrive` in `arousal.ts` |
+| Change which skill is bed, or what counts as restful | `packages/minecraft/src/brain/reticular.ts` |
+| Change why sleep is not possible | `sleepProblem` in `packages/minecraft/src/skills/sleep.ts` |
+| Change how low arousal slows the deciding layers | `rateOf` in `arousal.ts`; the usual intervals are `USUAL_MS` in `apps/run-bot/src/brain.ts`; a bot's strength is `arousal.gate` |
 | Change a bot's bravery | `bots.json`: `brainstem.bravery` (0 timid, 1 brave) |
 | Turn part of the brainstem off | `bots.json`: set its strength in `brainstem` to 0 |
 | Add a reward | `packages/minecraft/src/brain/rewards.ts` (write a rule, add it to `playerRewards`) |

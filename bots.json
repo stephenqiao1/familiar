@@ -48,15 +48,16 @@
       "habituation": 1,
       "selfCaused": 1,
       "startReact": 1,
+      "arousalStartle": 1,
       "loadedResponses": 1,
       "holdBack": 1,
-      "arousalGate": 1,
       "bodySignals": 1
     },
     "locomotion": {
       "speedFromAlarm": 1,
       "speedFromDopamine": 1,
-      "cautionFromFocus": 1
+      "cautionFromFocus": 1,
+      "slowWhenDrowsy": 1
     },
     "reflexes": {
       "innateHurts": [
@@ -86,6 +87,7 @@
       "needAir": 1,
       "eatToHeal": 1,
       "cure": 1,
+      "starving": 1,
       "learnBadFoods": 1,
       "vitals": 1
     },
@@ -164,6 +166,16 @@
       "analgesia": 1,
       "recuperate": 1,
       "reachCheck": 1
+    },
+    "arousal": {
+      "resting": 0.5,
+      "sleepPressure": 1,
+      "bedtime": 1,
+      "wakeThreshold": 0.5,
+      "inertia": 1,
+      "gate": 1,
+      "quietRest": 1,
+      "frazzled": 1
     }
   },
   "Brave": {
@@ -203,6 +215,11 @@
     "defence": {
       "innateThreats": [],
       "innateNeverFight": []
+    }
+  },
+  "Sleeper": {
+    "arousal": {
+      "wakeThreshold": 0.9
     }
   }
 }

@@ -30,7 +30,7 @@ import {
   type MedullaSettings,
   type ReflexSettings,
 } from "@familiar/minecraft";
-import { brainstemProblem, colliculusProblem, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
+import { arousalProblem, brainstemProblem, colliculusProblem, DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type ArousalSettings, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
 
 // Every bot's settings live in one file, keyed by bot name. A bot with no entry, or a setting
 // left out, gets the default. A bad value stops the bot at startup with a clear error.
@@ -58,6 +58,8 @@ export interface BotConfig {
   posture: PostureSettings;
   /** The colliculus: what makes something striking, how easily the bot turns its head, and whether it knows only what it sees. */
   colliculus: ColliculusSettings;
+  /** Arousal: how awake the bot rests, how it sleeps and wakes, and how far arousal reaches. */
+  arousal: ArousalSettings;
   /** Defence: what the bot is born knowing about threats, and the strength of each part of the defence circuit. */
   defence: DefenceSettings;
   memory: MemorySettings;
@@ -73,13 +75,17 @@ export const DEFAULT_MEMORY: MemorySettings = { halfLifeDays: 2 };
 export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Promise<BotConfig> {
   const bots = await readBots(file);
   const entry = bots[name] as
-    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings>; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; memory?: Partial<MemorySettings> }
+    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings> & { arousalGate?: number }; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; memory?: Partial<MemorySettings> }
     | undefined;
   const personality = { ...DEFAULT_PERSONALITY, ...entry?.personality };
   const patience = { ...DEFAULT_PATIENCE, ...entry?.patience };
   const noradrenaline = { ...DEFAULT_NORADRENALINE, ...entry?.noradrenaline };
   const focus = { ...DEFAULT_FOCUS, ...entry?.focus };
-  const brainstem = { ...DEFAULT_BRAINSTEM, ...entry?.brainstem };
+  // The arousal gate used to be brainstem.arousalGate; it is arousal.gate now. The old name still loads.
+  const { arousalGate: oldGate, ...brainstemEntry } = entry?.brainstem ?? {};
+  if (oldGate !== undefined) console.warn(`${file}: bot "${name}": brainstem.arousalGate is now arousal.gate; the old name still works${entry?.arousal?.gate !== undefined ? ", but arousal.gate is set too and wins" : ""}.`);
+  const brainstem = { ...DEFAULT_BRAINSTEM, ...brainstemEntry };
+  const arousal = { ...DEFAULT_AROUSAL, ...(oldGate === undefined ? {} : { gate: oldGate }), ...entry?.arousal };
   const locomotion = { ...DEFAULT_LOCOMOTION, ...entry?.locomotion };
   const reflexes = { ...DEFAULT_REFLEXES, ...entry?.reflexes };
   const medulla = { ...DEFAULT_MEDULLA, ...entry?.medulla };
@@ -89,9 +95,9 @@ export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Pro
   const defence = { ...DEFAULT_DEFENCE, ...entry?.defence };
   const memory = { ...DEFAULT_MEMORY, ...entry?.memory };
   const memoryProblem = memory.halfLifeDays > 0 ? null : `memory.halfLifeDays must be above 0, got ${memory.halfLifeDays}`;
-  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? memoryProblem;
+  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? arousalProblem(arousal) ?? memoryProblem;
   if (problem) throw new Error(`${file}: bot "${name}": ${problem}`);
-  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, memory };
+  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, arousal, memory };
 }
 
 /** The file's bots by name; none if the file is missing. Throws if it exists but is not valid. */

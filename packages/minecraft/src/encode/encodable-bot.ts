@@ -11,7 +11,7 @@ export interface EncodableBot {
   vehicle?: { name?: string | undefined } | null;
   /** The hidden reserve behind the food bar. */
   foodSaturation?: number;
-  time: { isDay: boolean };
+  time: { isDay: boolean; timeOfDay?: number };
   game: { dimension: string; minY?: number };
   isSleeping: boolean;
   inventory: { items(): EncodableItem[] };

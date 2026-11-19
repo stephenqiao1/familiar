@@ -1,5 +1,5 @@
 // Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
-// surprises, reflexes and the brainstem, the defence circuit, the medulla, balance and posture, the colliculus, memories, interrupts, warnings and region errors.
+// surprises, reflexes and the brainstem, arousal (bands, bedtimes, wakings, calls saved), the defence circuit, the medulla, balance and posture, the colliculus, memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -183,17 +183,38 @@ console.log(`LOADED RESPONSES FIRED: ${list(count(stem("loadedResponse"), (t) =>
 console.log(`ORIENTING: ${stem("orienting").length} times, ${ticks.filter((t) => t.winner?.region === "brainstem" && t.winner.action.skill === "look_at").length} looks taken`);
 // Time is counted from each tick to the next.
 const span = (t: Tick, i: number) => (ticks[i + 1]?.timestamp ?? t.timestamp) - t.timestamp;
-const asleepMs = ticks.reduce((sum, t, i) => sum + ((t.signals.arousal?.value ?? 1) < 0.1 ? span(t, i) : 0), 0);
+const secs = (ms: number) => (ms / 1000).toFixed(0);
+const timeWhere = (test: (t: Tick) => boolean) => ticks.reduce((sum, t, i) => sum + (test(t) ? span(t, i) : 0), 0);
+
+// The reticular formation: how awake the bot was, its bedtimes and wakings, and what the gate saved.
+type Reticular = { band?: string; rate?: number; asleep?: boolean; waking?: { by: string; strength: number; depth: number; sleptMs: number; calm: boolean }; bedtime?: { sleepy: number; proposed?: number; delayed?: string } };
+const ret = (t: Tick) => trace(t, "reticular") as Reticular;
+const arousals = ticks.flatMap((t) => (t.signals.arousal ? [t.signals.arousal.value] : []));
+const arousalRange = arousals.length ? `${Math.min(...arousals).toFixed(2)} to ${Math.max(...arousals).toFixed(2)}` : "not shared";
+const bands = new Map<string, number>();
+ticks.forEach((t, i) => { const band = ret(t).band; if (band) bands.set(band, (bands.get(band) ?? 0) + span(t, i)); });
+console.log(`AROUSAL: time in each band: ${["asleep", "drowsy", "awake", "alert", "over-aroused"].filter((band) => bands.has(band)).map((band) => `${band} ${secs(bands.get(band)!)} s`).join(", ") || "no reticular region"}; arousal ${arousalRange}`);
+const bedProposed = ticks.filter((t) => ret(t).bedtime?.proposed !== undefined);
+const wentToBed = ticks.filter((t) => (t.skillEvents ?? []).some((e) => e.skill === "sleep" && e.type === "started"));
+const bedBy = count(wentToBed, (t) => t.winner?.region ?? "typed in");
+const bedDelays = count(ticks.filter((t) => ret(t).bedtime?.delayed), (t) => ret(t).bedtime!.delayed!.replace(/waiting \d+ s/, "waiting"));
+console.log(`BEDTIME: bed proposed on ${bedProposed.length} ticks; sleep started ${wentToBed.length} times (by ${list(bedBy)}), refused ${ticks.flatMap((t) => (t.skillEvents ?? []).filter((e) => e.skill === "sleep" && e.type === "failed")).length} times; delayed by: ${list(bedDelays)}`);
+const wakings = ticks.flatMap((t) => (ret(t).waking ? [ret(t).waking!] : []));
+console.log(`WAKINGS: ${wakings.length}; by ${list(count(wakings, (w) => w.by))}`);
+for (const w of wakings) console.log(`  woken by ${w.by} (strength ${w.strength}, depth ${w.depth}) after ${secs(w.sleptMs)} s asleep${w.calm ? ", groggy" : ""}`);
+const asleepMs = timeWhere((t) => ret(t).asleep === true);
 const pausedTicks = ticks.filter((t) => (t.signals.upper_paused?.value ?? 0) > 0);
-const pausedMs = ticks.reduce((sum, t, i) => sum + ((t.signals.upper_paused?.value ?? 0) > 0 ? span(t, i) : 0), 0);
+const slowedMs = timeWhere((t) => { const rate = t.signals.upper_rate?.value ?? 1; return rate > 0 && rate < 1; });
 const engineCalls = ticks.filter((t) => trace(t, "instinct").engine !== undefined || t.regions.some((r) => r.region === "instinct" && r.error)).length;
-const engineSaved = ticks.filter((t) => trace(t, "instinct").paused === true).length;
+const engineSaved = ticks.filter((t) => trace(t, "instinct").paused === true);
+const savedAsleep = engineSaved.filter((t) => (t.signals.upper_paused?.value ?? 0) > 0).length;
 const callsWhilePaused = pausedTicks.filter((t) => trace(t, "instinct").paused !== true).length;
+const plannerRuns = ticks.filter((t) => trace(t, "prefrontal").planner !== undefined).length;
 const PLAN_EVERY_MS = 15_000;
-console.log(`ASLEEP: ${(asleepMs / 1000).toFixed(0)} s; upper layers paused ${(pausedMs / 1000).toFixed(0)} s (${pausedTicks.length} ticks)`);
-console.log(`ENGINE CALLS: ${engineCalls} made, ${engineSaved} saved by the pause (${callsWhilePaused} made while paused); planner runs saved: about ${Math.floor(pausedMs / PLAN_EVERY_MS)}`);
-const woken = count(stem("woken"), (t) => String(trace(t, "brainstem").woken));
-console.log(`WOKEN BY: ${list(woken)}`);
+const plannerExpected = Math.floor(((ticks.at(-1)?.timestamp ?? 0) - (ticks[0]?.timestamp ?? 0)) / PLAN_EVERY_MS);
+console.log(`ASLEEP: ${secs(asleepMs)} s (gate shut on ${pausedTicks.length} ticks); gate part open for ${secs(slowedMs)} s`);
+console.log(`ENGINE CALLS: ${engineCalls} made, ${engineSaved.length} saved by the gate (${savedAsleep} asleep, ${engineSaved.length - savedAsleep} drowsy; ${callsWhilePaused} made while shut); planner: ${plannerRuns} runs where about ${plannerExpected} were due`);
+console.log(`QUIET REST: ${secs(timeWhere((t) => (t.signals.quiet?.value ?? 0) > 0))} s; FRAZZLED: ${secs(timeWhere((t) => (t.signals.frazzled?.value ?? 0) > 0))} s`);
 const overruled = ticks.filter((t) => (t as Tick & { defenceOverruledBeforeDeath?: unknown }).defenceOverruledBeforeDeath);
 for (const t of overruled) console.log(`!! DIED WITH DEFENCE OVERRULED at tick ${t.tick}: ${JSON.stringify((t as Tick & { defenceOverruledBeforeDeath?: unknown }).defenceOverruledBeforeDeath)}`);
 

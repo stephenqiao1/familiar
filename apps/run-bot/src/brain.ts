@@ -34,6 +34,7 @@ import {
   type MedullaSettings,
   type ReflexSettings,
   playerRewards,
+  playerReticular,
   REFLEX_NOTE,
   situationOf,
   skillsToward,
@@ -56,6 +57,7 @@ import {
   LOW_FOCUS,
   NEUTRAL_BUDGET,
   NEUTRAL_SEARCH,
+  INTERRUPT_SIGNAL,
   PATIENCE_SIGNAL,
   PLANNER_OFFLINE_SIGNAL,
   planningHorizon,
@@ -82,7 +84,14 @@ import {
   createBrainstemRegion,
   createColliculusRegion,
   createMedullaRegion,
+  createRateGate,
   createReflexGain,
+  createReticularRegion,
+  DEFAULT_AROUSAL,
+  FRAZZLED_SIGNAL,
+  QUIET_SIGNAL,
+  UPPER_RATE_SIGNAL,
+  type ArousalSettings,
   DEFAULT_COLLICULUS,
   FULL,
   LOADED_SIGNAL,
@@ -102,6 +111,10 @@ const LEARNING_WINDOW_MS = 2000;
 const CALM_ALARM = 0.2;
 /** The alarm level at which a reflex's gain is exactly 1 (0.6 + 0.8 × 0.5). */
 const NEUTRAL_ALARM = 0.5;
+/** How often each deciding layer is normally called: the gate stretches these when arousal is low. */
+const USUAL_MS = { instinct: 500, planner: 15_000 };
+/** The line the planner is given while the bot is over-aroused. */
+const FRAZZLED_NOTE = "You are badly rattled right now: keep the plan short and simple, and put safety first.";
 /** Above this search level, more of the engine's options are offered. */
 const WIDER_OPTIONS_ABOVE = 0.6;
 
@@ -131,6 +144,10 @@ export interface BrainParts<Ctx> {
   medulla?: MedullaSettings;
   /** This bot's posture: its balance, righting reflex and reaction to being moved (from bots.json). Default: all on. */
   posture?: PostureSettings;
+  /** This bot's arousal: how it sleeps and wakes, and how far arousal reaches (from bots.json). Default: the usual. */
+  arousal?: ArousalSettings;
+  /** Why the bed skill cannot be started right now, in words (no bed in reach, it is day). Default: no reason given. */
+  whyNoSleep?: () => string | null;
   /** This bot's defence: what it is born knowing about threats, and the strength of each part of the defence circuit (from bots.json). Default: all on. */
   defence?: DefenceSettings;
   /** What the posture system did since last asked (refusals, stance holds, falls, things learned), for the trace. Default: nothing. */
@@ -179,6 +196,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const posture = parts.posture ?? DEFAULT_POSTURE;
   const colliculus = parts.colliculus ?? DEFAULT_COLLICULUS;
   const defence = parts.defence ?? DEFAULT_DEFENCE;
+  const arousal = parts.arousal ?? DEFAULT_AROUSAL;
   // With the field of view on, the deciding layers are told only what the bot sees, hears or just saw.
   const view = colliculus.fieldOfView > 0 ? createFieldOfView() : null;
   const told = (ws: Workspace) => (view ? toldView(ws, view.tell(ws.state)) : ws);
@@ -188,7 +206,12 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const gainOf = hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? createReflexGain({ settings: brainstem, alarmOf, leaningOf, threatOf: (ws) => threatLevel(ws.state) }) : undefined;
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
-  const instinct = playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE, parts.showPrimitives);
+  // Over-aroused, instinct is offered fewer options (the far side of the inverted U).
+  const instinct = playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE, parts.showPrimitives, (ws) => up(ws, FRAZZLED_SIGNAL));
+  // The graded gate: with arousal low the deciding layers are called less often (never while asleep).
+  // A call a signal has asked for at once (an alarm interrupt, a plan that just failed) is never held.
+  const gates = { instinct: createRateGate(USUAL_MS.instinct), planner: createRateGate(USUAL_MS.planner) };
+  const held = (gate: keyof typeof gates, ws: Workspace, urgent: boolean) => gates[gate].hold(level(ws, UPPER_RATE_SIGNAL, 1), ws.state.timestamp, urgent);
   const all: Region[] = [
     createReflexRegion({
       rules: createPlayerReflexes(parts.reflexes, posture.righting, defence),
@@ -200,6 +223,16 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       ...playerBrainstem(skills, ctx, parts.sore, { unsteady: posture.unsteady, ...(parts.postureNotes ? { notes: parts.postureNotes } : {}) }),
       settings: brainstem,
       defenceStrengths: defence,
+      alarmOf,
+      arousalOf: (ws) => level(ws, AROUSAL_SIGNAL, arousal.resting),
+      hardReflex: (ws) => level(ws, REFLEX_SIGNAL) >= 1,
+    }), //                                                                                  layer 0, every tick
+    // The reticular formation: how awake the bot is, when it sleeps and wakes, and how often the deciding
+    // layers are called. After the brainstem, so it hears this tick's threat and startle. Left out (--regions),
+    // arousal reads as 0.5 and nothing is ever paused.
+    createReticularRegion({
+      ...playerReticular(skills, ctx, parts.whyNoSleep),
+      settings: arousal,
       alarmOf,
       hardReflex: (ws) => level(ws, REFLEX_SIGNAL) >= 1,
     }), //                                                                                  layer 0, every tick
@@ -226,6 +259,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       novelty,
       personality,
       skillsToward: skillsToward(skills, ctx),
+      asleep,
       // A learning window opens on a notable reward, an alarm jump or a cue.
       ...(focus.learningWindow > 0 ? { learningWindow: { ms: LEARNING_WINDOW_MS, notable: (ws: Workspace) => up(ws, ALARM_JUMP_SIGNAL) || up(ws, CUE_SIGNAL) } } : {}),
     }), //                                                                                  layer 0, every tick
@@ -243,8 +277,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       factSupport: focus.factSupport,
       ...(noradrenaline.memoryTag > 0 ? { alarmOf: (ws: Workspace) => level(ws, ALARM_SIGNAL) } : {}),
       ...(focus.memoryWrite > 0 ? { focusOf: (ws: Workspace) => level(ws, FOCUS_SIGNAL, focus.resting) } : {}),
-      // Consolidate only while resting safely: focus and alarm both very low (in practice, asleep).
-      ...(focus.consolidation > 0 ? { resting: (ws: Workspace) => level(ws, FOCUS_SIGNAL, focus.resting) < LOW_FOCUS && level(ws, ALARM_SIGNAL) < CALM_ALARM } : {}),
+      // Consolidate only while resting safely: focus and alarm both very low (in practice, asleep), or a long quiet spell awake.
+      ...(focus.consolidation > 0 ? { resting: (ws: Workspace) => level(ws, ALARM_SIGNAL) < CALM_ALARM && (level(ws, FOCUS_SIGNAL, focus.resting) < LOW_FOCUS || up(ws, QUIET_SIGNAL)) } : {}),
     }), //                                                                                  layer 0, every tick
     createInstinctRegion({
       // Jev is asked about, and shown, only what the bot is told (everything, unless the field of view is on).
@@ -252,7 +286,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       questions: (ws) => instinct.questions(told(ws)),
       toProposals: instinct.toProposals,
       // Asleep and undisturbed: the brainstem pauses the deciding layers, so no engine calls are made.
-      paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL),
+      // Asleep: no engine calls. Drowsy: fewer. Anything urgent, or an alarm interrupt, goes straight through.
+      paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL)),
     }), //                                                                                  layer 1, every tick
     createPatienceRegion({
       inputs: playerOutlook,
@@ -270,10 +305,10 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
         ]),
       guidance: (ws) => {
         const horizon = planningHorizon(patienceOf(ws, patience), patience.horizon);
-        if (!up(ws, RETHINK_SIGNAL)) return horizon;
-        return { ...horizon, instruction: [RETHINK_INSTRUCTION, ...(horizon.instruction ? [horizon.instruction] : [])].join(" ") };
+        const notes = [...(up(ws, RETHINK_SIGNAL) ? [RETHINK_INSTRUCTION] : []), ...(up(ws, FRAZZLED_SIGNAL) ? [FRAZZLED_NOTE] : []), ...(horizon.instruction ? [horizon.instruction] : [])];
+        return notes.length ? { ...horizon, instruction: notes.join(" ") } : horizon;
       },
-      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL),
+      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL) || held("planner", ws, up(ws, REPLAN_SIGNAL)),
       wake: (ws) => up(ws, REPLAN_SIGNAL),
     }), //                                                                                  layer 2, every 15 s
   ];
@@ -292,6 +327,8 @@ export function createPlayerDopamine(parts: {
   skillsToward(thing: Thing): string[];
   /** Learn in full only for `ms` after a notable event. Default: always learn in full. */
   learningWindow?: { ms: number; notable(ws: Workspace): boolean };
+  /** Asleep: cues propose nothing. Default: never. */
+  asleep?(ws: Workspace): boolean;
 }): Region {
   const { scorebook, novelty, personality, learningWindow } = parts;
   return createDopamineRegion({
@@ -303,6 +340,7 @@ export function createPlayerDopamine(parts: {
     thingsOf: thingsInView,
     cueThingsOf: approachableThings,
     skillsToward: parts.skillsToward,
+    ...(parts.asleep ? { asleep: parts.asleep } : {}),
     ...(learningWindow ? { learningWindowMs: learningWindow.ms, notable: learningWindow.notable } : {}),
   });
 }

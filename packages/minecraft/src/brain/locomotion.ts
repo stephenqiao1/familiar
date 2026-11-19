@@ -1,6 +1,6 @@
 import type { Signal } from "@familiar/contracts";
 import { ALARM_SIGNAL, DOPAMINE_SIGNAL, FOCUS_SIGNAL } from "@familiar/neuromodulators";
-import { HUNGER_SIGNAL, UNSTEADY_SIGNAL, WARY_SIGNAL } from "@familiar/region-brainstem";
+import { AROUSAL_SIGNAL, HUNGER_SIGNAL, UNSTEADY_SIGNAL, WARY_SIGNAL } from "@familiar/region-brainstem";
 import type { Drive } from "../locomotion/index.js";
 
 // The command from above: how the brain's dials set how fast and how carefully the bot travels.
@@ -14,11 +14,13 @@ export interface LocomotionSettings {
   speedFromDopamine: number;
   /** Focus makes it more careful. */
   cautionFromFocus: number;
+  /** A drowsy bot travels a little slower. */
+  slowWhenDrowsy: number;
 }
 
-export const DEFAULT_LOCOMOTION: LocomotionSettings = { speedFromAlarm: 1, speedFromDopamine: 1, cautionFromFocus: 1 };
+export const DEFAULT_LOCOMOTION: LocomotionSettings = { speedFromAlarm: 1, speedFromDopamine: 1, cautionFromFocus: 1, slowWhenDrowsy: 1 };
 
-const KEYS = ["speedFromAlarm", "speedFromDopamine", "cautionFromFocus"] as const;
+const KEYS = ["speedFromAlarm", "speedFromDopamine", "cautionFromFocus", "slowWhenDrowsy"] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function locomotionProblem(s: LocomotionSettings): string | null {
@@ -37,11 +39,14 @@ const FRIGHTENED = 0.6;
 const CAUTION_FROM_UNSTEADY = 0.7;
 /** How much being wary (danger possible, or a threat only being watched) adds to caution: a little. */
 const CAUTION_FROM_WARY = 0.15;
+/** Fully drowsy (arousal 0.15 or less) takes this much off the speed; nothing at the resting 0.5 or above. Alarm's own speed-up is separate, so arousal is not used on the upper side. */
+const SLOW_WHEN_DROWSY = 0.15;
+const drowsiness = (arousal: number) => Math.min(1, Math.max(0, (0.5 - arousal) / 0.35));
 const clamp = (n: number) => Math.min(1, Math.max(0, n));
 
 /**
  * The drive for this tick:
- *   speed   = 0.4 + 0.5 × alarm + 0.3 × (dopamine − 0.5) − 0.3 × hunger
+ *   speed   = 0.4 + 0.5 × alarm + 0.3 × (dopamine − 0.5) − 0.3 × hunger − 0.15 × drowsiness
  *   caution = 0.3 + 0.3 × focus + 0.15 × wary (0 while alarm is above 0.6), plus 0.7 × unsteady whatever the alarm
  * each kept within 0 to 1. A missing signal counts as its resting value (`resting`). Each
  * strength scales its own term; hunger only slows the bot while some speed link is on, so with
@@ -55,7 +60,8 @@ export function driveFrom(signals: Readonly<Record<string, Signal>>, settings: L
     RESTING_DRIVE.speed +
     settings.speedFromAlarm * 0.5 * alarm +
     settings.speedFromDopamine * 0.3 * (level(DOPAMINE_SIGNAL, resting.dopamine) - 0.5) -
-    anySpeedLink * 0.3 * level(HUNGER_SIGNAL, 0);
+    anySpeedLink * 0.3 * level(HUNGER_SIGNAL, 0) -
+    settings.slowWhenDrowsy * SLOW_WHEN_DROWSY * drowsiness(level(AROUSAL_SIGNAL, 0.5));
   const frightened = settings.speedFromAlarm > 0 && alarm > FRIGHTENED;
   // Change how unsteadiness affects caution here. (The signal is already scaled by the bot's posture.unsteady.)
   const caution = (frightened ? 0 : RESTING_DRIVE.caution + settings.cautionFromFocus * 0.3 * level(FOCUS_SIGNAL, resting.focus) + CAUTION_FROM_WARY * level(WARY_SIGNAL, 0)) + CAUTION_FROM_UNSTEADY * level(UNSTEADY_SIGNAL, 0);

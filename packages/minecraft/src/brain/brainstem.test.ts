@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { fakeData, fakeState, type StatePatch } from "../encode/state.test-helper.js";
 import { menuSkills } from "../skills/index.js";
 import { startled } from "./alarm.js";
-import { drowsy, HOLDABLE, leaningOf, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
+import { HOLDABLE, leaningOf, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
 
 const ws = createWorkspace().viewFor("brainstem");
 const zombie = (dist: number, id = 1) => ({ id: `entity:${id}`, type: "zombie", dist, hostile: true, reachable: true });
@@ -53,21 +53,9 @@ describe("playerBrainstem", () => {
     expect(settings.body({ schemaVersion: 0, tick: 0, timestamp: 0, data: {} })).toBeNull();
   });
 
-  it("is drowsy at night with nothing hostile in view and nothing to do", () => {
-    const at = (p: StatePatch, running: string | null) => {
-      const store = createWorkspace();
-      store.update(fakeState(p), running ? { skill: running, target: undefined, startedAt: 0 } : null);
-      return drowsy(store.viewFor("brainstem"));
-    };
-    expect(at({ time: { isNight: true } }, "idle")).toBe(true);
-    expect(at({ time: { isNight: true } }, "go_to")).toBe(false);
-    expect(at({ time: { isNight: false } }, null)).toBe(false);
-    expect(at({ time: { isNight: true }, nearby: { mobs: [zombie(12)] } }, null)).toBe(false);
-  });
-
   it("knows which way each reflex skill leans, and what a goal may hold back", () => {
     expect([leaningOf("flee"), leaningOf("attack"), leaningOf("freeze"), leaningOf("eat")]).toEqual(["away", "toward", null, null]);
-    expect(HOLDABLE).toEqual(["defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard", "eat_when_starving", "need_air", "eat_to_heal", "cure", "flee", "attack", "eat", "steady"]);
+    expect(HOLDABLE).toEqual(["defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard", "need_air", "eat_to_heal", "cure", "eat_when_starving", "flee", "attack", "eat", "steady"]);
     expect(REFLEX_NOTE).toContain("in_lava_or_fire, drowning, last_stand");
   });
 

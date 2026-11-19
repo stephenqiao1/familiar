@@ -29,6 +29,8 @@ export interface DopamineOptions {
   thingsOf?(state: State): Thing[];
   /** The things in view worth heading toward (cues fire only for these, never for threats). Default: everything from `thingsOf`. */
   cueThingsOf?(state: State): Thing[];
+  /** Asleep: cues propose nothing (a cue is not a wake event). Default: never. */
+  asleep?(ws: Workspace): boolean;
   /** The skills that would head toward a thing right now (e.g. ["go_to"]). Default: none. */
   skillsToward?(thing: Thing): string[];
   /** Default: "dopamine". */
@@ -126,7 +128,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       const situation = situationOf(after);
       const { cues, proposals } = cueProposals({ things: (options.cueThingsOf ?? thingsOf)(after), situation, da, scorebook, skillsToward });
       return {
-        proposals,
+        proposals: options.asleep?.(ws) ? [] : proposals,
         trace: {
           situation,
           rewards,

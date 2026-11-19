@@ -26,6 +26,7 @@ import {
   setKnownBadFoods,
   setKnownHurts,
   setUpPosture,
+  sleepProblem,
   trackGut,
   trackSenses,
   tidyBody,
@@ -107,7 +108,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -228,6 +229,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       posture: postureSettings,
       colliculus,
       defence,
+      arousal,
+      whyNoSleep: () => sleepProblem(ctx),
       postureNotes: () => posture.notes(),
       justLearnedBadFoods: () => gut.justLearned(),
       sore: () => pain.sore(Date.now()),
@@ -256,7 +259,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   console.log(`Focus: resting ${focusSettings.resting}, trust in remembered things halves every ${focusSettings.trustHalfLifeMinutes} min.`);
   console.log(`Colliculus: threshold ${colliculus.threshold}, field of view ${colliculus.fieldOfView > 0 ? "on (the deciding layers are told only what is seen or heard)" : "off"}.`);
   console.log(`Defence: innate threats ${defence.innateThreats === "game" ? "the game's hostile flag" : `[${defence.innateThreats.join(", ")}]`}, ${Object.keys(threatRecord.entries()).length} kinds learned about, route checks ${defence.reachCheck > 0 ? "on" : "off"}.`);
-  console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}, arousal gate ${brainstem.arousalGate}.`);
+  console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}.`);
+  console.log(`Arousal: resting ${arousal.resting}, bedtime ${arousal.bedtime}, wake threshold ${arousal.wakeThreshold}, gate ${arousal.gate}.`);
   if (learned.skills.length) console.log(`Learned skills: ${learned.skills.map((s) => s.name).join(", ")}.`);
   console.log(`Logging to ${logPath}`);
 

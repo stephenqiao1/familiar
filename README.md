@@ -50,6 +50,7 @@ pnpm reflex-check    # live pass for the withdrawal and stretch reflexes: cactus
 pnpm medulla-check   # live pass for body upkeep: a dive, a held breath, eating to heal, starving, a bad food, a cure, hungry while asleep
 pnpm colliculus-check # live pass for the colliculus: a bang behind, a glance while walking, a fast thing against a near one, getting used to an animal, an arrow, the field of view
 pnpm startle-check   # live pass for startle: a bang behind, one it saw coming, five in a row, in the dark when hurt, its own explosive, a flinch mid-journey, a prepared action
+pnpm arousal-check   # live pass for arousal: bedtime (three times), not tired, deep and light sleep, hungry asleep, dawn, no bed, quiet rest, frazzled
 pnpm defence-check   # live pass for defence: a threat that has not noticed, one coming over open ground, cornered, armed, one that cannot reach, one that shoots, a bot born knowing no threats, recovery
 pnpm posture-check   # live pass for balance: unsafe digs refused, sneaking at an edge and on a bridge, steering a fall, a teleport, learning loose blocks
 pnpm locomotion-check # live pass for travel: walks at three speeds, a pond, a pit, a door, following, stopping, looking while walking

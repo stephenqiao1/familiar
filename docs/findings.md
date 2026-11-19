@@ -3,6 +3,74 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Live testing, 2026-11-18: the reticular formation
+
+*Found by running the real bot on the test server with `pnpm arousal-check`. No Jev and no
+planner calls, except the no-bed scene (the offline stand-in for Jev, to count calls) and the
+frazzled scene (Jev).*
+
+| Scene | Bands visited | What woke it | Calls saved | Outcome |
+|---|---|---|---|---|
+| Bedtime: night, bed nearby, a day awake (three runs) | awake, drowsy, asleep | nothing | instinct off | All three: sleepy 0.68, bed proposed at 0.35 by the reticular region, asleep 2 s later |
+| Not tired: the same, having just slept | awake | nothing | instinct off | Sleepy 0.36; bed never proposed |
+| The same far bang early and near morning | awake, drowsy, asleep | startle (0.31 against depth 0.47) | instinct off | Early: depth 0.9, startle 0.49, slept on. Late: woke |
+| Food runs down in bed | awake, drowsy, asleep | urge (0.9 against depth 0.9) | instinct off | Woke at food 5 to 6, ate, lost no health |
+| Dawn | awake, drowsy | nothing | instinct off | Sleep started once, refused once, then held off for 30 s |
+| Tired at night, no bed in reach | awake, drowsy, alert, over-aroused | nothing | 135 of 153 before the husk | Arousal fell to 0.20, the rate to 0.08; a husk put the rate back to 1 in 0.3 s |
+| Never sleeps, idle and safe by day | awake, drowsy | nothing | instinct off | Quiet after 66 s; memories consolidated (prune, merge, generalise) |
+| Three husks at once | awake, alert, over-aroused | nothing | 0 of 82 | Arousal 1.00; frazzled on 56 to 62 ticks |
+
+Regressions: `neuro-check` sleepgate, night, dark, ambush and calm pass, and so do the medulla,
+startle, defence, colliculus, reflex, posture, locomotion and skill checks. In sleepgate (a full
+night with Jev): 68 Jev calls made, 1030 saved, about 34 planner runs saved, and sleep was
+refused once at dawn (it was about 65 times).
+
+**Found and fixed.**
+
+- **A hit was logged as "getting up".** The game throws a hurt player out of bed before the
+  tick that sees the hurt, so the bot was no longer "asleep" when it was judged. The hurt is
+  now named whichever came first. (Arousal was right either way: no grogginess after a hurt.)
+- **The hunger scene did nothing on peaceful**: food does not run down there.
+
+**Limits of this version.**
+
+- **Jev outvotes bedtime.** Bed is proposed at 0.2 to 0.6. An engine that prefers `idle` at
+  0.8 wins, so the bot sits up tired. The offline stand-in always does this, which is why the
+  bedtime scenes run without instinct. With Jev it depends on what Jev picks, as before; the
+  reticular proposal only adds a vote. Not measured with Jev: in the `night` and `sleepgate`
+  scenes the bot had just "slept" (fresh data), was not sleepy, and Jev chose bed itself.
+- **"Waking" is not getting up.** A waking opens the gate and stops the region speaking for
+  sleep. Whether the bot leaves the bed depends on what is proposed next: for hunger, `eat`
+  wins. For a far bang with nothing to do about it, nothing replaces `sleep`, so the bot is
+  logged as woken and stays in bed, and the gate shuts again a moment later.
+- **Frazzled narrows almost nothing with Jev.** Jev offered 1.1 options on average when calm
+  (2 at most) and 1.2 when frazzled: there was rarely a third to cut. And the planner was
+  offline (alarm above 0.8) on 52 to 55 of the frazzled ticks, so its one-line note seldom
+  reaches it.
+- **The planner's saving while drowsy is small and was not measured.** At rate 0.3 it runs
+  every 50 s instead of 15. Only instinct's saved calls are counted exactly; the planner's are
+  an estimate from the time the gate was shut.
+- **Drowsy ticks still run every 500 ms.** The gate spaces Jev's calls; it does not slow the
+  loop, the reflexes or the dials.
+- **Sleepiness is the same whatever the bot is doing.** A bot a day awake is 0.68 sleepy at
+  nightfall and will propose bed in the middle of a job (softly: 0.35). The planner can outvote
+  it but cannot hold it back by name (it is not a reflex).
+- **Quiet rest needs tiredness.** A fresh bot idling by day sits at arousal 0.5 and never
+  becomes drowsy, so it never reaches `quiet`. The scene's bot had been awake three game days.
+  The original finding asked for "a long safe idle at base" to count; this counts only a
+  drowsy one.
+- **Depth follows the clock, not time asleep.** A bot that goes to bed late starts in light
+  sleep.
+- **"No bed in reach" is 64 blocks from the one base bed.** Other beds are not known.
+- **The deep-and-light scene's bang was 0.49 early and 0.31 late.** The two were not the same
+  size (the bot was facing differently), though both lie between the two bars (0.54 and 0.24
+  to 0.28), so the result holds.
+- **With the medulla left out (`--regions`), the bot no longer eats when starving**: that rule
+  moved there from the reflexes.
+- **Not run live:** a goal's alarm interrupt or failed plan passing the gate while drowsy, a
+  heavier sleeper (`wakeThreshold`), the old `brainstem.arousalGate` name, and bedtime with a
+  threat in view. All are unit-tested.
+
 ## Live testing, 2026-11-18: the defence circuit
 
 *Found by running the real bot on the test server with `pnpm defence-check`. No Jev and no
@@ -442,11 +510,15 @@ decide.*
   woke only when starvation damage began, 4.5 s after food reached 6. `eat_when_starving` is a
   reflex, not a medulla urge, so the new `urge` signal does not help it. **Fix later:** give the
   starving reflex the medulla's gain, or move it into the medulla.
+  **Closed 2026-11-18:** it is a medulla urge now, and an urge stronger than depth × 0.6 wakes
+  a sleeper. Live: woken at food 5 to 6, it ate and lost no health.
 
 ## The medulla: limits of this first version
 
 - **Nothing acts on `cold`, `tired`, `reserve` or `vitals`.** They are shared and logged for a
   later drives region. `cold` was checked by reading the freezing meter in powder snow, not by a scene.
+  **Partly closed 2026-11-18:** `tired` now feeds the reticular formation's `sleepy`, which
+  lowers arousal and sends the bot to bed. `cold`, `reserve` and `vitals` still have no reader.
 - **`tired` counts time since the bot last woke from a bed**, by the world's age. A bot that has
   never slept counts from when it first joined. Phantoms, the game's own cost of not sleeping,
   are not modelled.
@@ -841,7 +913,7 @@ by what the bot is doing.
 **What would fix it.** Count `sleep` as restful only once the bot is in bed; consider a soft
 "sleepy at night" reflex so bedtime does not rest on Jev alone.
 
-**Status.** Open.
+**Status.** Partly closed 2026-11-18. The reticular formation now proposes bed by itself when the bot is sleepy (live, three runs of three, with no Jev). It is a soft vote (0.2 to 0.6), so Jev can still outvote it. The dark half is untouched: a running `sleep` still counts as rest while the bot walks to a far bed (though with the bed more than 64 blocks away the skill now refuses to start).
 
 ## Same-time: a reflex that fired blocked the look beside its own skill
 
@@ -945,6 +1017,9 @@ with `pnpm brain-report`. Nothing here showed up in the automated tests.*
 - **At dawn `sleep` is started and refused about 65 times.** Mineflayer says it is still night
   until the day counter turns over, but the game stops allowing sleep a little earlier. Not new,
   and unseen before because the night was always skipped when the only player slept.
+  **Closed 2026-11-18:** after the game refuses, neither the reticular formation nor the sleep
+  skill tries again for 30 seconds. Live: one start and one refusal at dawn, alone and in the
+  full-night scene with Jev.
 
 **Status.** Fixed, except the items above.
 
@@ -1083,7 +1158,7 @@ would win and get the bot out of bed. Not seen live.
 
 **What would fix it.** Skip cue pulses while `upper_paused` is up.
 
-**Status.** Open.
+**Status.** Closed 2026-11-18. Asleep, focus's cue pulse and dopamine's cues propose nothing. Unit-tested; not seen live before or after.
 
 ## Primitives: two are not quite "tiny", and most are untested live
 
@@ -1258,7 +1333,7 @@ idling, a well-known place) rarely add up to enough.
 
 **What would fix it.** Add "is sleeping" to the state; count a long safe idle at base as rest too.
 
-**Status.** Open.
+**Status.** Closed 2026-11-18, in part. The state has said whether the bot is in bed since the medulla work, and a minute of drowsy, safe stillness (`quiet`) now counts as rest too. Live: a bot that never slept consolidated after 66 s idle by day. It has to be tired enough to be drowsy; a fresh bot idling does not qualify.
 
 ## Focus: only skills can mark a task as demanding
 

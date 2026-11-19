@@ -76,7 +76,8 @@ export function createFocusRegion(options: FocusOptions): Region {
       if (cue && skill) boost = { thing: cue, skill, until: now + CUE_BOOST_MS };
       if (boost && (now > boost.until || !inView.some((t) => t.id === boost!.thing.id))) boost = null;
       ws.setSignal(CUE_SIGNAL, cue ? 1 : 0);
-      const proposals: Proposal[] = boost
+      // A cue is not a wake event: it never gets a sleeping bot out of bed.
+      const proposals: Proposal[] = boost && !sleeping
         ? [{ action: { skill: boost.skill, target: boost.thing.id }, urgency: CUE_URGENCY, reason: `spotted the ${boost.thing.kind} it was looking for` }]
         : [];
 
