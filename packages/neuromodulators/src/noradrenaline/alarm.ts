@@ -6,6 +6,8 @@
 export interface Alarm {
   /** Adds this tick's triggers at time `at` (ms) and returns the new level. */
   update(bump: number, threatPresent: boolean, at: number): number;
+  /** The all-clear: what raised it turned out harmless. Alarm drops at once to this share of itself. */
+  settle(keep: number): void;
   level(): number;
 }
 
@@ -19,6 +21,9 @@ export function createAlarm(settings: { alarmGain: number; alarmDecaySeconds: nu
       if (!threatPresent) level *= Math.exp(-dt / settings.alarmDecaySeconds);
       level = Math.min(1, level + settings.alarmGain * Math.max(0, bump));
       return level;
+    },
+    settle(keep) {
+      level *= Math.min(1, Math.max(0, keep));
     },
     level: () => level,
   };

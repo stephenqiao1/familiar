@@ -76,6 +76,6 @@ describe("focus helpers", () => {
     const store = workspace({ nearby: { blocks: [chest], mobs: [cow] } });
     expect(watchedThings(store.viewFor("a"))).toEqual([]);
     store.viewFor("prefrontal").setGoal({ text: "", steps: [], reason: "", watchFor: ["chest"] });
-    expect(watchedThings(store.viewFor("a"))).toEqual([{ id: "pos:3,63,0", kind: "chest" }]);
+    expect(watchedThings(store.viewFor("a"))).toEqual([{ id: "pos:3,63,0", kind: "chest", fixed: true }]);
   });
 });

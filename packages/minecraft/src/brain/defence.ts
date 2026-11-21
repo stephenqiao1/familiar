@@ -1,10 +1,9 @@
 import type { State, Workspace } from "@familiar/contracts";
 import { DEFENCE_RULES, RECOVERING_SIGNAL, THREAT_LEVEL, type BrainstemOptions, type Choice, type Mode } from "@familiar/region-brainstem";
 import type { ReflexRule } from "@familiar/region-reflex";
-import { cheapDefence } from "../defence/assess.js";
 import type { ThreatView } from "../defence/size-up.js";
-import type { Defence, MinecraftStateData } from "../encode/state-data.js";
-import { minecraftDataOf } from "./read-state.js";
+import type { MinecraftStateData } from "../encode/state-data.js";
+import { defenceOf, minecraftDataOf } from "./read-state.js";
 
 // The defence circuit, read from the state: the three defence reflexes (one fires, whichever
 // the chosen mode calls for), resting to recover afterwards, and what alarm and the brainstem
@@ -19,14 +18,7 @@ export const DEFENCE_SKILL = { freeze: "freeze", flee: "flee", fight: "attack" }
 /** Resting to recover starts from this urgency, and stops once health is back to this. */
 export const RECUPERATE = { name: "recuperate", base: 0.4, untilHealth: 15 };
 
-const worked = new WeakMap<MinecraftStateData, Defence>();
-
-/** The state's defence reading: the threat sense's if it made one, else the cheap rules' (worked out once per state). */
-export function defenceOf(data: MinecraftStateData): Defence {
-  if (data.defence) return data.defence;
-  if (!worked.has(data)) worked.set(data, cheapDefence(data));
-  return worked.get(data)!;
-}
+export { defenceOf };
 
 /** How pressing the danger is this very tick: 0 none, 0.3 possible, 0.5 seen, 0.8 coming, 1 on it. */
 export function threatLevel(state: State): number {

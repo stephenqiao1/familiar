@@ -3,7 +3,10 @@
     "personality": {
       "restingDA": 0.5,
       "learningRate": 0.1,
-      "noveltyBonus": 0.5
+      "noveltyBonus": 0.5,
+      "wastedEffort": 1,
+      "situationWorth": 1,
+      "wanting": 1
     },
     "patience": {
       "resting": 0.5,

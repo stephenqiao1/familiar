@@ -3,7 +3,8 @@ import { posId, scanBlocks } from "./scan-blocks.js";
 import { DEFAULT_LIMIT } from "./scan-mobs.js";
 import type { Nearby } from "./state-data.js";
 
-const RADIUS = 16;
+/** How far off a useful block is sensed. */
+export const USEFUL_BLOCK_RADIUS = 16;
 /** Blocks that store items. */
 export const CONTAINERS = new Set(["chest", "trapped_chest", "barrel"]);
 /** Each crop's top growth stage (its "age" when ripe), from minecraft-data. */
@@ -17,10 +18,13 @@ const RIPE_AGE: Record<string, number> = {
   sweet_berry_bush: 3,
 };
 
+/** The kinds of block the scan lists. */
+export const isUsefulBlock = (name: string) => CONTAINERS.has(name) || name in RIPE_AGE || name === "bell";
+
 /** Chests, ripe crops and bells (a sign of a village) within 16 blocks, the nearest `limit`. */
 export function scanUsefulBlocks(bot: EncodableBot, limit = DEFAULT_LIMIT): Nearby[] {
   const me = bot.entity.position;
-  const candidates = scanBlocks(bot, (name) => CONTAINERS.has(name) || name in RIPE_AGE || name === "bell", RADIUS, limit * 4);
+  const candidates = scanBlocks(bot, isUsefulBlock, USEFUL_BLOCK_RADIUS, limit * 4);
   const found: Nearby[] = [];
   for (const pos of candidates) {
     const block = bot.blockAt(pos);

@@ -278,6 +278,29 @@ const scenes: Record<string, () => Promise<Row>> = {
     return row("pit: a husk 5 blocks off that cannot climb out", ticks, ok, `the cheap guess said it could reach the bot: ${cheap}; the route check said no after ${answered && sized[0] ? answered.timestamp - sized[0].timestamp : "?"} ms; defences after that: ${acted.length}; alarm at the end ${alarmEnd.toFixed(2)} (peak ${max(ticks, "alarm").toFixed(2)})`);
   },
 
+  /** 6b. The same pit, a second husk: what was found for that spot is remembered, so it is known harmless at first sight. */
+  async pit_again() {
+    await freshLane();
+    for (const command of ["fill 64 149 39 66 150 41 air", "fill 64 148 39 66 148 41 stone", "fill 63 148 38 67 148 42 stone"]) rcon(command);
+    let second = 0;
+    const { ticks } = await play(async () => {
+      await sleep(1500);
+      rcon("summon husk 65.5 149 40.5");
+      await sleep(8000);
+      rcon("kill @e[type=husk]");
+      await sleep(3000);
+      second = Date.now();
+      rcon("summon husk 65.5 149 40.5");
+      await sleep(8000);
+    });
+    const later = ticks.filter((t) => t.timestamp > second && defenceOf(t)?.threats.length);
+    const guessed = later.filter((t) => defenceOf(t)!.threats[0]!.canReach);
+    const acted = later.filter((t) => ["flee", "fight", "freeze"].includes(modeOf(t)));
+    const peak = Math.max(0, ...ticks.filter((t) => t.timestamp > second).map((t) => t.signals.alarm?.value ?? 0));
+    const ok = later.length > 0 && guessed.length === 0 && acted.length === 0 && peak < 0.3;
+    return row("pit_again: a second husk in the same pit", ticks, ok, `the second husk was sized up on ${later.length} ticks; thought able to reach on ${guessed.length} of them (the cheap guess said ${later[0]?.state.data.nearby.mobs.find((m) => m.type === "husk")?.reachable}); defences: ${acted.length}; alarm after it appeared at most ${peak.toFixed(2)}`);
+  },
+
   /** 7. A skeleton sat in a boat on a pillar: it cannot come down to the bot, but it shoots. Two hits, and the bot knows that. */
   async shooter() {
     await freshLane();

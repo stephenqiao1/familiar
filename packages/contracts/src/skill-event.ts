@@ -8,6 +8,8 @@ export interface SkillEvent {
   reason?: string;
   /** What the run changed, on the event that ends it, if the skill reported it. */
   changes?: Changes;
+  /** On the event that ends a run: the thing it was aimed at, if the skill chose it itself. */
+  aimedAt?: string;
   /** True for a movement that ran alongside the main skill, using other body parts. */
   alongside?: true;
   timestamp: number;

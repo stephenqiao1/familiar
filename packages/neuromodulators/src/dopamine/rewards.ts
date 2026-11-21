@@ -1,5 +1,4 @@
 import type { SkillEvent, State } from "@familiar/contracts";
-import type { Habituation } from "./habituation.js";
 
 /** What a reward rule compares: the state at the last tick, this tick's state, and the skill events in between. */
 export interface RewardMoment {
@@ -8,13 +7,19 @@ export interface RewardMoment {
   events: readonly SkillEvent[];
 }
 
-/** Positive when a need got smaller, negative when something bad happened. */
+/** Positive when a need got smaller; negative when one grew, or something bad happened. */
 export interface Reward {
   amount: number;
   /** Plain words for the log, e.g. "food 2 → 10". */
   reason: string;
   /** The bot died: the skill that led to it is punished hard (see the dopamine region). */
   fatal?: boolean;
+  /**
+   * The skill this reward is about (e.g. the one that failed). It goes to that skill's run and
+   * to no other. Without it the reward is nobody's in particular, and goes to whichever skill ran
+   * for the most of the tick.
+   */
+  skill?: string;
 }
 
 /** One kind of reward: look at what changed since the last tick, and score it or return nothing. */
@@ -22,34 +27,63 @@ export interface RewardRule {
   name: string;
   /** The need it belongs to (hunger, safety, ...). */
   need: string;
-  /** False for a rule that handles its own repeats (e.g. novelty). Default: true. */
-  habituates?: boolean;
-  check(moment: RewardMoment): Reward | null;
+  /** One reward, several (e.g. one for each skill that failed), or nothing. */
+  check(moment: RewardMoment): Reward | Reward[] | null;
+  /**
+   * For a rule that pays the change in a need: how pressing that need is in this state (0 =
+   * satisfied, 1 = desperate), or null where it does not apply. With it, the bot learns which
+   * things relieve the need and wants them as much as the need presses (see wantNow).
+   */
+  level?(state: State): number | null;
+  /**
+   * How vital the need is next to the others (higher = more vital; default 0). While a more
+   * vital need presses at all, a lesser one is silent: staying alive comes before stocking up.
+   */
+  rank?: number;
 }
 
-/** A reward as logged: its rule and need, and the amount before habituation shrank it. */
-export type LoggedReward = Reward & { rule: string; need: string; raw?: number; repeats?: number };
+/** A reward as logged: with its rule and need. */
+export type LoggedReward = Reward & { rule: string; need: string };
 
-/**
- * Runs every rule and shrinks repeated rewards from the same rule (unless it opts out).
- * A rule that throws is skipped and its error kept.
- */
-export function checkRules(rules: RewardRule[], moment: RewardMoment, habituation: Habituation) {
+/** Runs every rule. A rule that throws is skipped and its error kept. */
+export function checkRules(rules: RewardRule[], moment: RewardMoment) {
   const rewards: LoggedReward[] = [];
   const errors: Record<string, string> = {};
   for (const rule of rules) {
     try {
-      const reward = rule.check(moment);
-      if (!reward) continue;
-      const logged: LoggedReward = { rule: rule.name, need: rule.need, ...reward };
-      if (rule.habituates !== false) {
-        const { amount, repeats } = habituation.dampen(rule.name, reward.amount, moment.after.timestamp);
-        if (repeats > 0) Object.assign(logged, { amount, raw: reward.amount, repeats: Math.round(repeats * 10) / 10 });
-      }
-      rewards.push(logged);
+      const found = rule.check(moment);
+      for (const reward of found === null ? [] : Array.isArray(found) ? found : [found]) rewards.push({ rule: rule.name, need: rule.need, ...reward });
     } catch (error) {
       errors[rule.name] = error instanceof Error ? error.message : String(error);
     }
   }
   return { rewards, errors };
+}
+
+/** How pressing each need is in a state, by rule name: every rule that reads a level. A rule that throws, or does not apply, is left out. */
+export function needLevels(rules: RewardRule[], state: State): Record<string, number> {
+  const levels: Record<string, number> = {};
+  for (const rule of rules) {
+    try {
+      const level = rule.level?.(state);
+      if (typeof level === "number" && Number.isFinite(level)) levels[rule.name] = Math.min(1, Math.max(0, level));
+    } catch {
+      // The same failure is named in the trace when the rule is checked.
+    }
+  }
+  return levels;
+}
+
+/**
+ * How strongly each need presses for action right now: its level, unless a more vital need (a
+ * higher `rank`) presses at all, which silences it. Staying alive always comes first: with a
+ * threat about, nothing lesser is worth setting off for, however far the threat is inside the
+ * range that counts. The levels themselves (for learning what relieves a need) are not changed:
+ * use `needLevels` for those.
+ */
+export function pressingNow(rules: RewardRule[], state: State): Record<string, number> {
+  const levels = needLevels(rules, state);
+  const rank = (name: string) => rules.find((r) => r.name === name)?.rank ?? 0;
+  const silenced = (name: string) => Object.keys(levels).some((other) => rank(other) > rank(name) && levels[other]! > 0);
+  return Object.fromEntries(Object.entries(levels).map(([name, level]) => [name, silenced(name) ? 0 : level]));
 }

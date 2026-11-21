@@ -1,11 +1,16 @@
-import { createNoveltyRule, needDropReward, type NoveltyMemory, type Reward, type RewardMoment, type RewardRule } from "@familiar/neuromodulators";
+import { createNoveltyRule, needChangeReward, type NoveltyMemory, type Reward, type RewardMoment, type RewardRule } from "@familiar/neuromodulators";
 import { noticedIn } from "./cues.js";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { DANGER_DISTANCE, minecraftDataOf, nearestThreat } from "./read-state.js";
 
-// What counts as a reward for the player: any moment a need gets smaller, scaled by how big the
-// need was (see needDropReward). Negative rewards are bad things happening. Every number here is
-// a first guess to tune in play. Add a reward: write a rule here and add it to playerRewards.
+// What counts as a reward for the player. Almost every rule is a need level (0 = satisfied, 1 =
+// desperate) read from the state; the reward is the signed change in it since the last tick (see
+// needChangeReward): a need that falls pays, one that rises costs the same. So being hurt and
+// healing, losing a tool and finding it, a threat coming and going all add up to nothing, and
+// nothing is paid twice. The rest are things that happen (dying, a failed skill, a night slept
+// through). Every number here is a first guess to tune in play.
+// Add a need: write its level here with `need(...)` and add it to playerRewards. The bot then also
+// learns which things relieve it, and wants them as much as the need presses.
 
 const MAX_FOOD = 20;
 const MAX_HEALTH = 20;
@@ -15,17 +20,13 @@ const FOOD_STOCK_TARGET = 8;
 /** Enough torches carried; fewer counts as short. */
 const TORCH_TARGET = 16;
 const TOOL_KINDS = ["sword", "pickaxe", "axe", "shovel"];
-/** Skills that use up items on purpose, so a drop while they run is not a loss. */
-const SPENDING_SKILLS = new Set(["eat", "deposit_items"]);
 const DEATH_PENALTY = -1;
-/** Per item lost, capped at -1 for one tick. */
-const LOST_ITEM_PENALTY = -1 / 64;
 const FAILED_SKILL_PENALTY = -0.1;
 /** Reasons a skill is reported failed without ever having started. */
 export const NEVER_STARTED = new Set(["cannot run", "unknown skill"]);
 
 /** A rule that only runs on Minecraft states. */
-function rule(name: string, need: string, check: (a: MinecraftStateData, b: MinecraftStateData, m: RewardMoment) => Reward | null): RewardRule {
+function rule(name: string, need: string, check: (a: MinecraftStateData, b: MinecraftStateData, m: RewardMoment) => Reward | Reward[] | null): RewardRule {
   return {
     name,
     need,
@@ -37,124 +38,156 @@ function rule(name: string, need: string, check: (a: MinecraftStateData, b: Mine
   };
 }
 
-/** A reward when the need level fell, else null. */
-function needDrop(before: number, after: number, reason: string): Reward | null {
-  const amount = needDropReward(before, after);
-  return amount > 0 ? { amount, reason } : null;
+/**
+ * The start of a new life: the bot died between these two states, or the first was its dead
+ * body. A respawn refills health and food and moves the bot away from everything; none of that
+ * is something it achieved, so no need is compared across it.
+ */
+export function newLife(moment: Pick<RewardMoment, "before" | "after">): boolean {
+  const a = minecraftDataOf(moment.before);
+  const b = minecraftDataOf(moment.after);
+  return a !== null && b !== null && (b.self.deaths !== a.self.deaths || a.self.health <= 0);
+}
+
+/**
+ * A need: `level` reads how pressing it is (0 to 1) from a state, or null where it does not
+ * apply. The reward is the signed change in that level, described by `say`. `rank` says how
+ * vital it is next to the others (see pressingNow): a higher one quietens the lower.
+ */
+function need(name: string, kind: string, level: (d: MinecraftStateData) => number | null, say: (a: MinecraftStateData, b: MinecraftStateData) => string, rank = 0): RewardRule {
+  const paid = rule(name, kind, (a, b, moment) => {
+    const [before, after] = [level(a), level(b)];
+    if (before === null || after === null || before === after || newLife(moment)) return null;
+    return { amount: needChangeReward(before, after), reason: say(a, b) };
+  });
+  return {
+    ...paid,
+    rank,
+    level(state) {
+      const data = minecraftDataOf(state);
+      return data && level(data);
+    },
+  };
 }
 
 // Hunger
 
-export const foodBarUp = rule("food_bar_up", "hunger", (a, b) =>
-  needDrop(1 - a.self.food / MAX_FOOD, 1 - b.self.food / MAX_FOOD, `food ${a.self.food} → ${b.self.food}`),
+export const foodBar = need(
+  "food_bar",
+  "hunger",
+  (d) => 1 - d.self.food / MAX_FOOD,
+  (a, b) => `food ${a.self.food} → ${b.self.food}`,
 );
 
 // Safety
 
-export const healthUp = rule("health_up", "safety", (a, b) =>
-  needDrop(1 - a.self.health / MAX_HEALTH, 1 - b.self.health / MAX_HEALTH, `health ${a.self.health} → ${b.self.health}`),
+export const health = need(
+  "health",
+  "safety",
+  (d) => 1 - d.self.health / MAX_HEALTH,
+  (a, b) => `health ${a.self.health} → ${b.self.health}`,
 );
 
-/** A hostile mob that was close is gone (killed or out of range), and none is close now. */
-export const threatGone = rule("threat_gone", "safety", (a, b) => {
-  const was = nearestThreat(a);
-  if (!was || nearestThreat(b)) return null;
-  return needDrop(1 - was.dist / DANGER_DISTANCE, 0, `${was.type} gone`);
-});
+/**
+ * How close the nearest mob that could harm the bot is: 0 with none in range, 1 on top of the bot.
+ * The range is wider for one that has noticed the bot (see nearestThreat).
+ * It ranks above every other need: with a threat close, nothing else is worth setting off for.
+ */
+export const danger = need(
+  "danger",
+  "safety",
+  (d) => {
+    const threat = nearestThreat(d);
+    return threat ? Math.max(0, 1 - threat.dist / threat.within) : 0;
+  },
+  (a, b) => {
+    const [was, now] = [nearestThreat(a), nearestThreat(b)];
+    if (!now) return `${was?.type ?? "threat"} gone`;
+    return was ? `${now.type} at ${was.dist} → ${now.dist} blocks` : `${now.type} at ${now.dist} blocks`;
+  },
+  1,
+);
 
-/** At night, the bot reached more light (the nearest thing to shelter the state shows). */
-export const reachedLight = rule("reached_light", "safety", (a, b) => {
-  if (!a.time.isNight || !b.time.isNight) return null;
-  return needDrop(1 - a.time.lightLevel / MAX_LIGHT, 1 - b.time.lightLevel / MAX_LIGHT, `light ${a.time.lightLevel} → ${b.time.lightLevel}`);
-});
+/** At night, how dark it is where the bot stands (the nearest thing to shelter the state shows). By day it does not apply. */
+export const nightLight = need(
+  "night_light",
+  "safety",
+  (d) => (d.time.isNight ? 1 - d.time.lightLevel / MAX_LIGHT : null),
+  (a, b) => `light ${a.time.lightLevel} → ${b.time.lightLevel}`,
+);
 
 // Rest
 
 /**
  * The sleep skill finished on its own (the bot woke, it was not interrupted) and nothing hurt it:
  * slept through the night. The clock can still read night for a moment after waking, so the time
- * is not checked.
+ * is not checked. (Not a need level: the time since the bot last slept restarts whenever it gets
+ * out of a bed, so lying down for a moment would read as a full night's rest.)
  */
 export const sleptThroughNight = rule("slept_through_night", "rest", (a, b, { events }) => {
   const slept = events.some((e) => e.skill === "sleep" && e.type === "done");
-  return slept && b.self.health >= a.self.health ? needDrop(1, 0, "slept through the night") : null;
+  return slept && b.self.health >= a.self.health ? { amount: 1, reason: "slept through the night", skill: "sleep" } : null;
 });
 
 // Having enough
 
-/** The first tool of a kind (sword, pickaxe, axe, shovel). */
-export const firstTool = rule("first_tool", "having_enough", (a, b) => {
-  const fresh = TOOL_KINDS.filter((kind) => toolCount(a, kind) === 0 && toolCount(b, kind) > 0);
-  return fresh.length ? { amount: fresh.length * needDropReward(1, 0), reason: `first ${fresh.join(", ")}` } : null;
-});
-
-export const foodStockUp = rule("food_stock_up", "having_enough", (a, b) =>
-  needDrop(shortOf(a.self.foodItems, FOOD_STOCK_TARGET), shortOf(b.self.foodItems, FOOD_STOCK_TARGET), `food items ${a.self.foodItems} → ${b.self.foodItems}`),
+/** How many kinds of tool (sword, pickaxe, axe, shovel) the bot has none of. */
+export const tools = need(
+  "tools",
+  "having_enough",
+  (d) => TOOL_KINDS.filter((kind) => toolCount(d, kind) === 0).length / TOOL_KINDS.length,
+  (a, b) => {
+    const [had, has] = [TOOL_KINDS.filter((kind) => toolCount(a, kind) > 0), TOOL_KINDS.filter((kind) => toolCount(b, kind) > 0)];
+    const gained = has.filter((kind) => !had.includes(kind));
+    const lost = had.filter((kind) => !has.includes(kind));
+    return [gained.length ? `now has a ${gained.join(", ")}` : "", lost.length ? `no ${lost.join(", ")} any more` : ""].filter(Boolean).join("; ");
+  },
 );
 
-export const torchesUp = rule("torches_up", "having_enough", (a, b) => {
-  const [before, after] = [a.self.inventory.torch ?? 0, b.self.inventory.torch ?? 0];
-  return needDrop(shortOf(before, TORCH_TARGET), shortOf(after, TORCH_TARGET), `torches ${before} → ${after}`);
-});
+export const foodStock = need(
+  "food_stock",
+  "having_enough",
+  (d) => shortOf(d.self.foodItems, FOOD_STOCK_TARGET),
+  (a, b) => `food items ${a.self.foodItems} → ${b.self.foodItems}`,
+);
+
+export const torches = need(
+  "torches",
+  "having_enough",
+  (d) => shortOf(d.self.inventory.torch ?? 0, TORCH_TARGET),
+  (a, b) => `torches ${a.self.inventory.torch ?? 0} → ${b.self.inventory.torch ?? 0}`,
+);
 
 // Curiosity
 
-/** Meeting a new kind of thing (mob, useful block, player, biome, item); halves with each meeting. */
+/** Boredom, relieved by meeting a kind of thing (mob, useful block, player, biome, item); a thing met often relieves little. */
 export function curiosity(memory: NoveltyMemory, bonus?: number): RewardRule {
-  return createNoveltyRule({ noticed: noticedIn, memory, ...(bonus === undefined ? {} : { bonus }) });
+  return createNoveltyRule({ noticed: noticedIn, memory, fresh: newLife, ...(bonus === undefined ? {} : { bonus }) });
 }
 
-// Negative rewards: the need each one sets back is in its `need`.
-
-export const damageTaken = rule("damage_taken", "safety", (a, b) => {
-  const lost = a.self.health - b.self.health;
-  return lost > 0 ? { amount: -lost / MAX_HEALTH, reason: `health ${a.self.health} → ${b.self.health}` } : null;
-});
+// Things that happen. (Being hurt is the health need rising; losing food, torches or the last tool of a kind is that need rising.)
 
 export const died = rule("died", "safety", (a, b) => {
   const deaths = b.self.deaths - a.self.deaths;
   return deaths > 0 ? { amount: deaths * DEATH_PENALTY, reason: "died", fatal: true } : null;
 });
 
-/** Items gone that no skill spent on purpose (eating, storing). */
-export const lostItems = rule("lost_items", "having_enough", (a, b, { events }) => {
-  const spending = [a.current?.skill, b.current?.skill, ...events.map((e) => e.skill)].some((s) => s !== undefined && SPENDING_SKILLS.has(s));
-  if (spending) return null;
-  const lost = Object.entries(a.self.inventory).filter(([name, n]) => (b.self.inventory[name] ?? 0) < n);
-  if (!lost.length) return null;
-  const count = lost.reduce((sum, [name, n]) => sum + n - (b.self.inventory[name] ?? 0), 0);
-  return { amount: Math.max(-1, count * LOST_ITEM_PENALTY), reason: `lost ${lost.map(([name]) => name).join(", ")}` };
-});
-
-/** A skill that ran and failed. One that could not start ("cannot run") did not fail at anything. */
-export const skillFailed = rule("skill_failed", "progress", (_a, _b, { events }) => {
-  const failed = events.filter((e) => e.type === "failed" && !NEVER_STARTED.has(e.reason ?? ""));
-  return failed.length ? { amount: failed.length * FAILED_SKILL_PENALTY, reason: `${failed.map((e) => e.skill).join(", ")} failed` } : null;
-});
+/** A skill that ran and failed: charged to that skill. One that could not start ("cannot run") did not fail at anything. */
+export const skillFailed = rule("skill_failed", "progress", (_a, _b, { events }) =>
+  events.filter((e) => e.type === "failed" && !NEVER_STARTED.has(e.reason ?? "")).map((e) => ({ amount: FAILED_SKILL_PENALTY, reason: `${e.skill} failed`, skill: e.skill })),
+);
 
 // TODO(dopamine): rewards to add once the bot can see or do these things:
 // - Progress: a planner sub-goal finished (goals have no "step done" yet); a new tool tier;
 //   an advancement unlocked (Mineflayer has no advancement event).
 // - Curiosity: first time seeing a structure (structures can't be detected yet).
 // - Social: a trade completed; help given or received; a friendly chat. No such skills yet.
-// - Wasted time (negative): not defined yet. One idea: a small penalty for each stretch of time
-//   with no positive reward.
+//
+// Wasted time is not a rule here: the dopamine region charges a skill that ended having earned
+// less than the work it took, using the effort measured in effort-spent.ts.
 
 /** Every player reward rule without memory, checked every tick. Add `curiosity(memory)` too. */
-export const playerRewards: RewardRule[] = [
-  foodBarUp,
-  healthUp,
-  threatGone,
-  reachedLight,
-  sleptThroughNight,
-  firstTool,
-  foodStockUp,
-  torchesUp,
-  damageTaken,
-  died,
-  lostItems,
-  skillFailed,
-];
+export const playerRewards: RewardRule[] = [foodBar, health, danger, nightLight, sleptThroughNight, tools, foodStock, torches, died, skillFailed];
 
 function toolCount(d: MinecraftStateData, kind: string): number {
   return Object.entries(d.self.inventory).reduce((sum, [name, n]) => (name.endsWith(`_${kind}`) ? sum + n : sum), 0);

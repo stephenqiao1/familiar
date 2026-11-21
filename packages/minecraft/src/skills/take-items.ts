@@ -7,7 +7,7 @@ import { withJourney } from "../locomotion/index.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { countByName } from "../encode/encode-self.js";
 import { posId } from "../encode/scan-blocks.js";
-import { chosenContainer, containerAt, stillWanted } from "./storage.js";
+import { atContainer, chosenContainer, containerAt, stillWanted } from "./storage.js";
 
 
 /**
@@ -35,38 +35,40 @@ export const takeItems: Skill<MinecraftCtx> = {
     if (missing.length === 0) return { status: "done", reason: "already carrying what the goal wants" };
     const chest = target === undefined ? pickChest(ctx, missing) : containerAt(bot, target);
     if (!chest) return { status: "failed", reason: `no chest at ${target ?? "base"}` };
-    ctx.log(`take_items: heading for ${chest.name} at ${chest.position} for ${describe(missing)}`);
-    const walk = await ctx.locomotion.goTo(chest.position, { see: true }, signal);
-    if (walk.status !== "done") return walk;
+    return atContainer(chest, async () => {
+      ctx.log(`take_items: heading for ${chest.name} at ${chest.position} for ${describe(missing)}`);
+      const walk = await ctx.locomotion.goTo(chest.position, { see: true }, signal);
+      if (walk.status !== "done") return walk;
 
-    const block = bot.blockAt(chest.position);
-    if (!block || block.name !== chest.name) return { status: "failed", reason: `no chest at ${chest.position}` };
-    const window = await doOpen(bot, block, signal);
-    if (!window) return { status: "interrupted" };
-    const taken: ItemWant[] = [];
-    try {
-      if (!("withdraw" in window)) return { status: "failed", reason: "container cannot be taken from" };
-      for (const want of missing) {
-        if (signal.aborted) return { status: "interrupted" };
-        const stacks = window.containerItems().filter((i) => i.name === want.item);
-        const count = Math.min(want.count, stacks.reduce((sum, i) => sum + i.count, 0));
-        if (count === 0) continue;
-        try {
-          await doMoveItem(window, stacks[0]!.type, count, "out");
-          taken.push({ item: want.item, count });
-        } catch (error) {
-          // Withdraw throws when the inventory is full: keep what was taken.
-          ctx.log(`take_items: stopped at ${want.item}: ${error instanceof Error ? error.message : error}`);
-          break;
+      const block = bot.blockAt(chest.position);
+      if (!block || block.name !== chest.name) return { status: "failed", reason: `no chest at ${chest.position}` };
+      const window = await doOpen(bot, block, signal);
+      if (!window) return { status: "interrupted" };
+      const taken: ItemWant[] = [];
+      try {
+        if (!("withdraw" in window)) return { status: "failed", reason: "container cannot be taken from" };
+        for (const want of missing) {
+          if (signal.aborted) return { status: "interrupted" };
+          const stacks = window.containerItems().filter((i) => i.name === want.item);
+          const count = Math.min(want.count, stacks.reduce((sum, i) => sum + i.count, 0));
+          if (count === 0) continue;
+          try {
+            await doMoveItem(window, stacks[0]!.type, count, "out");
+            taken.push({ item: want.item, count });
+          } catch (error) {
+            // Withdraw throws when the inventory is full: keep what was taken.
+            ctx.log(`take_items: stopped at ${want.item}: ${error instanceof Error ? error.message : error}`);
+            break;
+          }
         }
+        ctx.chests.remember(posId(chest.position), countByName(window.containerItems()), Date.now());
+      } finally {
+        await doClose(bot);
       }
-      ctx.chests.remember(posId(chest.position), countByName(window.containerItems()), Date.now());
-    } finally {
-      await doClose(bot);
-    }
-    const short = stillWanted(ctx.wants(), countByName(bot.inventory.items()));
-    ctx.log(`take_items: took ${taken.length ? describe(taken) : "nothing"}`);
-    return withJourney(short.length ? { status: "done", reason: `chest lacked ${describe(short)}` } : { status: "done" }, walk);
+      const short = stillWanted(ctx.wants(), countByName(bot.inventory.items()));
+      ctx.log(`take_items: took ${taken.length ? describe(taken) : "nothing"}`);
+      return withJourney(short.length ? { status: "done", reason: `chest lacked ${describe(short)}` } : { status: "done" }, walk);
+    });
   },
 };
 

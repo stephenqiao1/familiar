@@ -22,7 +22,7 @@ afterEach(async () => {
 describe("loadBotConfig", () => {
   it("reads one bot's personality, filling in what is left out", async () => {
     await writeFile(file, JSON.stringify({ Scout: { personality: { restingDA: 0.65, noveltyBonus: 1 } }, Other: {} }));
-    expect(await loadBotConfig("Scout", file)).toEqual({ personality: { restingDA: 0.65, learningRate: 0.1, noveltyBonus: 1 }, patience: DEFAULT_PATIENCE, ...REST });
+    expect(await loadBotConfig("Scout", file)).toEqual({ personality: { restingDA: 0.65, learningRate: 0.1, noveltyBonus: 1, wastedEffort: 1, situationWorth: 1, wanting: 1 }, patience: DEFAULT_PATIENCE, ...REST });
   });
 
   it("uses the defaults for a bot with no entry, or no file", async () => {

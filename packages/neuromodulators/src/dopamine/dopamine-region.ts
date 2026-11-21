@@ -1,11 +1,12 @@
 import type { Region, SkillEvent, State, Workspace } from "@familiar/contracts";
-import { cueProposals, towardKey, type Thing } from "./cues.js";
-import { createEpisodeTracker, type EndedEpisode } from "./episodes.js";
+import { aimAt, cueProposals, type Thing } from "./cues.js";
+import { aimOf, createEpisodeTracker, type EndedEpisode } from "./episodes.js";
 import { createMood } from "../mood.js";
-import { createHabituation } from "./habituation.js";
-import { checkRules, type RewardRule } from "./rewards.js";
+import { checkRules, needLevels, pressingNow, type LoggedReward, type RewardMoment, type RewardRule } from "./rewards.js";
 import { createScorebook, type Scorebook } from "./scorebook.js";
-import { BAD_SURPRISE_SIGNAL, createTonicDopamine, DOPAMINE_SIGNAL, NOVELTY_SIGNAL, RESTING_DA, REWARD_SIGNAL, SURPRISE_SIGNAL } from "./tonic.js";
+import { effortOf, reliefIsTelling, reliefOf, retryAfter, trustAfter, withTheRest, type NeedLevels } from "./wanting.js";
+import { WASTED_EFFORT_RULE, wastedEffort } from "./wasted.js";
+import { BAD_SURPRISE_SIGNAL, createTonicDopamine, DOPAMINE_SIGNAL, NOVELTY_SIGNAL, RESTING_DA, REWARD_SIGNAL, SURPRISE_SIGNAL, WANT_SIGNAL } from "./tonic.js";
 
 export interface DopamineOptions {
   rules: RewardRule[];
@@ -23,6 +24,19 @@ export interface DopamineOptions {
   learningWindowMs?: number;
   /** Something else notable happened this tick (e.g. an alarm jump or a cue): it opens a window too. Default: never. */
   notable?(ws: Workspace): boolean;
+  /**
+   * The work the body did between two ticks, in reward units: what that stretch costs if the
+   * running skill comes to nothing (see wastedEffort). Default: none, so nothing is ever wasted.
+   */
+  effortOf?(moment: RewardMoment): number;
+  /**
+   * How much of the change in a situation's worth is counted for or against the skill that ran
+   * through it (0 to 1). A skill is then judged on the difference it made, not on trouble it
+   * started in. Default: 1. At 0, a skill is paid and charged for whatever happened while it ran.
+   */
+  situationWorth?: number;
+  /** How strongly a wanted thing in view pulls: scales the urgency of cues (0: none). Default: 1. */
+  wanting?: number;
   /** Where DA rests with no recent reward. Default: 0.5. */
   restingDA?: number;
   /** Everything in view the bot could aim a skill at, nearest first. Default: nothing (no cues). */
@@ -44,6 +58,19 @@ const NOTABLE_REWARD = 0.1;
 /** Outside a learning window, skill values move this much of the usual step. */
 const OUTSIDE_WINDOW = 0.2;
 
+/** The scorebook's name for a situation by itself, whatever skill is running: what tends to follow from being in it. */
+export const SITUATION = "(situation)";
+/** What follows a situation counts for half as much this long afterwards, in ms. */
+const WORTH_HALF_LIFE_MS = 10_000;
+/**
+ * A surprise is also put down to the situations just before the one it happened in, for half as
+ * much this long ago, in ms. The harm of a fall shows a moment after the fall is over; without
+ * this it would be blamed on standing still.
+ */
+const TRACE_HALF_LIFE_MS = 1000;
+/** Situations fainter than this in the trace are dropped. */
+const FAINT = 0.05;
+
 /** Guardrail: an episode that ended in death learns from this outcome (or worse), a large negative surprise. */
 export const DEATH_OUTCOME = -5;
 /** A death with no skill running is blamed on a skill that ended at most this long before. */
@@ -51,29 +78,47 @@ export const BLAME_WINDOW_MS = 10_000;
 
 /**
  * Dopamine, steps 1 to 7. Each tick it:
- *   1. runs every reward rule on what changed since the last tick (repeated rewards from the
- *      same rule shrink), and adds the rewards to the running skill's episode;
+ *   1. runs every reward rule on what changed since the last tick, and adds the rewards (a need
+ *      that fell pays, one that rose costs) to the running skill's episode;
  *   2. shares the tonic DA level (0..1, a fading measure of recent reward) as the "dopamine" signal,
  *      and this tick's positive reward, novelty reward and biggest surprise as signals;
  *   3. when a skill ends (done, failed or interrupted), teaches the scorebook from the surprise:
- *      the episode's outcome minus what it expected for that skill (and for that skill aimed at
- *      that kind of thing) in the situation it started in, and counts the run as a success
+ *      the episode's outcome minus what it expected for that skill, in the situation it started
+ *      in, aimed at that thing (see the scorebook's levels), and counts the run as a success
  *      (done) or not (failed). A death makes the outcome at most
- *      DEATH_OUTCOME; with no skill running, the skill that ended just before takes the blame;
- *   4. proposes heading toward things in view that paid off before (cues);
- *   5. logs mood, a running average of recent surprises (only logged for now).
+ *      DEATH_OUTCOME; with no skill running, the skill that ended just before takes the blame.
+ *      A run that was expected to pay and earned less than the work it took is charged the
+ *      difference (wasted effort), which is logged as a reward and lowers DA like any other;
+ *      A skill is judged on the difference it made. The region also learns what each situation
+ *      is worth by itself (what tends to follow from it, whatever is running), and a skill is
+ *      credited with the change in that worth from where it started to where it ended: one that
+ *      starts in trouble is not blamed for the harm already coming, and one that walks into
+ *      trouble is. A run cut short is taken to have been going to earn the rest of what was
+ *      expected, so only what actually happened to it is learned; but each time in a row it is
+ *      cut short with no finished run between, that is trusted less (see trustAfter), so a run
+ *      that never gets to finish is given up on. A tick's rewards go to the skill that ran for
+ *      the most of that tick;
+ *   4. learns what each run did to each need (how far its level fell from the run's start to its
+ *      end: its relief) and the work it took, each filed like a skill of its own (see reliefOf);
+ *   5. proposes heading toward the things in view that would pay right now (cues): each thing is
+ *      weighed by itself, by the relief learned for it, how pressing each need is, and the work of getting there (see cueProposals);
+ *   6. logs mood, a running average of recent surprises (only logged for now).
  * The arbiter reads DA and the scorebook. A rule that throws is skipped and named in the trace.
  */
 export function createDopamineRegion(options: DopamineOptions): Region {
   const { rules, situationOf, scorebook = createScorebook(), learningRate = 0.1, thingsOf = () => [], skillsToward = () => [] } = options;
-  const { restingDA = RESTING_DA, name = "dopamine", layer = 0 } = options;
+  const { restingDA = RESTING_DA, name = "dopamine", layer = 0, situationWorth = 1 } = options;
+  const worthOf = (situation: string) => scorebook.get(situation, SITUATION).expected;
+  /** The situations the bot has just been in, and how fresh each still is (1 = this tick). */
+  let trace = new Map<string, number>();
   const episodes = createEpisodeTracker();
   const tonic = createTonicDopamine(restingDA);
-  const habituation = createHabituation();
   const mood = createMood();
   /** The latest episode that ended, and when, for blaming a death between skills. */
   let lastEnded: { episode: EndedEpisode; at: number } | null = null;
   let before: State | null = null;
+  /** How pressing each need was at the last tick. */
+  let levels: NeedLevels = {};
   const seen = new WeakSet<SkillEvent>();
 
   /** Teaches the scorebook from one ended episode, also under the kind of thing it was aimed at. */
@@ -81,12 +126,71 @@ export function createDopamineRegion(options: DopamineOptions): Region {
   let step = learningRate;
   let windowUntil = -Infinity;
 
-  function learn(e: EndedEpisode) {
-    const outcome = e.fatal ? Math.min(e.outcome, DEATH_OUTCOME) : e.outcome;
-    const surprise = scorebook.learn(e.situation, e.skill, outcome, step);
-    if (e.toward !== undefined) scorebook.learn(e.situation, towardKey(e.skill, e.toward), outcome, step);
+  /** Wants that are waiting to be tried again (see retryAfter), by skill and thing, and until when. */
+  const heldUntil = new Map<string, number>();
+  const wantKey = (skill: string, thingId: string | undefined) => `${skill}\n${thingId ?? ""}`;
+
+  /** The effort a run wasted: charged only if the run (this skill, here, aimed at this thing) was expected to pay. */
+  function wasteOf(e: EndedEpisode): number {
+    return wastedEffort(e, scorebook.get(e.situation, e.skill, aimOf(e)).expected);
+  }
+
+  /**
+   * What the run did to each need: how far its level fell from the run's start to `now`. Each is
+   * learned as the relief to expect of this skill, here, aimed at this thing. A need that could
+   * not have shown the expected relief (it was not pressing enough to begin with) teaches nothing.
+   */
+  function learnReliefs(e: EndedEpisode, now: NeedLevels, cut: boolean, trust: number): Record<string, number> {
+    const reliefs: Record<string, number> = {};
+    if (e.fatal) return reliefs; // a respawn refills everything: nothing the run did
+    for (const [need, atStart] of Object.entries(e.needs ?? {})) {
+      if (now[need] === undefined) continue;
+      const got = atStart - now[need];
+      const expected = scorebook.get(e.situation, reliefOf(e.skill, need), aimOf(e)).expected;
+      if (got === 0 && expected === 0) continue;
+      const relief = cut ? withTheRest(got, expected, trust) : got;
+      if (!reliefIsTelling(atStart, relief, expected)) continue;
+      scorebook.learn(e.situation, reliefOf(e.skill, need), relief, step, aimOf(e));
+      if (got !== 0) reliefs[need] = Math.round(got * 1000) / 1000;
+    }
+    return reliefs;
+  }
+
+  /** Teaches the scorebook from one ended episode; `endedIn` is the situation it ended in, `now` how pressing each need is at its end. */
+  function learn(e: EndedEpisode, endedIn: string, now: NeedLevels) {
+    const expected = scorebook.get(e.situation, e.skill, aimOf(e)).expected;
+    // The difference it made to the situation: better or worse off than where it started.
+    const shift = e.fatal ? 0 : situationWorth * (worthOf(endedIn) - worthOf(e.situation));
+    const earned = e.fatal ? Math.min(e.outcome, DEATH_OUTCOME) : e.outcome + shift;
+    const wasted = wasteOf(e);
+    // Cut short: what it was expected to earn and had not yet is taken as still to come, and
+    // trusted less each time in a row this happens.
+    // Not finished: cut short, or failed before its job was done. Neither shows what the thing gives.
+    const cut = e.ended !== "done" && !e.fatal;
+    const inARow = cut ? scorebook.cutShort(e.skill, aimOf(e)) : 0;
+    const trust = cut ? trustAfter(inARow) : 1;
+    // The same want is not acted on again at once: it waits, longer each time in a row; a finished run ends the wait.
+    if (cut) heldUntil.set(wantKey(e.skill, e.towardId), (before?.timestamp ?? 0) + retryAfter(inARow));
+    else heldUntil.delete(wantKey(e.skill, e.towardId));
+    const unfinished = cut ? withTheRest(e.gained, expected, trust) - e.gained : 0;
+    const outcome = earned - wasted + unfinished;
+    const reliefs = learnReliefs(e, now, cut, trust);
+    // The work it took (a run cut short took at least what such runs usually take).
+    const usualWork = scorebook.get(e.situation, effortOf(e.skill), aimOf(e)).expected;
+    if (e.effort > 0 || usualWork !== 0) scorebook.learn(e.situation, effortOf(e.skill), cut ? Math.max(e.effort, usualWork) : e.effort, step, aimOf(e));
+    const surprise = scorebook.learn(e.situation, e.skill, outcome, step, aimOf(e));
     mood.feel(surprise, before?.timestamp ?? 0);
-    return { ...e, outcome, surprise, ...scorebook.get(e.situation, e.skill) };
+    return {
+      ...e,
+      outcome,
+      surprise,
+      ...(shift !== 0 ? { shift } : {}),
+      ...(unfinished > 0 ? { unfinished } : {}),
+      ...(cut && trust < 1 ? { trust } : {}),
+      ...(wasted > 0 ? { wasted } : {}),
+      ...(Object.keys(reliefs).length ? { reliefs } : {}),
+      ...scorebook.get(e.situation, e.skill, aimOf(e)),
+    };
   }
 
   return {
@@ -99,36 +203,80 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       for (const e of events) seen.add(e);
       const moment = before && { before, after, events };
       before = after;
+      const [was, now] = [levels, needLevels(rules, after)];
+      levels = now;
       if (!moment) {
         ws.setSignal(DOPAMINE_SIGNAL, tonic.update(0, after.timestamp));
         return { proposals: [] };
       }
 
-      const { rewards, errors } = checkRules(rules, moment, habituation);
-      const total = rewards.reduce((sum, r) => sum + r.amount, 0);
+      const { rewards, errors } = checkRules(rules, moment);
+      // Rewards about one skill go to that skill; the rest are whoever's was running.
+      const about = rewards.filter((r): r is LoggedReward & { skill: string } => r.skill !== undefined);
+      const anyones = rewards.filter((r) => r.skill === undefined);
+      const earned = anyones.reduce((sum, r) => sum + r.amount, 0);
       const fatal = rewards.some((r) => r.fatal);
+      let effort = 0;
+      try {
+        effort = options.effortOf?.(moment) ?? 0;
+      } catch (error) {
+        errors.effort = error instanceof Error ? error.message : String(error);
+      }
+      // This tick's rewards and work belong to the skill that ran for the most of it. A skill
+      // starts after the tick that chose it, so it belongs to that tick's situation.
+      const [here, there] = [situationOf(moment.before), situationOf(after)];
+      const inView = new Map([...thingsOf(after), ...thingsOf(moment.before)].map((t) => [t.id, t]));
+      const { ended, credited } = episodes.advance({
+        events,
+        from: moment.before.timestamp,
+        to: after.timestamp,
+        situation: here,
+        aimOf: (target) => {
+          const thing = inView.get(target);
+          return thing && aimAt(thing);
+        },
+        needs: was,
+        amount: earned,
+        gained: anyones.reduce((sum, r) => sum + Math.max(0, r.amount), 0),
+        effort,
+        fatal,
+        about,
+      });
+      // Effort that came to nothing is a reward like the rest: it opens a learning window and lowers DA.
+      for (const e of ended) {
+        const wasted = wasteOf(e);
+        if (wasted > 0) rewards.push(wastedReward(e, wasted));
+      }
+      const total = rewards.reduce((sum, r) => sum + r.amount, 0);
       const opened = options.learningWindowMs !== undefined && (Math.abs(total) >= NOTABLE_REWARD || fatal || (options.notable?.(ws) ?? false));
       if (opened) windowUntil = after.timestamp + options.learningWindowMs!;
       const inWindow = options.learningWindowMs === undefined || after.timestamp <= windowUntil;
       step = learningRate * (inWindow ? 1 : OUTSIDE_WINDOW);
-      const credited = episodes.credit(total, fatal);
-      const blamed = fatal && !credited && lastEnded && after.timestamp - lastEnded.at <= BLAME_WINDOW_MS ? learn({ ...lastEnded.episode, fatal: true }) : null;
+      const blamed = fatal && !credited && lastEnded && after.timestamp - lastEnded.at <= BLAME_WINDOW_MS ? learn({ ...lastEnded.episode, fatal: true }, there, now) : null;
       const da = tonic.update(total, after.timestamp);
       ws.setSignal(DOPAMINE_SIGNAL, da);
       ws.setSignal(REWARD_SIGNAL, total);
-      ws.setSignal(NOVELTY_SIGNAL, rewards.reduce((sum, r) => (r.need === "curiosity" ? sum + r.amount : sum), 0));
-      // A skill starts after the tick that chose it, so it belongs to that tick's situation.
-      const kinds = new Map(thingsOf(moment.before).map((t) => [t.id, t.kind]));
-      const ended = episodes.apply(events, situationOf(moment.before), (target) => kinds.get(target));
-      for (const e of ended) if (e.ended !== "interrupted") scorebook.record(e.situation, e.skill, e.ended === "done");
-      const learned = ended.map(learn);
+      ws.setSignal(NOVELTY_SIGNAL, Math.max(0, rewards.reduce((sum, r) => (r.need === "curiosity" ? sum + r.amount : sum), 0)));
+      for (const e of ended) if (e.ended !== "interrupted") scorebook.record(e.situation, e.skill, e.ended === "done", aimOf(e));
+      const learned = ended.map((e) => learn(e, there, now));
+      // What this situation is worth: what it just paid, plus what the one it led to is worth
+      // (counted for less the longer it took; nothing follows a death).
+      const elapsed = Math.max(0, after.timestamp - moment.before.timestamp);
+      const unforeseen = earned + (fatal ? 0 : 0.5 ** (elapsed / WORTH_HALF_LIFE_MS) * worthOf(there)) - worthOf(here);
+      const stale = 0.5 ** (elapsed / TRACE_HALF_LIFE_MS);
+      trace = new Map([...trace].map(([s, fresh]): [string, number] => [s, fresh * stale]).filter(([, fresh]) => fresh >= FAINT));
+      trace.set(here, 1);
+      for (const [recent, fresh] of trace) scorebook.learn(recent, SITUATION, worthOf(recent) + fresh * unforeseen, learningRate);
+      if (fatal) trace.clear();
       ws.setSignal(SURPRISE_SIGNAL, Math.max(0, ...learned.map((e) => Math.abs(e.surprise))));
       ws.setSignal(BAD_SURPRISE_SIGNAL, Math.max(0, ...learned.map((e) => -e.surprise)));
       if (learned.length) lastEnded = { episode: learned.at(-1)!, at: after.timestamp };
-      const situation = situationOf(after);
-      const { cues, proposals } = cueProposals({ things: (options.cueThingsOf ?? thingsOf)(after), situation, da, scorebook, skillsToward });
+      const situation = there;
+      const { cues, proposals } = cueProposals({ things: (options.cueThingsOf ?? thingsOf)(after), situation, da, needs: pressingNow(rules, after), scorebook, skillsToward: (thing) => skillsToward(thing).filter((skill) => !((heldUntil.get(wantKey(skill, thing.id)) ?? -Infinity) > after.timestamp)), strength: options.wanting ?? 1 });
+      const asleep = options.asleep?.(ws) ?? false;
+      ws.setSignal(WANT_SIGNAL, asleep || !proposals.length ? 0 : Math.min(1, Math.max(...cues.map((c) => c.want))));
       return {
-        proposals: options.asleep?.(ws) ? [] : proposals,
+        proposals: asleep ? [] : proposals,
         trace: {
           situation,
           rewards,
@@ -144,4 +292,10 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       };
     },
   };
+}
+
+/** Wasted effort as it is logged beside the tick's other rewards. */
+function wastedReward(e: EndedEpisode, wasted: number): LoggedReward {
+  const aim = e.toward === undefined ? e.skill : `${e.skill} to the ${e.toward}`;
+  return { rule: WASTED_EFFORT_RULE, need: "progress", amount: -wasted, reason: `${aim} came to nothing (effort ${e.effort.toFixed(3)}, earned ${e.gained.toFixed(3)})` };
 }

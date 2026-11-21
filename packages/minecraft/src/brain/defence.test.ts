@@ -8,9 +8,9 @@ import type { ThreatFacts } from "../defence/size-up.js";
 import { SCHEMA_VERSION } from "../encode/encode-state.js";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { fakeData } from "../encode/state.test-helper.js";
-import { hostileAppeared, threatPresent } from "./alarm.js";
+import { falseAlarm, hostileAppeared, threatPresent } from "./alarm.js";
 import { DEFENCE_REFLEXES, defenceOf, defenceReflexes, pressingThreat, threatLevel } from "./defence.js";
-import { lastStand, playerReflexes } from "./reflexes.js";
+import { corneredFight, lastStand, playerReflexes } from "./reflexes.js";
 
 type Mob = MinecraftStateData["nearby"]["mobs"][number];
 
@@ -84,6 +84,19 @@ describe("the defence reflexes from the threat sense's reading", () => {
   });
 });
 
+describe("cornered_fight", () => {
+  const fires = (d: MinecraftStateData) => corneredFight.check(workspace(d).viewFor("reflex"));
+  it("with a threat on it and no way out, fights at full urgency, so nothing outvotes it", () => {
+    expect(fires(sensed({ dist: 2, escapable: false }, { bestWeapon: null }))).toMatchObject({ action: { skill: "attack", target: "entity:7" }, urgency: 1 });
+  });
+  it("is silent with a way out, and while the threat is only coming (the bot holds still for that)", () => {
+    expect(fires(sensed({ dist: 2 }, { bestWeapon: null }))).toBeNull();
+    expect(fires(sensed({ dist: 6, escapable: false }))).toBeNull();
+    // Armed and choosing to fight with a way out is the soft reflex's business, not this one's.
+    expect(fires(sensed({ dist: 2 }))).toBeNull();
+  });
+});
+
 describe("last_stand", () => {
   it("breaks away when there is a way out, and stays silent when cornered (the defence circuit fights instead)", () => {
     const view = (d: MinecraftStateData) => lastStand.check(workspace(d).viewFor("reflex"));
@@ -126,6 +139,14 @@ describe("alarm agrees with defence", () => {
     expect(pressingThreat(data({ mobs: [{ ...zombie, dist: 3, reachable: false }] }))).toBeNull();
     expect(threatPresent(stateOf(data({ mobs: [zombie] })))).toBe(true);
     expect(threatPresent(stateOf(sensed({ dist: 6, canWalkTo: false })))).toBe(false);
+  });
+  it("the all-clear: a threat that was pressing is found unable to get to the bot, and nothing else presses", () => {
+    const [guessed, answered] = [stateOf(sensed({ dist: 5 })), stateOf(sensed({ dist: 5, canWalkTo: false }))];
+    expect(falseAlarm(guessed, answered)).toBe(true);
+    // Still able to reach, never pressing, or simply gone: no all-clear.
+    expect(falseAlarm(guessed, guessed)).toBe(false);
+    expect(falseAlarm(answered, answered)).toBe(false);
+    expect(falseAlarm(guessed, stateOf(data()))).toBe(false);
   });
   it("one that shoots and has a clear line holds alarm up from where it is", () => {
     expect(threatPresent(stateOf(sensed({ dist: 7, canWalkTo: false, shoots: true, facing: true, approach: 0 })))).toBe(true);

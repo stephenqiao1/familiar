@@ -182,7 +182,7 @@ describe("the protective reflexes as a set", () => {
   });
 
   it("keeps in_lava_or_fire, drowning and last_stand first, exactly as they were", () => {
-    expect(createPlayerReflexes().map((r) => r.name)).toEqual(["in_lava_or_fire", "drowning", "last_stand", "pain_withdrawal", "buried", "about_to_touch", "falling_right", "defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard"]);
+    expect(createPlayerReflexes().map((r) => r.name)).toEqual(["in_lava_or_fire", "drowning", "last_stand", "cornered_fight", "pain_withdrawal", "buried", "about_to_touch", "falling_right", "defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard"]);
   });
 
   it("in_lava_or_fire reads the body, not the list: with nothing innate, lava still triggers it", () => {

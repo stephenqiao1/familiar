@@ -13,6 +13,8 @@ export interface SkillResult {
   reason?: string;
   /** What the run changed, if the skill reports it (primitives do). */
   changes?: Changes;
+  /** The thing the run was aimed at, if the skill chose it itself (a chest it picked with no target given). */
+  aimedAt?: string;
 }
 
 /** A behaviour the agent can perform. `Ctx` is whatever the game side gives skills to act with. */

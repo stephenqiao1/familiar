@@ -3,6 +3,1045 @@
 Things we noticed while building that work but may need attention later. Each entry says what we
 saw, why it happens, and what would fix it. Newest first.
 
+## Problems with the current design
+
+*Written 2026-11-19 by reading every entry below. Nothing new was tested. Each item is a problem
+that shows up in several findings and comes from how the brain is built, not from one bug. The
+entries named in brackets hold the evidence.*
+
+1. **One urgency number decides everything, and habit usually wins.** Every proposal competes on
+   the same 0 to 1 scale. Jev's `idle` scores about 0.9 once its learned value and the stay bonus
+   are added, so anything soft loses to it: a look at 0.35, the urge to breathe until air 7, bed
+   at 0.2 to 0.6, a held-back flee, a starving sleeper. Each case was patched by itself (looks
+   at full urgency when idle, the `urge` signal shrinking the stay bonus, upkeep skipping the
+   gain), so the rules for who wins are now spread over several places. *(Reticular: "Jev outvotes
+   bedtime"; medulla: "the urge at its strongest still lost to habit"; colliculus: "the spec's
+   look urgency never wins"; "The first tick of a threat is damped".)*
+   **Would fix:** rank by layer before urgency (a body need outranks a habit), or score the
+   layers on separate scales that the arbiter combines by one stated rule.
+
+2. **The planner can only talk to Jev.** A goal reaches behaviour as text in Jev's prompt. The
+   arbiter never sees it, nothing carries out a step, and a finished step is noticed up to 15
+   seconds late. So the planner's weight has three levels in practice, "leave far threats alone"
+   is persuasion, a goal that says "stay still" can drown the bot, and the forced retreat goal
+   can be overwritten. Its controls over the lower layers are coarse too: a hold-back is all or
+   nothing and lasts as long as the goal. *("The planner's weight has only three levels";
+   "An interrupt has little to cancel"; "Planner steps"; "The forced retreat goal can be
+   overwritten"; medulla: "holding back is all or nothing".)*
+   **Would fix:** let the planner (or a region acting for it) make proposals the arbiter can
+   weigh, with a "done when" condition per step that code checks every tick.
+
+3. **What the bot does depends on what Jev picks, and most live checks leave Jev out.** With Jev
+   in, the same scene passes one run and fails the next. So the dependable checks run on
+   reflexes alone, which shows that a reflex fires and its skill works, not that it wins in the
+   real brain. The whole-brain results are mostly one or two runs each. *("The night and dark
+   scenes depend on what Jev picks"; medulla: "the live scenes other than the dives run without
+   instinct"; demo runner: "three demos do not show their limit every time"; "Jev sometimes
+   times out".)*
+   **Would fix:** a recorded or seeded Jev for scenes, and repeat counts for whole-brain runs.
+
+4. **The brain assumes one skill at a time, and waits for it.** The loop does not tick again
+   until a stopped skill has ended, so a skill that cannot be stopped stops every reflex (the
+   chest that froze the brain for 20 seconds). A movement run alongside is invisible to dopamine
+   and patience. Only one defence is chosen each tick, so a held-back flee is replaced by
+   nothing. The stay bonus protects the running skill only if someone proposes it again.
+   *(Medulla: "a skill that cannot be stopped stops every reflex"; "A look that runs alongside
+   is invisible"; "Holding back flee leaves an unarmed bot with nothing"; "The stay bonus only
+   protects a skill that is proposed again".)*
+   **Would fix:** a deadline on stopping a skill, a standing "keep doing this" proposal, and
+   episodes that know about side movements.
+
+5. **Everything waits for a tick, and every tick runs everything.** The loop polls for change
+   every 100 ms with ticks at least 150 ms apart, so a reaction starts 5 to 174 ms after its
+   event and a fall is noticed up to half a second late. Regions run in a fixed order, so some
+   signals arrive a tick late and are worked out twice instead (looming, this tick's threat).
+   And a faster tick speeds up the costly parts too: alarm can triple the Jev calls, while a
+   drowsy bot still ticks every 500 ms. *(Startle: "Speed"; posture: "the righting reflex needs
+   a brain tick"; startle limits: "looming is read from the state"; "Faster ticks mean more Jev
+   calls"; reticular: "drowsy ticks still run every 500 ms".)*
+   **Would fix:** let a raw event wake the loop, and give the fast layers their own short tick
+   that does not run instinct.
+
+6. **One state serves both Jev and the brain's own bookkeeping.** Attention is narrowed by
+   leaving things out of the state, and other regions read the same state. Things hidden by
+   alarm look new when they come back, the field of view changes what Jev picks, and there is
+   no single budget to spend: Jev is sent the whole state, which keeps growing. *("Narrowing
+   attention hides things, which then look new again"; "The attention budget is a count, not a
+   size limit"; colliculus limits: "the field of view filters only..." and "the state is
+   bigger".)*
+   **Would fix:** keep the full state for the brain and build a separate, budgeted view for Jev
+   and the planner.
+
+7. **Learning blames by timing and nearness, and mostly cannot unlearn.** A bad meal, a kill,
+   a hurtful block, a self-caused bang and a dangerous player are all decided by "it happened
+   within a few seconds, close by". Two coincidences teach a wrong fact, and several kinds of
+   fact are then kept for good (a block that hurts, a player who is a threat). In the other
+   direction, disappointment only shrank toward zero and never ended an urge (closed 2026-11-19:
+   wasted effort now costs something, though only where a payoff was expected). *(Reflex limits:
+   "blame is a guess" and "learning is all or nothing"; medulla limits: "blame for a bad meal is
+   by timing alone"; defence: "kills are credited by timing", "fleeing a player by reflex may
+   not be wanted"; "Disappointment fades the urge to check, but never ends it"; "The learning
+   window slows learning from quiet disappointments".)*
+   **Would fix:** graded confidence that fades without fresh evidence. (The cost for wasted time
+   was added 2026-11-19.)
+
+8. **The protections live in different places, and a journey slips past most of them.** Stance
+   and self-caused are known only through the primitive wrapper, so skills that move the body
+   directly are not covered. While the bot travels, the route checks, `about_to_touch`, `pushed`
+   and the posture check are skipped on trust in the pathing rules, which is how a fleeing bot
+   ran off the sky plaza and how a flight into a dead end goes unnoticed. The pathfinder's own
+   digging teaches nothing. *(Posture limits: "only primitives get stance", "loose blocks are
+   learned only from `break_block`"; defence: "while the bot is travelling the checks are
+   skipped", "a flight hides a shove"; colliculus: "fleeing took the bot off the sky plaza
+   once"; startle limits: "self-caused covers only what a primitive reports".)*
+   **Would fix:** route every body movement through the one doorway, and run the cheap checks
+   during a journey as well.
+
+9. **Most thresholds are hand-set, and several strengths are on or off.** Zone distances (8, 16,
+   48, 64 blocks), sound weights, balance numbers, time windows and the 0.5 that speaks for
+   staying asleep were chosen by hand, each tuned in its own scene. Nothing checks them against
+   each other, and a change to one moves which proposal wins elsewhere (problem 1). *(Startle
+   limits: "those weights are hand-set"; posture limits: "the balance numbers are hand-set";
+   "Most strengths are on or off"; locomotion limits.)*
+   **Would fix:** one table of the numbers with what each was tuned against; a whole-brain
+   regression that reports wins and losses when one changes.
+
+10. **Signals are built before anything reads them.** `cold`, `reserve`, `vitals`, `stuck`,
+    `headroom` and mood are worked out and logged with no reader; `sore` changes two numbers.
+    Mood cannot be shared at all, because signals are forced into 0 to 1. The lower layers were
+    built ahead of the drives region meant to use them. *(Medulla limits: "nothing acts on
+    `cold`, `tired`, `reserve` or `vitals`"; locomotion limits: "the `stuck` signal has no
+    reader"; "Mood can't be shared between brain parts yet".)*
+    **Would fix:** build the drives region next, or stop adding signals until it exists.
+
+11. **There is too little to do for the upper layers to show anything.** There are only a few
+    skills and none gathers, builds or explores, so a safe bot idles at base. Search, giving up,
+    cues and the planner's steps have little to act on and are mostly untested live. A bot that
+    flees far does not come home by reflex. *("The bot mostly idles at base"; "Live testing,
+    2026-11-14": "not yet exercised live"; "A bot that logged out far from base would not
+    start".)*
+    **Would fix:** gather, explore and build skills, then re-run the live scenes.
+
+12. **The body is not a real player's body.** On 1.21.11 Mineflayer misreports air, knockback,
+    projectile speed and sound names; pistons, slowness, soul sand and honey do not affect this
+    client. The fixes read the server's own packets, which a new version can break, and some
+    learning (slippery, slow) cannot happen on this body at all. *(Brainstem live testing;
+    reflexes: "the bot could not be knocked back at all"; colliculus: "arrows never loomed",
+    "sound names cannot be trusted"; posture: "slippery and slow cannot be learned on this
+    body".)*
+    **Would fix:** keep the packet readers in one place with a live check for each, and re-run
+    them on every Minecraft or Mineflayer upgrade.
+
+13. **Dopamine pays the running skill for whatever happens, and the rewards read any change as
+    an achievement.** Credit goes by timing alone, so `idle` is paid for animals wandering up and
+    wounds mending, and a respawn reads as health and food regained (a death netted +0.46 live).
+    Rewards pay on the way up and cost nothing on the way down, so they can be looped. And what
+    is learned is filed under one situation and one kind of thing, so it neither carries from day
+    to night nor tells one chest from another. *("Live testing, 2026-11-19: dopamine".)*
+    **Partly closed 2026-11-20:** rewards are now the signed change in a need, so a loop pays
+    nothing, a death is a loss and `idle` nets about zero. Still open: credit goes by timing, and
+    what is learned is filed under one exact label.
+    **Closed 2026-11-20** for filing and credit: the scorebook is a sum of adjustments, and a
+    skill is credited with the difference it made. A cue can now win (2026-11-21: its pull is what the thing would pay for the needs pressing right now), also for a remembered thing out of the state (same day).
+
+**Status.** Open. A summary: when an entry below closes one of these, update it here too.
+
+## Dopamine: a want that cannot be carried out is neither hammered at nor unlearned
+
+*Built and run live 2026-11-21. Closes "a want that cannot be carried out is retried at once
+and unlearned in seconds" (noted three times in the entries below).*
+
+**The problem.** When `take_items` could not get to the chest it failed within a fraction of
+a second, and the want proposed it again on the next tick. Each failure was learned as "this
+chest gave nothing". Nine failures in three seconds took the want from 0.9 to nothing; 29
+started-and-dropped trips near a standing husk took it from 0.86 to 0.5. A few seconds of bad
+luck erased what many good trips had taught. Seen from three different causes in one day (a
+route blocked by a threat's avoid area, a death that moved the bot away, a threat on the only
+route), so the weakness was dopamine's own.
+
+**The change: two rules, both general.**
+- **A run that failed did not finish either** (`dopamine-region.ts`, `scorebook.ts`). Only a
+  run that ends as done shows what its thing gives (an empty chest ends as done). A failed run
+  is now treated as one cut short: what it had not yet delivered is taken as still to come,
+  trusted less each time in a row (halving every four). One failure teaches nothing about the
+  chest; a string of them still gives up on it. A failed run no longer starts that count again:
+  only a finished one does.
+- **A thwarted want waits before it is tried again** (`retryAfter` in `wanting.ts`). After a
+  run toward a thing does not finish, the want for it is not proposed for 1 s; 2 s after the
+  second in a row, then 4, 8, and so on up to a minute. A finished run ends the wait.
+
+**Seen live.**
+
+| Scene | Before | After |
+|---|---|---|
+| Whole brain, a standing husk on the only route (`threat_with_jev`) | The trip was started and dropped 29 times in 15 s; the want fell 0.86 → 0.5 | Started twice in one run and not at all in the other; the want stayed 0.86 |
+| The same, husk gone | Got its bread | Got its bread, 4 s and 22 s later |
+| Chest walled off for 15 s (`no_path`, new) | | `take_items` kept looking for a way and did not fail at all; the want stayed 0.90; bread fetched once the wall went |
+| Seven other dopamine scenes; `neuro-check` calm, ambush, remembered, hunger | No problem; pass | No problem; all pass |
+
+**Limits.**
+- **The fast "no path" failure was not reproduced on demand.** A plain wall makes the skill
+  keep searching, not fail. The quick failures came from a route blocked by a threat's avoid
+  area, which is what the standing-husk scene exercises. The nine-in-a-row case is covered by
+  a unit test only.
+- **Nine failures in a row still leave about a fifth of what was learned** (before: under 3%).
+  With the waits they now take about three minutes, not three seconds.
+- **The wait is the same whatever stopped the run.** A trip cut off once by a glance waits a
+  second before the want returns, though nothing was wrong with the trip.
+- **The waits are not saved**: a restart forgets them (the count of unfinished runs is saved).
+- **A failed run now leaves the skill's expected value nearly untouched the first time**
+  (it still pays the fixed cost of a failure and of the effort wasted). A skill that fails
+  every time is learned as bad more slowly than before.
+
+**Status.** Built. Open: the limits above.
+
+## Cornered: when fleeing is not working, hold and fight
+
+*Built and run live 2026-11-21. Closes the first limit of the next entry (the bot died in both
+attacking-husk runs).*
+
+**What the plan was, and what tracing changed.** The plan had two parts: count a failing
+flight as cornered, and make the way-out check ask a better question. Tracing the death tick
+by tick showed the way-out check was right (there was a way out, past the husk along the far
+wall), so it is left alone. Three other causes turned up instead, each of which got its fix.
+
+| What went wrong | Why | Fix |
+|---|---|---|
+| `flee` refused to run ("cannot run") on a dozen ticks while the husk walked up | `flee` took "out of the threat's sight" as safe. The bot was tucked behind the glass corner; the husk was after it all the same | Out of sight is safe only from a threat that is not after the bot: one that has noticed it and can get to it keeps coming (`skills/flee.ts`, reading the defence circuit's sizing up) |
+| The bot never believed it was cornered | Nothing read whether fleeing was working | Fleeing chosen for 1.5 s with the threat nearer than when it began counts as no way out, until the bot has made 2 blocks of ground (`threat-sense.ts`) |
+| Cornered, the defence circuit chose to fight, and lost the vote | As a soft reflex the fight (0.95, held back by the patience brake) lost to Jev's `flee` already under way (0.76 plus the stay bonus) | With a threat on the bot and no way out, the fight is a hard reflex, `cornered_fight`: nothing outvotes it (`brain/reflexes.ts`) |
+| A husk the bot had just run from stopped counting at 8 blocks | It had not yet shown any sign of noticing | A threat that was on the bot or coming counts as having noticed for 5 s after (`threat-sense.ts`) |
+
+**Seen live** (`pnpm dopamine-check threat_with_jev_live`; whole brain, attacking husk, the
+plaza now walled all round for this scene).
+
+| | Before | After, three runs |
+|---|---|---|
+| Deaths | 1 in each run | 0, 0, 0 |
+| At the corner | Kept choosing `flee`; hit and knocked off | Held still, then fought (`attack` won 18 to 24 ticks); health 20 at the end in the run traced |
+| Chest wanted with the husk within 16 blocks | 3 times in one earlier run | 0 ticks |
+| Husk removed | | Got its bread in every run |
+| `defence-check`, eleven scenes | | Ten pass; `shooter` failed (one arrow landed; the flaky one) |
+| `threat_with_jev`, `threat_first`, `death`; `neuro-check` calm, ambush, remembered, hunger | | No problem; all pass |
+
+**Limits.**
+- **Two earlier fatal runs were on the open platform.** In those the bot was hit off the edge
+  even once it fought. The scene is now walled, so "cornered" means walls. Fighting with a drop
+  behind it is still as dangerous as it was; nothing here keeps the bot away from an edge.
+- **The husk was never killed.** Unarmed, the bot fought for five seconds and held it off; a
+  longer fight, a stronger mob or two of them were not run.
+- **A hard reflex ignores hold-backs.** A goal that holds the fight reflex back does not hold
+  `cornered_fight`.
+- **"Fleeing is not working" can be wrong for a moment**: a bot stuck on a block for 1.5 s while
+  a threat closes turns to hold and fight. It is cleared once 2 blocks of ground are made.
+- **A mob the bot cannot outrun now ends in a fight** by the same rule. Not run.
+- **Cornered and only being approached, the bot's `freeze` (0.78) still loses to Jev's `flee`
+  (0.79)**, so it runs on the spot until the threat is on it, then fights.
+- **A threat that was once on the bot counts as having noticed for 5 s**, so backing off from an
+  unaware mob is now fled, not frozen for.
+- **An unaware threat sitting on the only way to the chest makes the bot dither.** With the
+  standing husk, once the 5 s were up the bot wanted the chest again (the husk was 13 blocks
+  off and unaware, which by the rule does not press), walked toward it looking for a way round,
+  and backed off each time it came to 8 blocks: 29 ticks of `take_items` started and dropped in
+  one run, the want falling from 0.86 to 0.5 as each trip was cut short. It never came nearer
+  than 7 blocks. The scene's plaza is too narrow to go round; in the open it would.
+- **In `defence-check blank` the new rule fired once**: after fleeing 9 ticks the bot held and
+  fought for 2. The scene still passed; whether it was truly out of room there was not checked.
+- **Each flee still stops at about 11 blocks and Jev idles until the threat is back at 8.**
+  Left as it was.
+
+**Status.** Built. Open: the limits above.
+
+## The whole brain, starving, with a threat that can reach it
+
+*Run live 2026-11-21, with one fix that came out of it. Closes "the whole brain with Jev and a
+threat was not run" (two entries below).*
+
+**What was run** (`pnpm dopamine-check threat_with_jev threat_with_jev_live`). Jev and every
+region on; the bot knows a full chest and is out of bread; a husk is put 3 blocks off with
+nothing between, standing still in one scene and attacking in the other. After 15 s the husk is
+removed.
+
+**What it showed.**
+- **Standing husk: the rule held.** On 65 ticks with the husk inside 8 blocks the chest was
+  never wanted, no option was loosened, and Jev fled (62 ticks; the reflex 3). The husk gone,
+  the want took the bot to the chest 2 s later and it got its bread.
+- **Attacking husk: the rule held where it applied, and still got the bot killed.** The bot
+  fled; at 9 blocks the husk no longer counted as danger (the range was 8), the chest was wanted
+  at once (0.84) and the bot turned back toward the husk. Three times: flee, turn back, flee.
+  The husk caught it at the end of the platform and knocked it off.
+
+**The fix: a threat that has noticed the bot counts from further off** (`nearestThreat` in
+`brain/read-state.ts`). One that has not noticed counts inside 8 blocks as before; one that
+has noticed (it is coming, facing the bot, or has hurt it) counts out to 16, as far as threats
+are sized up at all. The danger need is graded over that wider range, so being chased at 9
+blocks still silences every lesser need.
+
+| Scene | Before the fix | After |
+|---|---|---|
+| Attacking husk, chest wanted while the husk was near | Three times, at 9 blocks; the bot turned back each time | 0 of 52 and 0 of 51 ticks (two runs) |
+| Attacking husk, after it was removed | | Went for the chest 2 s and 21 s later; got its bread |
+| Standing husk | Rule held | Rule held |
+| `defence-check`, eleven scenes | | Ten pass; `shooter` failed again (one arrow landed; the flaky one) |
+| Three dopamine scenes; `neuro-check` calm, ambush, remembered, hunger | Pass | No problem; all pass |
+
+**Limits.**
+- **Closed the same day (see the entry above).** The bot still died in both attacking runs, of the fall. It fled to the corner of the
+  scene's platform, which stands 150 blocks up with an open edge; the husk hit it and knocked
+  it off. Part of that is the scene. Part is not: cornered at an edge, it kept trying to flee
+  (`flee` failed with "cannot run" on a dozen ticks) and never turned to fight, and Jev idled
+  for 13 to 15 ticks while the husk walked up from beyond the flight distance.
+- **Dying moves the bot to its base**, where the remembered chest on the platform cannot be
+  walked to. In one run the want then won 65 ticks to no end (the retry problem noted two
+  entries below).
+- **The danger reward is now paid over 16 blocks for a threat that has noticed**, so fleeing is
+  paid for further and a chasing mob costs more as it comes. Total for coming and going is
+  still nothing, by the unit test.
+- **Noticing lapses a few seconds after a mob stops coming**, and with it the wider range.
+- **A bare state with no word on a mob's movement counts it as having noticed** (the cheap
+  rules' default), so there the range is 16.
+
+**Status.** Run; the turning back is fixed. Open: the limits above, first the cornered case.
+
+## Defence: watch first, take the all-clear, and remember the place
+
+*Built and run live 2026-11-21. Closes the two unexplained `defence-check` failures of the next
+entry.*
+
+**The problem.** Working out whether a mob can get to the bot takes a real route check, about
+one to two seconds. Until it answers, the bot uses a cheap guess (in sight and at about its
+height). For a husk in a pit the guess is wrong. In two runs of three the bot acted on it: it
+fled for a tick and alarm rose to 0.6; when the answer came the bot stopped, but alarm only
+faded by itself and was still 0.4 at the end. It was a race between the answer and the reaction.
+
+A real brain has the same two routes, a fast rough one and a slow careful one, and reacts to
+the rough one on purpose. But its first reaction is small (freeze and look), the careful route
+can cancel the alarm, and it stops reacting to what proved harmless. The bot now does all three.
+
+**The change.**
+- **Watch first** (`settling` in `defence/routes.ts`, `size-up.ts`; the chooser in
+  `region-brainstem/defence.ts`). While the first route answer for a mob is being worked out,
+  a mob that counts as coming only on the guess is frozen for, not fled from. This holds only
+  while it is beyond half its flight distance, for at most 2.5 s, and never for a mob that is
+  looming, has hurt the bot in the last 10 s, or whose check was given up as unsure.
+- **The all-clear** (`falseAlarm` in `brain/alarm.ts`; `allClear` on the noradrenaline region).
+  When a threat that was pressing is found unable to harm the bot, and nothing else presses,
+  alarm drops at once to a quarter of itself.
+- **Remember the place** (`defence/reach-memory.ts`). Every route answer is kept by where the
+  mob and the bot each stood (within 2 blocks, 64 places). The next mob in that spot, or the
+  same one later, is known at first sight, with no guess and no wait.
+
+**Seen live** (`pnpm defence-check`).
+
+| Scene | Before | After |
+|---|---|---|
+| `pit`, when the answer is slow (1.75 s) | Fled for a tick; alarm 0.6, still 0.4 at the end; failed | Froze for a tick; alarm 0.6, cut to 0.10 by the end; passed |
+| `pit`, four runs | 1 of 3 passed | 4 of 4 passed |
+| `pit_again` (new): a second husk in the same pit | | Known unable to reach on all 17 ticks, though the guess said it could; no defence; alarm 0 |
+| All ten earlier scenes | 8 passed | 10 passed (`shooter` too, once) |
+| Five dopamine scenes (`threat_first`, `with_jev` among them); `neuro-check` calm, ambush, remembered | No problem; pass | No problem; pass |
+
+**Limits.**
+- **A mob that really can reach the bot is now fled from up to a second or two later**, if it
+  is first seen beyond half its flight distance and the route check has not answered. In `open`
+  the husk was still fled from at 8 blocks, but a fast mob first seen at 5 could gain ground.
+  Not measured.
+- **The all-clear is one fixed cut** (to a quarter), whatever else raised alarm in the same
+  moment (a hit taken while the guess stood would be cut with it).
+- **The memory of places is lost when the bot restarts**, and is not checked against changes to
+  the world: fill the pit in and a mob there is still taken as unable to reach until the route
+  check answers again (asked about once a second, so about a second).
+- **An old answer is noted for a new place for up to a second** when a mob moves, until the
+  route check is asked again.
+- **`shooter` passed once with these changes** after failing 5 of 5 before them. Nothing here
+  should change it (the scene needs two arrows to land), so it is most likely the same luck;
+  it was not rerun.
+- **Only the nearest two threats get a route check**, so only they are watched first or
+  remembered.
+
+**Status.** Built. Open: the limits above.
+
+## A threat that cannot get to the bot is no threat
+
+*Built and run live 2026-11-21. Closes a limit of the next entry ("a threat that cannot reach
+the bot counts the same as one that can").*
+
+**The problem.** The bot had more than one opinion of the same mob. The defence circuit sizes
+each threat up, with a real route check and, for mobs that shoot, a clear line. But the danger
+need, the "threatened" label, memories and the outlook all used a cruder rule: any hostile mob
+within 8 blocks. Tracing a caged husk live showed two more places with the same fault: the
+defence chooser froze the bot for a husk that could not reach it (45 s, starving), and journeys
+were routed round it in a circle so wide that no path to the chest was left.
+
+**The change: one test of whether a threat counts** (`couldHarm` in `defence/size-up.ts`): it
+can get to the bot or hit it from where it is, it is on the bot or has just hurt it, or it
+would blast through a wall (a creeper).
+- `nearestThreat` (`brain/read-state.ts`) now reads the defence circuit's sizing up through
+  that test. The danger need, the "threatened" label, memories and the outlook all follow,
+  with no change of their own. Threats the bot has learned are counted too.
+- The defence chooser only watches a seen threat that cannot reach (`wary`), noticed or not:
+  there is nothing to hide from (`region-brainstem/defence.ts`).
+- Journeys are routed round a threat only if it could harm (`threat-sense.ts`).
+- **Priority is now strict** (`pressingNow`): a lesser need is silent while danger presses at
+  all. The first version let it fade with distance, and a leftover want of 0.04 slipped in
+  between two flee runs and started a trip toward the threat.
+
+**Seen live** (`pnpm dopamine-check threat_first`).
+
+| Moment | Before | After |
+|---|---|---|
+| Out of bread, a husk in a glass box 3 blocks off | Froze for 45 s; no path to the chest; no bread | Walked past it; had its bread in 3.5 s |
+| The same husk with nothing between | A weak want started trips between flee runs | Fled; wanted nothing while it was inside 8 blocks |
+| Caged husk appearing and leaving (`threat_gone`) | Paid −0.39 then +0.39; the bot froze | Paid nothing; the bot did nothing |
+| Five other dopamine scenes; `neuro-check` calm, ambush, remembered, hunger | No problem; all pass | No problem; all pass |
+| `defence-check`, ten scenes | | Eight pass; `pit` and `shooter` failed (see limits) |
+
+**Limits.**
+- **Closed for a threat that has noticed the bot (same day, entry two above).** Out of range, out of mind. Danger counts inside 8 blocks only. The bot fled a husk that
+  stood between it and the chest, and at 8 blocks wanted the chest again and turned back (seen
+  in an early run of the scene: flee, return, flee). A threat that has just been fled is not
+  remembered for even a moment. This was so before; strict priority makes the edge sharper.
+- **Until the route check answers, reach is a guess** (line of sight and similar height). A mob
+  round a corner with no line of sight counts as unable to reach for that moment, so the bot
+  does not freeze or steer round it until the answer comes. Only the two nearest threats get a
+  route check.
+- **A cage that opens is noticed only when the route is checked again.**
+- **Only creepers are counted as hurting through a wall.** The list is one line to extend.
+- **A want that cannot be carried out is retried at once and unlearned in seconds.** With no
+  path to the chest, `take_items` failed nine times in three seconds and each failure lowered
+  the want, from 0.9 to nothing. The no-path case is now gone for a caged mob, but any other
+  cause of "no path" would do the same. Not fixed.
+- **`defence-check shooter` failed 5 of 5 runs with this change and 1 of 3 without it.** I could
+  not find a cause in the change. The scene needs two arrows to hit within 25 s; in a failing
+  and a passing run the bot did the same things tick for tick until the arrows flew, and the
+  difference was whether its flinch at the first volley made that arrow miss. So the scene
+  looks flaky, but eight runs do not rule out that the change makes a miss more likely.
+- **`defence-check pit` failed 2 of 3 runs** (and passed once with the freeze rule put back):
+  in the second before the route check answers, the husk in the pit is guessed reachable, the
+  bot flees for one tick and alarm rises to 0.6, ending at 0.4 against a limit of 0.3. The
+  earlier write-up recorded alarm at 0 for this scene. Not explained.
+  **Explained and closed the same day:** see the entry above.
+- **The scene's plaza is 9 blocks wide**, so a route round a threat that could harm is still
+  impossible there; the free-husk half only shows the fleeing and the silence.
+- **The "threatened" label now differs for a caged mob**, so what was learned under it before
+  (in a saved scorebook) is filed under a label the bot no longer gets in that case.
+
+**Status.** Built. Open: the limits above.
+
+## Dopamine: staying alive comes before any other need
+
+*Built and run live 2026-11-21. Closes the first limit of the next entry ("two needs pressing at
+once are not weighed against each other").*
+
+**The problem.** Every need counted alike. Out of food with a hostile mob close, the want for a
+known chest stayed at full strength (up to 0.9), and Jev's pick to defend itself was loosened
+like any other option, so the bot could set off for the chest past the threat. Food is there
+to mend health; it is never worth more than not being killed.
+
+**The change: needs have a rank** (`rank` on a reward rule; `pressingNow` in
+`dopamine/rewards.ts`).
+- A need with a higher rank quietens every lower one as it presses: with the more vital need at
+  v, a lesser one keeps (1 − v)² of its level. No threat: all of it. A mob half way in (4 of 8
+  blocks): a quarter. A mob on top of the bot: none.
+  **Changed the same day to strict** (see the entry above): a lesser need is silent while a
+  more vital one presses at all.
+- `danger` has rank 1; every other need has rank 0. A new vital need takes one number.
+- Both places that act on needs read the quietened levels: what the bot wants (the cues) and
+  how far Jev's options are loosened (the arbiter). So with a threat close the chest is not
+  wanted, nothing is loosened, and the defence keeps its full hold.
+- What is learned still goes by the true levels, so a chest's relief is learned the same with
+  or without a mob about.
+
+**What a soft reflex is** (asked while this was built). A hard reflex fires at full urgency (1)
+and nothing can outvote it: in lava or on fire, drowning, the last stand at low health, pulling
+away from what hurts, being buried. A soft reflex is graded and capped at 0.95, so the rest of
+the brain can outvote it: the defence circuit's freeze, flee and fight, the milder protective
+ones, and the body's upkeep urges such as eating.
+
+**Seen live** (`pnpm dopamine-check threat_first`, reflexes only).
+
+| Moment | Seen |
+|---|---|
+| Out of bread, a caged husk 3 blocks off | Wanted nothing on 0 of 17 ticks; froze throughout |
+| Husk gone | Went for the chest and got its bread, 23 s later |
+| Six other dopamine scenes (`with_jev` among them); `neuro-check` calm, ambush, remembered, hunger | No problem; all pass |
+
+**Limits.**
+- **The 23 s is not the want being slow.** The alarm drops the goal that wants bread, and
+  `take_items` only takes what a goal wants, so nothing can be wanted until the planner sets the
+  goal again. A bot with no goal asking for food does not want a chest of it at all.
+- **Only a hostile mob within 8 blocks counts as danger.** Lava, a fall, fire, drowning and low
+  health do not quieten other needs (the hard reflexes cover the first four). Low health is
+  rank 0: it is not a threat by itself, and food is what mends it.
+- **A threat 6 to 8 blocks off quietens little** (a husk at 6 leaves 56%), so the bot may still
+  set off, and the want fades as it gets nearer. Whether a trip then turns back was not run.
+- **A threat that cannot reach the bot counts the same** as one that can (the caged husk). **Closed the same day:** see the entry above.
+- **The whole brain with Jev and a threat was not run** for this; the unit test covers the
+  arbiter (Jev's `attack` keeps its hold, the chest is not wanted). **Run the same day:** see the entry
+  three above.
+- **Seen in the first run of the scene:** a trip cut off by a husk appearing was learned as
+  "going to this chest makes danger worse". One such run lowers the want a little; several
+  would put the bot off a good chest because of where a mob happened to be.
+
+**Status.** Built. Open: the limits above.
+
+## Dopamine: a pressing need loosens the hold of a skill that does not serve it
+
+*Built and run live 2026-11-21. Closes the first limit of the next entry ("a want still cannot
+interrupt a skill Jev is running").*
+
+**The problem.** Jev bids about 0.72 to 0.8 for the skill already running, whatever the bot
+needs. A want for a known chest of bread bid 0.42 from memory, so a bot with no food at all
+finished its walk home first. Raising the want's cap would not be how a brain does it: there,
+the protection of the current task weakens as a need grows, and the question is whether the
+task is still worth it next to what else is on offer.
+
+**The change** (`holdNow` in `dopamine/wanting.ts`, applied in `createArbiter`).
+- Dopamine publishes the strongest want on offer as a signal (`want`; 0 when nothing is wanted).
+- While something is wanted, the arbiter scales each option of the deciding layers (Jev, the
+  planner) by how much of its hold it keeps: 1 − 0.5 × (the worst need it is not expected to
+  relieve)². What an option relieves is the relief already learned for that skill, at that
+  thing if it names one.
+- So a mild need changes almost nothing (a need at 0.25 costs 3%), and with a need at 1 an
+  option that does not serve it keeps half. The square is the same curve as the need's reward.
+
+**Kept narrow on purpose, so it cannot make other things worse.**
+- **Reflexes are never scaled** (only layers 1 and up are), so nothing here weakens a defence.
+- **The want itself is never scaled.**
+- **With nothing wanted, nothing changes**: a starving bot that knows of no food is not made
+  restless for nothing.
+- **Every deciding option is scaled by the same rule, not the running one alone.** Scaling only
+  the running skill would make two options that do not serve the need take turns each tick.
+- `personality.wanting` scales it (0: off), so there is no new setting.
+
+**Seen live.**
+
+| Scene | Before | After |
+|---|---|---|
+| `with_jev`: out of bread, Jev walking home (bid 0.71), chest remembered | The want (0.42) lost; the walk was finished first | The want (0.54) won; the bot turned for the chest |
+| The same run, flip-flopping between skills | | None: each trip ran to its end |
+| `with_jev`: carrying 8 bread | Not wanted | Not wanted on 0 of 49 ticks |
+| Seven reflex-only scenes; `neuro-check` calm, ambush, remembered | No problem; pass | No problem; pass |
+| `neuro-check` hunger | Pass | Failed once on "it ate (0 times)", passed on the rerun (see limits) |
+
+**Limits.**
+- **Closed the same day (see the entry above):** two needs pressing at once were not weighed against each other. The rule goes by the worst
+  need an option leaves unmet. Starving with a threat about, Jev's pick to defend itself is
+  loosened like any other, so the bot may set off for the chest. The reflexes still act, and a
+  full-urgency one always wins. Not run live.
+- **A soft reflex is still not interrupted by a want** (a reflex below full urgency against a
+  want capped at 0.9 is as before).
+- **An option with no target is judged by its skill alone.** Jev's own `take_items` (no target)
+  shows only part of the learned relief, so the want wins over it for the same trip. No restart
+  follows, but the log names dopamine as the winner.
+- **Early on, what does serve the need is loosened too**, because its relief is only partly
+  learned.
+- **Curiosity is not counted** among the needs here (the arbiter reads the body's needs only).
+- **The floor (half) is hand-set.**
+- **One wasted interruption is possible**: a want for a chest that has since been emptied
+  interrupts Jev once, until the chest memory says it holds nothing.
+- **The `hunger` check is flaky, and not from this change.** In the failed run the bot ate three
+  bread, but each `eat` run was cut off by Jev's next pick the moment the food bar was back to
+  half, and the check counts only `eat` runs that end as done. The `want` signal was 0
+  throughout, so the new rule never acted. Not fixed.
+- **Seen once in `sated`: a teleport while `take_items` was walking left it standing for ten
+  seconds.** The scene emptied the bot before moving it, so the want started a trip that the
+  move then stranded. The scene now moves first. The stall itself (locomotion after a teleport
+  mid-walk) is a separate problem, not followed up.
+
+**Status.** Built. Open: the limits above.
+
+## Dopamine: wanting a remembered thing, and knowing what a run was aimed at
+
+*Built and run live 2026-11-21. Closes the first limit of the next entry ("a want is only for
+what is in the state now").*
+
+**The problem, as first written, was half wrong.** I had said a chest the bot "is not looking
+at" pulls nothing. Checked against the code: dopamine reads the full state, where a chest is
+listed whenever it is within 16 blocks, whichever way the bot faces. What is true is that a
+want fired only for a thing listed in the state at that moment. A chest leaves the state when
+the bot is more than 16 blocks off, when more than 10 nearer useful blocks crowd it out, or
+when alarm is high enough to narrow attention (seen live: alarm above about 0.6 dropped a chest
+4 blocks away).
+
+**A second, larger cause turned up in the Jev runs.** A run's aim was known only if the skill
+was given a target and that target was in the state when it started. Jev picks `take_items`
+with no target (the skill chooses the chest), so nothing Jev did was ever learned about that
+chest, and no want for it could form.
+
+**The change: three small general pieces.**
+- **Memory of places** (`rememberedThings` in `brain/cues.ts`). Nothing new is stored. The
+  scorebook already files each fixed thing under its position, so `scorebook.things()` lists
+  every particular thing it has learned about. Those that are useful blocks and not in the
+  state now are handed to dopamine beside the things in view, with the distance from here
+  worked out each tick. Only the nearest 16 are weighed.
+- **The longer walk costs** (`Thing.extraWork` in `dopamine/cues.ts`). A remembered thing costs
+  the walk beyond sensing range on top of a usual trip, at the same rate effort is charged
+  (about 0.003 a block, times `wastedEffort`). 100 blocks costs about 0.3, so a far chest is
+  wanted with nothing left and not when only a little short.
+- **A run's aim is settled at its end if not known at its start** (`episodes.ts`). A skill
+  that chooses its own thing says so in its result (`aimedAt`; `take_items` and
+  `deposit_items` do, through `atContainer` in `skills/storage.ts`). A target out of the state
+  at the start is looked up again when the run ends.
+
+Anything new plugs in: a new kind of block the scan lists is remembered with no further code,
+and a new skill that picks its own thing only has to return `aimedAt`.
+
+**Seen live** (`pnpm dopamine-check`, twelve scenes, none showing a problem).
+
+| Scene | Before | After |
+|---|---|---|
+| `out_of_range`: 30 blocks from the known chest, out of bread | No want | Set off from memory (want 0.76 to 0.91), got its bread; two runs |
+| The same, carrying 8 bread | | No pull on 0 of 16 ticks |
+| `with_jev`: Jev's own untargeted `take_items` | Learned with no aim: the chest never wanted (0 cues in the run) | Filed under the chest; the chest was then wanted, also with the chest dropped from the state by alarm |
+| `with_jev`: the pull against Jev | Won in 1 run of 4 | In one run, started three trips (0.44 over `idle` 0.39; 0.63; 0.71) |
+
+**Limits.**
+- **A want still cannot interrupt a skill Jev is running.** From memory the pull was 0.42 against
+  a running `return_to_base` at 0.72; it won only between Jev's skills.
+  **Closed the same day:** see the entry above.
+- **Gone things are not forgotten.** Nothing is deleted from the scorebook. A chest that is gone
+  stops being wanted only because `take_items` cannot run on a block that is not there; a spot
+  reached with `go_to` has to be walked to and found empty several times.
+- **Beyond the loaded chunks nothing is wanted by `take_items`**: it cannot run on a block the
+  client has not loaded. Only `go_to` could, and only if `go_to` itself learned the relief.
+- **Positions carry no dimension.** A chest remembered in the overworld is weighed by its
+  numbers in the Nether too.
+- **Only useful blocks are remembered** (containers, ripe crops, bells). A remembered ripe crop
+  is wanted after it is harvested until trips there teach otherwise.
+- **The extra walk is straight-line distance**, not the path, and a long trip also raises that
+  chest's learned usual work, so it is charged a little twice afterwards.
+- **A run's aim is still lost** if the skill names no target, reports none, or the thing is in
+  neither the state nor memory when the run ends (a first visit ending under high alarm).
+- **The `with_jev` verdict is weak**: its time windows do not line up with what Jev does. The
+  result above is from reading the trace tick by tick, one run.
+- **`two_chests` behaved differently in one run** (it went straight to the full chest with the
+  empty one nearer). Not followed up; it may be run-to-run variation.
+
+**Status.** Built. Open: the limits above.
+
+## Dopamine: wanting what a need calls for, and giving up on what never finishes
+
+*Built and run live 2026-11-21. This is step 3 of the dopamine rework (steps 1 and 2 are the
+next entry), plus the fix for a run that is always cut short.*
+
+**The problem.** The pull toward a learned thing (a cue) was a fixed, small number: what aiming
+at the thing had been learned to add, capped at 0.3. It did not know whether the bot needed the
+thing, and it could not beat Jev's `idle` (0.8 plus value plus the stay bonus). On the logs of
+2026-11-19 cues fired on thousands of ticks and won none.
+
+**The change: the pull is what the thing would pay right now** (`dopamine/wanting.ts`, `cues.ts`).
+- Every need rule now also says how pressing it is (0 to 1). In `rewards.ts` that is free: a
+  need written with `need(...)` already had its level.
+- When a run ends, the region learns what it did to each need: how far the level fell from the
+  run's start to its end (its relief). This is filed like a skill of its own
+  (`take_items ⇒ food_stock`), so it is learned by the same levels as everything else: the skill
+  in general, each situation label, the kind of thing, that particular thing. The usual work of
+  the run is learned the same way (`take_items ⇒ (effort)`).
+- For each thing in view: want = for each need, the reward for that need moving from its level
+  now to where the learned relief would leave it (the same `before² − after²` every reward
+  uses), less the usual work of getting there, less what aiming there has cost (a death).
+- The urgency is the want itself, times DA (×1 at rest), capped at 0.9: under a hard reflex.
+
+So nothing is tuned per thing or per need. A chest of bread pulls at 0.9 with no food left, at
+under 0.1 nearly stocked, and not at all with enough. A new need gets its pull by being written.
+
+**A need already met teaches nothing.** A stocked bot that opens a full chest shows no relief,
+and that says nothing about the chest. A relief below what was expected is believed only if the
+need stood high enough at the start to have shown it.
+
+**A run that never finishes is given up on.** A run cut short was taken to have been going to
+earn the rest of what was expected, every time, so a skill that is always interrupted never
+learned it does not pay. With the pull now able to win, that is a loop: want it, set off, get
+cut off, want it again. Each cut-off in a row, with no finished run between, now halves the
+trust in "the rest was coming" every four cut-offs (kept per thing: that chest, else that kind,
+else the skill). The same trust is used for the relief. One cut-off still teaches nothing.
+
+**Live** (`pnpm dopamine-check`, now eleven scenes: `sated` and `with_jev` are new):
+
+| Scene | Before | After |
+|---|---|---|
+| Out of bread, a known full chest in view (reflexes only) | Pull capped at 0.3 | Want 0.90 (food stock +0.92); went and got its bread |
+| Carrying 8 bread (enough), same chest in view, skill able to run | Same pull as when short | No pull on 0 of 21 ticks; pulled again as soon as it was short |
+| A learned trip cut off six times by a typed `stop` | Flat at +0.24 for ever | +0.24 → +0.22, trust 1.00 → 0.42: first cut-off teaches nothing, then it wears down |
+| Two chests, night, death, fall, idle, threat, sword loop, light loop | No problem | No problem |
+| Whole brain with Jev, out of bread, chest known (four runs) | Cues won 0 ticks of 97,487 | One run: the pull won at 0.64 against Jev's `idle` at 0.54 and started the trip. Three runs: nothing to test, see below |
+
+Ten reflex-only scenes, none showing a problem. Whole-brain regression (`neuro-check` calm,
+ambush, remembered, hunger): all pass.
+
+**With Jev the result is thin: one clear win in four runs.** In the other three the chest was
+never in the bot's view while it was short and not already on its way (0 ticks each), so the
+pull had nothing to fire on. Either the chest was not in the state, or Jev picked `take_items` by itself and fetched the
+bread first. *Corrected 2026-11-21:* an earlier version blamed a glance turning the head. That
+cannot be: dopamine reads the full state, where a chest is listed whenever it is within 16
+blocks, whichever way the bot faces (and Tester has the field of view off). A chest leaves the
+state only when the bot is more than 16 blocks from it (`return_to_base` walks it away), when
+more than 10 nearer useful blocks crowd it out, or when alarm is high enough to narrow
+attention (`narrow` in `encode-state.ts` drops every block). Which of these it was is not
+checked. Whenever the chest was in view and the bot was short, the
+want fired (0.55 to 0.69), and stocked with 8 it fired on 0 of 184 ticks across the four runs.
+
+**Limits.**
+
+- **A want is only for what is in the state now.** "In view" here means listed in the state:
+  within 16 blocks (through walls, facing any way), among the 10 nearest useful blocks, and
+  alarm not narrowing attention. A chest the bot knows about outside that pulls nothing; the
+  chest memory and the scorebook's own `pos:` entries are never consulted. With Jev running the
+  chest 13 blocks off was out of the state for 7 seconds at a stretch (cause not checked; not a
+  glance). **Would fix:** a memory of places, so that remembered things are weighed the same
+  way as things in the state, less the work of the longer walk.
+- **The pull starts the trip; Jev then carries it.** Once the skill is running Jev proposes it
+  itself at 0.8 with the stay bonus, so the tick log credits the pull with one tick per trip.
+  The scene counts the ticks on which the bot did what was wanted, whoever proposed it.
+- **It cannot interrupt a skill Jev is sure of.** Jev at p near 1 scores about 1.1 with value
+  and stay bonus; the pull stops at 0.9. It wins against a lukewarm pick (`idle` at 0.54 lost
+  to the pull at 0.64 plus value). It also loses a tick to a glance, which runs at 1.00 when idle.
+- **Relief is whatever happened to the need during the run**, whoever caused it. A husk walking
+  up while the bot heads to a chest is learned as "this chest raises danger". The credit shift
+  of step 2 (the worth of the situation) is not applied to reliefs.
+- **Nothing is learned about a thing while the need is met.** A bot that is never short of food
+  never learns which chest holds it.
+- **Only a skill that finishes the job learns a relief.** `take_items` at a chest relieves the
+  food stock; `go_to` the same chest relieves nothing, so walking up to things is wanted only
+  where arriving itself helps (light at night).
+- **Giving up after cut-offs is slow outside a learning window.** Live, six cut-offs by a typed
+  `stop` took the trust to 0.42 and the expectation down 5%: nothing notable happened, so the
+  step was a fifth of the usual. A reflex that cuts a run off jumps the alarm and opens the
+  window; that case was not run live.
+- **The usual work is kept per thing, not per distance.** It is an average over wherever the
+  trips started.
+- **The arbiter still weighs skills by benefit and cost, not by need.** Jev's `eat` is not
+  worth more to the arbiter when the bot is hungry. The reliefs are learned for every skill, so
+  this could use them; it was not built.
+- **An untried chest was not tested.** Boredom is a need with a level now, but noticing a thing
+  relieves it on sight, not on arrival, so nothing yet pulls the bot to look inside.
+- **The scorebook grows faster**: one more set of adjustments per skill for each need it has
+  changed, and one for its work.
+- **New settings:** `personality.wanting` (1; 0 learns but never pulls). The half-life of trust
+  (4 cut-offs) and the cap (0.9) are hand-set.
+- **The live scenes ran once or twice each**; `with_jev` four times, with one usable run.
+
+**Status.** Built. Open: the limits above. The first (a want needs the thing in the state) was closed the same day: see the entry above.
+
+## Dopamine: learning by adjustments, and credit for the difference made
+
+*Built and run live 2026-11-20, in two steps. Together with the signed needs (next entry) these
+are the two causes behind the problems found on 2026-11-19. The third step (wanting as need
+times expectation, so that a cue can win in the whole brain) is not built.*
+
+**Step 1: adjustments, not pages** (`dopamine/scorebook.ts`). The scorebook kept one page per
+exact situation and kind of thing, so a new label doubled the table and nothing carried over.
+A skill's value is now a sum of adjustments, learned level by level, the most general first:
+the skill in general; each label of the situation; the kind of thing aimed at; that particular
+thing, by id (blocks only: a mob's id does not last). Each level takes one step of what is still
+unexplained. The cue weighs every thing in view by itself and takes the best of each kind.
+Situation labels are a plain list (`situation-labels.ts`): a new one is one line and one
+adjustment per skill.
+
+**Step 2: credit for the difference made** (`dopamine/dopamine-region.ts`, `episodes.ts`).
+- The region learns what each situation is worth by itself (what tends to follow from it,
+  whatever is running), and a skill is credited with the change in that worth from where it
+  started to where it ended. A new "body" label (falling, burning, underwater, steady) lets it
+  tell trouble already under way.
+- A run cut short is taken to have been going to earn the rest of what was expected, so only
+  what actually happened to it is learned.
+- A tick's rewards go to the skill that ran for the most of that tick, by the events' own times.
+  A reward that is about one skill (it failed; the sleep it finished) goes to that skill alone.
+
+**Live** (`pnpm dopamine-check`, nine scenes, the last full run; fall and interrupted run again after a fix):
+
+| Scene | Before these two steps | After |
+|---|---|---|
+| A full chest far off, an empty one put nearer | Went to the empty one, then wanted no chest | Went to the full one both times it ran short; got its bread |
+| Learned by day, then dusk | No pull at night | Pull fired at night (3 ticks); got its bread |
+| A learned trip cut off six times on the way | Expectation fell 11% (57% once learning was faster) | Flat: +0.24 six times running |
+| Ten hard falls, then three with a pool in reach | Not testable (nothing ran) | The reflex is paid +0.02 to +0.04 for landing in the water; the skill running when the bot fell is charged -0.03 |
+| Death, idle, threat, sword loop, light loop | No problem (signed needs) | No problem |
+
+Nine scenes, none showing a problem. Whole-brain regression (`neuro-check` calm, ambush,
+remembered, hunger): all pass, calm on its second run (the first hit the known Jev timeout and
+ran only 12 ticks).
+
+**Found and fixed on the way.**
+
+- **The reflex was charged for another skill's failure.** With rewards going to whoever ran for
+  most of the tick, the -0.1 for `idle` being cut short landed on `air_steer`, which had just
+  taken over (-0.09 for each unhurt landing). A reward can now name the skill it is about.
+- **The harm of a fall shows a tick after the fall is over.** The body reads "steady" about
+  200 ms before the health drop is seen, so the hurt was put down to standing still and falling
+  was never learned as bad (worth -0.00 after ten falls costing -0.25 each). A surprise is now
+  also put down to the situations of the last second or so.
+- **Rest was a list of two skill names** in the effort measure. It is now any skill that uses no
+  part of the body, read from the skill itself.
+
+**Limits.**
+
+- **Learning is faster overall.** A surprise used to move a skill 10% of the way. It now moves
+  the total 19% (two levels) to 34% (aimed at a particular thing, four levels), since each level
+  takes its own step. In the behaviour test the bot gives up on an emptied chest after 9 trips
+  when it is near and 5 when far (it was 29 and 12). `personality.learningRate` is now the step
+  per level.
+- **One label on its own learns slowly.** The labels of a situation share one step between
+  them, so what a single label changes is learned at a sixth of the pace. Live, after ten falls
+  costing 0.25 each, falling was worth only -0.02 and moved credit by 0.03 to 0.04. The direction
+  is right; the size is small.
+- **Situation worth only moves credit where the situation changes.** A skill that runs from
+  before the trouble to after it still takes all of it.
+- **An untried chest is never tried while a known one is in view.** The near chest was wanted a
+  little (on what chests are worth), the far one more (it had paid), so the bot never opened the
+  near one. That was the right answer here, but nothing makes it look in a new chest.
+- **A skill always cut short never learns it does not pay.** The unearned part is assumed still
+  to come, every time. Interrupted runs are not counted in its record of successes either.
+  *(Closed 2026-11-21: trust falls with each cut-off in a row; see the entry above.)*
+- **The scorebook grows with every block ever aimed at** (each chest, crop and hazard position
+  has its own adjustment) and nothing is pruned.
+- **Only two rewards name their skill** (`skill_failed`, `slept_through_night`). Every other
+  reward in a tick goes whole to the skill that ran longest; it is not split.
+- **The two half-lives are hand-set**: what follows a situation counts for half after 10
+  seconds; a surprise reaches back to earlier situations for half after 1 second.
+- **Saved scorebooks in the old format are ignored on load.**
+- **Cues are still capped at 0.3** and still cannot win in the whole brain: step 3.
+  *(Closed 2026-11-21: see the entry above.)*
+- **New settings:** `personality.situationWorth` (1; 0 turns the credit shift off).
+- **The live scenes ran once or twice each**, with no Jev.
+
+**Status.** Steps 1 and 2 done; step 3 is the entry above. Open: the other limits above.
+
+## Dopamine: rewards are now the signed change in a need
+
+*Built and run live 2026-11-20. This is the one change behind most of the problems in the entry
+below, not a fix for each.*
+
+**The cause.** A reward was "a need got smaller", with the other half cut off: a need getting
+bigger cost nothing (`Math.max(0, before - after) * before`). So anything that went down and
+came back up was pure profit, and a few hand-written penalties patched the missing half without
+mirroring the gains.
+
+**The change.** Every need reward is `before² − after²` (`need-change.ts`): a fall pays, a rise
+costs exactly what falling back will pay. The rules are need levels: food bar, health, danger
+from the nearest threat, darkness at night, tools missing, food stock, torches
+(`packages/minecraft/src/brain/rewards.ts`). `damage_taken`, `lost_items`, `threat_gone` and
+`first_tool` are gone, and so is the halving of repeats. Curiosity is a need too: boredom builds
+over ten minutes with nothing new, and a new thing pays back at most the boredom that had built
+up. No need is compared across a death.
+
+**Live, the same eight scenes** (`pnpm dopamine-check`, one run):
+
+| Scene | Before | After |
+|---|---|---|
+| Death, hungry and hurt, a husk beside it | Net +0.46; DA 0.57 → 0.62 | Net -1.01; DA 0.44 → 0.33 |
+| Idle while six animals appear and a wound mends | `idle` paid +2.60; +0.10 in the arbiter | `idle` paid -0.03; 0.00 in the arbiter; DA peaked at 0.53 (was 0.84) |
+| A caged husk appears and is removed | +0.39 | -0.39 on appearing, +0.39 on going: 0.00 |
+| A creeper appears and goes off | +0.33 | 0.00 |
+| Drop a sword and pick it up, four times | +0.98 | -0.44 and +0.44 each round: 0.00; DA ended at 0.58 (was 0.82) |
+| In and out of a lit corner at night, four round trips | +0.85 | 0.00; walking into the dark is now learned as a loss (-0.46 to -0.60 a trip) |
+| Two chests | Wanted the empty one, then no chest | The same (not addressed) |
+| A trip cut off on the way | Expectation fell 11% | The same (not addressed) |
+| Learned by day, then dusk | No cue at night | The same (not addressed) |
+
+Whole-brain regression (`neuro-check` calm, ambush, remembered, hunger): all pass. Eating paid
+0.44, 0.31, 0.19, 0.06 over four meals.
+
+**Limits and consequences.**
+
+- **A hit at full health barely registers** (20 → 17 costs 0.02) and the same hit when weak
+  costs a lot (6 → 3 costs 0.23). Before, every hit cost the same. Alarm, pain and the startle
+  do not use this number, so the reflexes are unchanged.
+- **A threat appearing is charged to whatever is running.** Live, `idle` took -0.39 when the
+  husk appeared, and the +0.39 for its going went to nobody, because a reflex had cut `idle`
+  short by then. The sum for the bot is zero, but not for each skill: who is running when the
+  bad half lands and who when the good half lands still decides what is learned.
+- **Eating when barely hungry is a small loss**: the food stock falls more than the bar gains.
+- **Other items are no longer missed.** Losing cobblestone, a helmet or a bucket costs nothing;
+  only food, torches and the last tool of a kind are needs.
+- **Sleeping through the night is still a one-off reward**, not a need level. The time since
+  the bot last slept restarts whenever it gets out of a bed, so as a need a moment's lie-down
+  would pay for a whole night.
+- **Dusk and dawn are free.** Darkness is a need only at night, and the change of day is not
+  compared, so night falling costs nothing and day breaking pays nothing.
+- **Boredom is one number for everything.** A new item in the pocket relieves it as much as a
+  new animal. `personality.noveltyBonus` now means how much of its boredom one brand-new kind
+  takes away (0.5: half). It starts half full on every run, and a gap in the ticks (a pause, a
+  reconnect) fills it as if the time had been dull.
+- **The death tick still charges the blow that killed**, when the dead body is seen before the
+  respawn (health to 0). Live it was not seen: the death came out at -1.01.
+- **Saved scorebooks are on the old scale.** Values learned before this change were built from
+  one-sided rewards; delete `data/<bot>/scorebook.json` to start clean.
+- **Not addressed, as said beforehand**: all chests are one kind and only the nearest is
+  considered; nothing learned by day is known at night; an interrupted trip counts as a
+  disappointment; cues never win in the whole brain; the rescue reflexes are blamed for the
+  fall. The first two share a cause (the scorebook files under one exact label and never falls
+  back to a more general one).
+
+**Status.** Done for the reward side. Of the five items above, four were closed the same day (see "Dopamine: learning by adjustments, and credit for the difference made"); cues in the whole brain are still open.
+
+## Live testing, 2026-11-19: dopamine
+
+*Two sources. First, every existing live log was read for what dopamine did in it (593 logs,
+97,487 ticks, 15 deaths). Then eight new scenes were run on the test server with
+`pnpm dopamine-check`: the real bot with no Jev and no planner calls, so only the reflexes,
+dopamine's own cues and typed commands act. Each scene was run once, two of them twice.*
+
+| Scene | What it did | Numbers |
+|---|---|---|
+| Death: killed while hungry and hurt, a husk beside it | Dying came out as a gain | Net +0.46: died -1.00, hurt -0.60; then health back +1.00, food back +0.42, new sights +0.50, "husk gone" +0.14. DA 0.57 → 0.62 |
+| Idle while six new animals appear and a wound mends | Idle took the credit | +2.60 to `idle` in 20 s; idle expected +0.26, +0.10 in the arbiter; DA peaked at 0.84 |
+| A full chest 14 blocks off, the bot short of bread | The pull took it there by itself | Cue won 10 to 12 ticks per run; three trips each |
+| The same, then an empty chest put nearer | It went to the empty one, then wanted no chest | Set off for the near chest; found nothing; short again with the full chest in view: 0 cues, 0 bread |
+| The full chest emptied behind its back | One wasted trip, charged | `wasted_effort` -0.024 and -0.027 (two runs); expected +0.146 → +0.143 |
+| A learned trip cut off on the way, six times | The expectation wore down | +0.13 → +0.11 (11%) without the chest once being reached |
+| Learned by day, then dusk | Did not want the chest at night | Cues: 10 by day, 0 after dusk; bread got: 0 |
+| A caged husk 2 blocks off, removed by the server | Paid for it | "husk gone" +0.39, with the bot only frozen and watching |
+| A creeper going off in its cell | Paid for it | "creeper gone" +0.33 (the small blast did not hurt it) |
+| Drop a sword and pick it up, four times | Paid each time | `first_tool` +0.51, +0.26, +0.14, +0.07 against -0.06 for the four losses; DA ended at 0.82 |
+| At night, in and out of a lit corner, four round trips | Paid each time | `reached_light` 12 times, +0.85 in all; DA ended at 0.76 |
+
+**Problems found.**
+
+- **Dying pays.** Respawning refills health and food, and the reward rules read that as two
+  needs being met; the threat is "gone" because the bot was moved away from it; and the respawn
+  point is a new sight. Live the whole death netted +0.46 and DA went up. In the old logs the
+  median death netted -0.5 (15 deaths, from -1.04 to +0.24). The skill running at death is still
+  taught -5, so the scorebook is right; it is DA, mood and the reward signal that are wrong.
+  **Would fix:** on a tick where the death count rose, and the next, pay no positive rewards.
+- **Whatever is running takes the credit, and that is usually `idle`.** A reward goes to the
+  running skill whatever caused it. An animal wandering up, a wound mending, a zombie burning at
+  dawn: `idle` is paid for all of it. Live, 20 seconds of idling earned +2.60. Over the old logs
+  `idle` collected +143, and its learned value in the arbiter had a median of 0.66 (0.13 on its
+  score), on top of Jev's 0.8. This feeds "the bot mostly idles at base".
+  **Would fix:** do not credit a resting skill with novelty, healing or a threat leaving; or
+  credit a reward only to a skill whose own changes could have caused it.
+- **The pull toward things works alone and never wins in the whole brain.** With nothing else
+  proposing, the cue walked the bot to the chest every time. In the old logs, cues fired 126
+  times and won 0 ticks of 97,487: capped at 0.3, they cannot beat `idle` at 0.8 plus value plus
+  the stay bonus. **Would fix:** let a cue add to the urgency of a matching proposal, or lift the
+  cap when the cue's reward matches a need the body has now.
+- **All chests are one kind.** What the far chest paid made the bot want the near, empty one.
+  And only the nearest thing of a kind is considered: once the near chest was known to be empty
+  (so `take_items` could not run on it), no cue fired at all, with the full chest in view and
+  the bot short of bread. **Would fix:** learn by the thing as well as its kind (this chest), and
+  consider the nearest thing of a kind that a skill can run on.
+- **Nothing learned by day is known at night.** Each of the five situation labels starts a new
+  page in the scorebook. The same holds across fed and hungry, at base and away, alone and with
+  a player in view. **Would fix:** fall back to a skill's average over all situations when this
+  one has no entry.
+- **Novelty is far larger than any need.** Over the old logs it paid +712, against +29 for
+  eating, +44 for stocking food, +33 for sleeping and +16 for healing. Live, the first chest trip
+  was worth +2.06, of which +1.50 was three new item kinds picked up on the way. The logs
+  overstate it (each test scene starts with an empty novelty memory), but a new item in the
+  inventory pays as much as finding food when out of it. Item novelty also pays again each time
+  an item comes back (bread: "seen 1×", "seen 2×"). **Would fix:** a smaller bonus for items,
+  and a cap on novelty per minute.
+- **Rewards that pay on the way up and cost nothing on the way down can be looped.** Dropping
+  and picking up a sword paid `first_tool` four times running; walking out of the light and
+  back paid `reached_light` every time. Repeats are halved, and the count fades in five minutes,
+  so each loop pays less, but neither stops and each raised DA to about 0.8. Nothing proposes
+  such a loop today; a bot that learns skills by experiment would find it.
+  **Would fix:** pay `first_tool` once per kind for good (remember it, like novelty), and make
+  leaving the light cost what reaching it paid.
+- **A threat leaving pays whoever is there, and escaping pays almost nothing.** The reward is
+  the danger at the last tick the threat was within 8 blocks. A caged husk that vanished paid
+  +0.39 though it could never reach the bot and the bot did nothing; a creeper blowing up counts
+  as "gone" (+0.33). A bot that runs away is paid for the last tick before the gap reached 8
+  blocks, which is close to 0: in the old logs 14 of 65 `threat_gone` rewards were under 0.02,
+  and live a flight to 17 blocks paid nothing. So fighting at close range is taught and running
+  is not. **Would fix:** pay for the fall in danger from its peak during the skill, and only for
+  a threat that could reach the bot.
+- **A trip cut off on the way counts as a disappointment.** An interrupted run is learned from
+  with whatever it had earned so far, usually 0. Six cut-off trips took the expectation from
+  +0.13 to +0.11. That is with the learning window on (a fifth of the step); with it off each
+  interruption would take a tenth. **Would fix:** do not learn from an interrupted run that
+  earned and lost nothing.
+- **Wasted effort is charged, but slowly, and not at all for a very short run.** Seen live for
+  the first time: -0.024 and -0.027 for a 14-block trip to an emptied chest. Two limits showed.
+  A run that starts and ends between two ticks has no effort and no rewards counted (the 4-block
+  trip to the empty near chest: effort 0, not charged). And with the learning window on, one
+  charge moved the expectation from +0.146 to +0.143; the chest memory stopped the trips long
+  before dopamine would have.
+
+**Seen in the old logs, not reproduced live.**
+
+- **The rescue reflexes are blamed for what they rescue from.** `air_steer` averaged -1.36 a run
+  over 38 runs and was the running skill at 10 of the 15 deaths; `escape_hazard` averaged -0.17
+  and took one -5. Hard reflexes win regardless, so this matters only where the same skill is
+  proposed softly. The live fall scene showed nothing: no skill was running when the bot landed,
+  so nobody was blamed.
+- **Eating through `consume` is fined as a lost item** (29 times): only `eat` and
+  `deposit_items` are let off.
+- **A biome border re-pays novelty.** Standing on one flips the biome label; `frozen_river` was
+  "met" again 23 times after its eighth meeting. The amounts are tiny by then, but the kind's
+  novelty is used up without the bot going anywhere.
+- **A skill cut short by a reflex is failed on purpose** (-0.1 and a failure on its record).
+  `idle` was failed 146 times this way by `surface` in the dive scenes.
+
+**Scenes that showed nothing.** A fall of 8 blocks (see above). A skill made to fail at once
+(`go_to` into a sealed box did not fail within 6 seconds). Both were dropped from the check. The
+creeper's blast was made small so the bot would live, and it took no damage, so "hurt and paid
+on the same tick" was not seen.
+
+**Limits of the check.** One or two runs a scene. The scenes test dopamine alone: with Jev
+proposing, most of what the cue did here would be outvoted. The server removes bread from the
+bot between trips, which is logged as `lost_items` (-0.06 each); that is the test's doing.
+
+**Status.** Partly closed 2026-11-20 by one change (see "Dopamine: rewards are now the signed change in a need"): dying, idle taking the credit, novelty, the two loops, the threat rewards and the `consume` fine no longer show. Chests as one kind, day and night, interrupted trips, the rescue reflexes and the run between two ticks were closed the same day by two more changes (see "Dopamine: learning by adjustments"). Still open: cues in the whole brain.
+
+## Dopamine: wasted effort, and its limits
+
+*Built 2026-11-19 (`packages/neuromodulators/src/dopamine/wasted.ts`,
+`packages/minecraft/src/brain/effort-spent.ts`).*
+
+**What it does.** While a skill runs, the work the body does is added up: blocks travelled, seconds
+spent busy, and food energy burned. When the skill ends as done or failed, having earned less than
+that work was worth, the difference is charged as a negative reward (`wasted_effort` in the tick's
+rewards). It is only charged where the bot expected a payoff. In the behaviour test, after eleven
+good trips the chest is emptied:
+
+| Chest | Charged per empty trip | Empty trips until the pull is gone |
+|---|---|---|
+| 6 blocks away | 0.019 | 29 |
+| 48 blocks away | 0.15 | 12 |
+| 6 blocks, `wastedEffort: 0` | 0 | never (faint but there after 30, as before) |
+
+Once the pull is gone it stays gone on further empty trips, and comes back in under ten trips once
+the chest pays again.
+
+**Limits.**
+
+- **A near chest is still checked many times.** A 6-block trip is cheap, so it takes 29 empty
+  trips to stop, against 12 for a far one. That is the scaling asked for, but 29 is a lot. Raise
+  `personality.wastedEffort` in `bots.json` to make all effort cost more (2 doubles it).
+- **Only a run that expected a payoff is charged.** A first fruitless walk somewhere new costs
+  nothing, and neither does going home or storing items, which no reward rule pays for. Without
+  this, every unrewarded skill would slowly lose to `idle`. The price: the bot learns "this was a
+  waste" only about things that once paid.
+- **The charge stops when the expectation crosses zero**, so the expectation settles just below
+  zero (by about a tenth of one trip's effort), not at the true cost of the trip. It then drifts
+  back up toward zero on later empty trips, without crossing.
+- **An interrupted run is never charged**, however far the bot had walked. Nor is one that ended
+  in death (the death penalty covers it).
+- **The skill and the skill-toward-a-thing were judged apart.** Closed 2026-11-20: a run has one
+  expectation now (the skill, here, aimed at that thing) and is charged once.
+- **Effort is three hand-set weights**: a block 1/400, a busy second 1/400, a food point 1/40,
+  capped at 0.5 a run. Digging, fighting and climbing count only through time and food. Damage
+  taken is not effort (it is already a negative reward).
+- **"Busy" was any skill but `idle` and `sleep`, by name.** Closed 2026-11-20: it is any skill
+  that uses a part of the body, read from the skill. A skill that mostly waits (a slow chest, a
+  long dig) is still charged for the wait.
+- **Distance is from whole-block positions**, so a tick's movement is rough. A jump of more than
+  8 blocks, a respawn, or a gap of more than 2 seconds between ticks counts as no work.
+- **Mending hides effort.** While health is coming back, food burned is not counted, even if the
+  bot is also sprinting.
+- **Wasted effort lowers DA and counts toward a learning window** like any reward, but only a
+  charge of 0.1 or more opens one. With the learning window on, a cheap wasted trip still teaches
+  at a fifth of the usual size (the finding below).
+- **A big reward on the tick a skill ends hides the waste from DA.** The charge is added to the
+  tick's total, so an unrelated gain that tick can cancel it there. The scorebook is still charged.
+- **Old logs and saved scorebooks are unaffected**; the trace has one new reward name and the
+  episode a new `wasted`, `gained` and `effort`.
+
+**Status.** Open. Seen live 2026-11-19 (`pnpm dopamine-check two_chests`): charged -0.024 and -0.027 for a 14-block trip to an emptied chest. A run that starts and ends between two ticks is not charged; see the live entry above.
+
 ## Live testing, 2026-11-18: the reticular formation
 
 *Found by running the real bot on the test server with `pnpm arousal-check`. No Jev and no
@@ -1268,7 +2307,9 @@ earlier finding worse: the urge to check an emptied chest now fades five times m
 **What would fix it.** Treat a skill ending well short of what was expected as notable too, or add
 the "wasted time" penalty so an empty trip produces a reward signal.
 
-**Status.** Open. Turn it off with `learningWindow: 0`.
+**Status.** Partly closed 2026-11-19. Wasted effort is a reward signal, so an empty trip that
+cost 0.1 or more (about 40 blocks of walking) now opens a window and is learned in full. A cheaper
+one still is not. Turn the window off with `learningWindow: 0`.
 
 ## Focus: only chest contents are checked for trust
 
@@ -1662,4 +2703,7 @@ the reward table would do it; it is still a TODO in `packages/minecraft/src/brai
 Other options: a small minimum expectation before a cue fires, or treating a trip that found
 nothing as a failed skill.
 
-**Status.** Open. Deferred along with "wasted time".
+**Status.** Closed 2026-11-19. A trip that was expected to pay and did not is now charged the
+effort it took, so the expectation crosses zero and the cue stops: after 29 empty trips to a chest
+6 blocks away, 12 to one 48 blocks away (behaviour test; see "Dopamine: wasted effort"). With
+`personality.wastedEffort: 0` the old behaviour is kept.

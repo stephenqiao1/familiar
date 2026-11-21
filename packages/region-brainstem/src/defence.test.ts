@@ -41,6 +41,17 @@ describe("chooseDefence", () => {
   it("coming with a way out: flee at 0.7", () => {
     expect(choose([threat()])).toMatchObject({ mode: "flee", base: BASE.flee, threat: 0.8, cornered: false });
   });
+  it("seen but unable to get to the bot: only watched, noticed or not (nothing to hide from)", () => {
+    expect(choose([threat({ stage: "seen", noticed: false, dist: 3, canReach: false })])).toMatchObject({ mode: "wary", base: 0, why: expect.stringContaining("cannot reach") });
+    expect(choose([threat({ stage: "seen", noticed: true, dist: 3, canReach: false })]).mode).toBe("wary");
+  });
+
+  it("coming on a guess at its reach: holds still and watches while it is not close, flees once it is", () => {
+    expect(choose([threat({ dist: 5, flightDistance: 8, settling: true })])).toMatchObject({ mode: "freeze", base: BASE.freeze, why: expect.stringContaining("holding still to find out") });
+    expect(choose([threat({ dist: 3.5, flightDistance: 8, settling: true })]).mode).toBe("flee");
+    expect(choose([threat({ dist: 5, flightDistance: 8 })]).mode).toBe("flee");
+  });
+
   it("coming and cornered: freeze at 0.6", () => {
     expect(choose([threat({ escapable: false })])).toMatchObject({ mode: "freeze", base: BASE.corneredFreeze, cornered: true });
   });

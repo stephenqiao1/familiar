@@ -140,8 +140,7 @@ async function writeJson(file: string, value: unknown): Promise<void> {
 function isSavedScore(e: unknown): e is SavedScore {
   const o = e as Partial<SavedScore> | null;
   return (
-    typeof o?.situation === "string" &&
-    typeof o.skill === "string" &&
+    typeof o?.feature === "string" &&
     typeof o.expected === "number" &&
     typeof o.benefit === "number" &&
     typeof o.cost === "number" &&

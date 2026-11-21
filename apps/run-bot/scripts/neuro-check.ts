@@ -215,7 +215,7 @@ const scenes: Scene[] = [
     ],
     checks: (run) => {
       const rewards = run.ticks.flatMap((t) => (run.trace(t, "dopamine").rewards as { rule: string; amount: number }[] | undefined) ?? []);
-      const ate = rewards.filter((r) => r.rule === "food_bar_up");
+      const ate = rewards.filter((r) => r.rule === "food_bar" && r.amount > 0);
       const eats = run.events().filter((e) => e.skill === "eat" && e.type === "done").length;
       const foodLow = Math.min(...run.ticks.map((t) => t.state.data.self.food));
       return [

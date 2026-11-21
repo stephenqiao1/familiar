@@ -48,7 +48,7 @@ describe("hard reflexes", () => {
   });
 
   it("are the only hard rules, and every other rule is soft", () => {
-    expect(playerReflexes.filter((r) => r.kind === "hard").map((r) => r.name)).toEqual(["in_lava_or_fire", "drowning", "last_stand", "pain_withdrawal", "buried", "about_to_touch", "falling_right"]);
+    expect(playerReflexes.filter((r) => r.kind === "hard").map((r) => r.name)).toEqual(["in_lava_or_fire", "drowning", "last_stand", "cornered_fight", "pain_withdrawal", "buried", "about_to_touch", "falling_right"]);
     expect(playerReflexes.filter((r) => r.kind === "soft").map((r) => r.name)).toEqual(["defence_fight", "defence_flee", "defence_freeze", "recuperate", "hold_ground", "edge_guard"]);
   });
 });

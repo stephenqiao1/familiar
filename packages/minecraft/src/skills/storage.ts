@@ -1,4 +1,4 @@
-import type { ItemWant } from "@familiar/contracts";
+import type { ItemWant, SkillResult } from "@familiar/contracts";
 import type { Bot } from "mineflayer";
 import { Vec3 } from "vec3";
 import { posId } from "../encode/scan-blocks.js";
@@ -25,4 +25,9 @@ export function containerAt(bot: Bot, target: string): Block | null {
 /** The target's container, or with no target the base chest. */
 export function chosenContainer(ctx: MinecraftCtx, target: string | undefined): Block | null {
   return containerAt(ctx.bot, target ?? posId(ctx.base.chest));
+}
+
+/** Does a storage skill's work at the container it chose, and reports that container as what the run was aimed at. */
+export async function atContainer(chest: Block, work: () => Promise<SkillResult>): Promise<SkillResult> {
+  return { ...(await work()), aimedAt: posId(chest.position) };
 }

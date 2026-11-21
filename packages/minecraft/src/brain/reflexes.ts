@@ -1,7 +1,7 @@
 import type { ReflexRule } from "@familiar/region-reflex";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { DEFAULT_REFLEXES, protectiveReflexes, type ReflexSettings } from "./protective-reflexes.js";
-import { defenceOf, defenceReflexes } from "./defence.js";
+import { DEFENCE_SKILL, defenceOf, defenceReflexes } from "./defence.js";
 import { minecraftDataOf } from "./read-state.js";
 
 // The player's wired-in reactions, in two classes.
@@ -54,16 +54,28 @@ export const lastStand = rule("last_stand", "hard", (data) => {
   return { action: { skill: "flee", target: mob.id }, urgency: 1, reason: `health ${data.self.health}, ${mob.type} ${mob.dist} blocks away` };
 });
 
+/**
+ * Cornered with a threat on it: fight, and nothing outvotes it. The defence circuit chooses this
+ * when there is no way out (the route check says so, or fleeing has not been getting the bot
+ * away). As a soft reflex the choice lost to a flee already under way, which kept its stay bonus
+ * while the attack was held back by patience; with nowhere to go that is the one wrong answer.
+ */
+export const corneredFight = rule("cornered_fight", "hard", (data) => {
+  const { choice } = defenceOf(data);
+  if (choice.mode !== "fight" || !choice.cornered || choice.target === null) return null;
+  return { action: { skill: DEFENCE_SKILL.fight, target: choice.target }, urgency: 1, reason: choice.why };
+});
+
 // Soft reflexes. Defence (freeze, flee, fight, and resting after) is the defence circuit's: see defence.ts.
 // Eating when starving is an upkeep urge: see medulla.ts.
 
 /**
  * Every reflex for a bot with these settings, checked every tick: the hard ones (the three that
- * were always there, then withdrawal, buried and about-to-touch), then the soft ones (defence first).
+ * were always there, the cornered fight, then withdrawal, buried and about-to-touch), then the soft ones (defence first).
  */
 export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1, defence: { recuperate: number } = { recuperate: 1 }): ReflexRule[] {
   const protective = protectiveReflexes(settings, righting);
-  return [inLavaOrFire, drowning, lastStand, ...protective.hard, ...defenceReflexes(defence), ...protective.soft];
+  return [inLavaOrFire, drowning, lastStand, corneredFight, ...protective.hard, ...defenceReflexes(defence), ...protective.soft];
 }
 
 /** Every player reflex with the default settings. */

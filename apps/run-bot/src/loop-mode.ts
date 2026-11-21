@@ -249,7 +249,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   );
   const logPath = defaultLogPath(ROLE);
   console.log(`Regions: ${regions.map((r) => r.name).join(", ")}. Engine: ${engine.name}. Planner: ${planner.name}.`);
-  console.log(`Personality: resting DA ${personality.restingDA}, learning step ${personality.learningRate}, novelty bonus ${personality.noveltyBonus}.`);
+  console.log(`Personality: resting DA ${personality.restingDA}, learning step ${personality.learningRate}, novelty bonus ${personality.noveltyBonus}, wasted effort ${personality.wastedEffort}, situation worth ${personality.situationWorth}, wanting ${personality.wanting}.`);
   console.log(
     `Patience: resting ${patience.resting}, time constant ${patience.timeConstantSeconds}s, effects: persistence ${patience.persistence}, horizon ${patience.horizon}, brake ${patience.brake}.`,
   );

@@ -36,6 +36,8 @@ export interface ThreatFacts {
   noticedLately?: boolean;
   /** A route exists from it to the bot (or the cheap guess at one). */
   canWalkTo: boolean;
+  /** `canWalkTo` is still the cheap guess: the route check has been asked and has not answered yet. Default: false. */
+  settling?: boolean;
   /** Nothing solid between it and the bot. */
   clearLine: boolean;
   /** This kind hits from afar. */
@@ -52,6 +54,19 @@ export interface ThreatView extends Threat {
   shoots: boolean;
   /** How it was judged to have noticed, or null. */
   noticedBy: "approach" | "facing" | "hurt" | "struck" | "lately" | null;
+}
+
+/** These hurt through a wall (a blast), so being unable to get to the bot does not make them harmless. */
+const HURTS_THROUGH_WALLS = new Set(["creeper"]);
+
+/**
+ * Whether a sized-up threat could harm the bot from where it is: it can get to the bot (or hit it
+ * from there), it is on the bot or has just hurt it, or it would blast through a wall. A mob shut
+ * in a cage, or across a gap it cannot cross, could not. This is the one test of whether a threat
+ * counts: for the danger the bot feels, and for the room its journeys give a threat.
+ */
+export function couldHarm(threat: Pick<Threat, "canReach" | "stage" | "kind">): boolean {
+  return threat.canReach || threat.stage === "on_it" || HURTS_THROUGH_WALLS.has(threat.kind);
 }
 
 /**
@@ -79,7 +94,9 @@ export function sizeUp(facts: ThreatFacts, bravery: number, flightStrength = 1):
         : seen && dist <= Math.max(FAR_DISTANCE, flight)
           ? "seen"
           : "possible";
-  return { id, kind, dist, stage, noticed, canReach, escapable, danger: round(danger), beatable, flightDistance: round(flight), seen, shoots, noticedBy };
+  // Coming only on a guess at its reach (not looming, and it has not hurt the bot lately, which would settle it): to be watched, not yet run from.
+  const settling = facts.settling === true && stage === "coming" && !facts.looming && !hurtLately;
+  return { id, kind, dist, stage, noticed, canReach, escapable, danger: round(danger), beatable, flightDistance: round(flight), seen, shoots, noticedBy, ...(settling ? { settling } : {}) };
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;

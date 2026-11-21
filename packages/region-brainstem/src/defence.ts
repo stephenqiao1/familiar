@@ -30,6 +30,8 @@ export interface Threat {
   beatable: boolean;
   /** How far off this threat starts to count as coming, in blocks. */
   flightDistance: number;
+  /** Whether it can reach the body is still a guess, being worked out right now. Default: false. */
+  settling?: boolean;
 }
 
 export interface DefenceInputs {
@@ -67,6 +69,8 @@ export interface DefenceStrengths {
   cornered: number;
 }
 
+/** A threat whose reach is still a guess is only watched while it is beyond this share of its flight distance. */
+export const HOLD_BEYOND = 0.5;
 export const BASE = { freeze: 0.5, corneredFreeze: 0.6, flee: 0.7, breakAway: 0.9, fight: 0.9 };
 export const THREAT_LEVEL: Record<Stage, number> = { possible: 0.3, seen: 0.5, coming: 0.8, on_it: 1 };
 /** Flight distance for a middling threat and a middling bot, in blocks. */
@@ -96,8 +100,10 @@ export function mostPressing(threats: readonly Threat[]): Threat | null {
 /**
  * Chooses one defence for the most pressing threat:
  *   possible                               → wary (no action)
+ *   seen, cannot reach the bot             → wary (no action)
  *   seen, not noticed                      → freeze (0.5), or avoid while travelling
  *   coming, a way out                      → flee (0.7)
+ *   coming, reach still a guess, not close → freeze (0.5) until the route check answers
  *   coming, cornered                       → freeze (0.6)
  *   on it, a way out, and unarmed, weak or not beatable → flee (0.9: break away)
  *   on it, cornered, or armed, healthy and beatable     → fight (0.9)
@@ -117,13 +123,17 @@ export function chooseDefence(inputs: DefenceInputs, strengths: DefenceStrengths
 
   if (top.stage === "possible") return choice("wary", 0, inputs.possible ?? "not seen");
   if (top.stage === "seen") {
-    if (top.noticed) return choice("wary", 0, top.canReach ? "has noticed but is beyond the flight distance" : "has noticed but cannot reach");
+    // One that cannot get to the bot is watched, noticed or not: there is nothing to hide from.
+    if (!top.canReach) return choice("wary", 0, top.noticed ? "has noticed but cannot reach" : "cannot reach");
+    if (top.noticed) return choice("wary", 0, "has noticed but is beyond the flight distance");
     if (top.dist > FREEZE_WITHIN * top.flightDistance) return choice("wary", 0, "has not noticed, far off");
     if (inputs.travelling) return choice("avoid", 0, "has not noticed: routing round it");
     if (strengths.freeze <= 0) return choice("wary", 0, "has not noticed (freezing is off)");
     return choice("freeze", BASE.freeze * strengths.freeze, "has not noticed: holding still");
   }
   if (top.stage === "coming") {
+    // Reach still a guess, and it is not close yet: hold still and watch until the answer comes (a second or two).
+    if (top.settling && top.dist > HOLD_BEYOND * top.flightDistance) return choice("freeze", BASE.freeze, "coming, if it can get here: holding still to find out");
     return cornered ? choice("freeze", BASE.corneredFreeze, "coming, and no way out yet") : choice("flee", BASE.flee, `coming (inside ${round(top.flightDistance)} blocks)`);
   }
   // On it.

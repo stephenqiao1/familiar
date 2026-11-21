@@ -24,6 +24,8 @@ export const SLICES_PER_TICK = 1;
 export const MAX_SLICES = 16;
 /** An answer about a creature not asked about for this long is forgotten. */
 const FORGET_MS = 30_000;
+/** The first answer about a creature is waited for at most this long; after that the cheap guess is acted on. */
+export const SETTLE_MS = 2500;
 
 type Kind = "reach" | "escape";
 interface Slot {
@@ -31,6 +33,10 @@ interface Slot {
   askedAt: number;
   query: Query | null;
   slices: number;
+  /** When the creature was first asked about. */
+  since: number;
+  /** A question about it was given up as unsure. */
+  gaveUp: boolean;
 }
 
 export interface RouteChecks {
@@ -39,6 +45,8 @@ export interface RouteChecks {
   /** The last answer, or null if there is none yet. */
   canReach(id: number): boolean | null;
   escapable(id: number): boolean | null;
+  /** The first answer on whether it can reach the bot is still being worked out (for at most SETTLE_MS, and not given up). */
+  settling(id: number, now: number): boolean;
   /** How the checks have gone, for the log. */
   stats(): { asked: number; answered: number; unsure: number; skippedBusy: number };
 }
@@ -48,9 +56,9 @@ export function createRouteChecks(queries: RouteQueries): RouteChecks {
   const seen = new Map<number, number>();
   const counts = { asked: 0, answered: 0, unsure: 0, skippedBusy: 0 };
   let turn = 0;
-  const slot = (kind: Kind, id: number) => {
+  const slot = (kind: Kind, id: number, now: number) => {
     const key = `${kind}:${id}`;
-    if (!slots.has(key)) slots.set(key, { answer: null, askedAt: -Infinity, query: null, slices: 0 });
+    if (!slots.has(key)) slots.set(key, { answer: null, askedAt: -Infinity, query: null, slices: 0, since: now, gaveUp: false });
     return slots.get(key)!;
   };
 
@@ -65,7 +73,7 @@ export function createRouteChecks(queries: RouteQueries): RouteChecks {
         slots.delete(`escape:${id}`);
       }
       if (busy) return void (ids.length && counts.skippedBusy++);
-      const jobs = ids.flatMap((id) => (["reach", "escape"] as const).map((kind) => ({ kind, id, slot: slot(kind, id) })));
+      const jobs = ids.flatMap((id) => (["reach", "escape"] as const).map((kind) => ({ kind, id, slot: slot(kind, id, now) })));
       let slices = 0;
       // Take turns, so one slow question does not starve the others.
       for (let i = 0; i < jobs.length && slices < SLICES_PER_TICK; i++) {
@@ -87,12 +95,19 @@ export function createRouteChecks(queries: RouteQueries): RouteChecks {
         if (said === "yes" || said === "no") {
           s.answer = said === "yes";
           counts.answered++;
-        } else counts.unsure++;
+        } else {
+          s.gaveUp = true;
+          counts.unsure++;
+        }
       }
       turn++;
     },
     canReach: (id) => slots.get(`reach:${id}`)?.answer ?? null,
     escapable: (id) => slots.get(`escape:${id}`)?.answer ?? null,
+    settling(id, now) {
+      const s = slots.get(`reach:${id}`);
+      return s !== undefined && s.answer === null && !s.gaveUp && now - s.since <= SETTLE_MS;
+    },
     stats: () => ({ ...counts }),
   };
 }

@@ -6,9 +6,10 @@ import type { Locomotion } from "../locomotion/index.js";
 import type { Entity } from "../mc-types.js";
 import { flightDistance } from "@familiar/region-brainstem";
 import { assessDefence, withLooming } from "./assess.js";
+import { createReachMemory } from "./reach-memory.js";
 import { MAX_THREATS, type RouteChecks } from "./routes.js";
 import type { DefenceSettings } from "./settings.js";
-import { FAR_DISTANCE, type ThreatFacts } from "./size-up.js";
+import { couldHarm, FAR_DISTANCE, type ThreatFacts } from "./size-up.js";
 import type { ThreatRecord } from "./threat-record.js";
 
 // The threat sense: each tick it sizes up everything near that might be a threat, using what
@@ -62,13 +63,23 @@ interface Met {
   damage: number;
   hurtAt: number | null;
   noticedAt: number | null;
+  /** Fleeing from it was chosen without a break since this time, when it was this far off. */
+  fleeing?: { since: number; from: number };
+  /** Fleeing was not getting the bot away: it was this far off when that was found. Stands until the bot has made ground. */
+  noWayOutAt?: number;
 }
+
+/** Fleeing that has left the threat nearer than when it began, after this long, is not working. */
+const FLIGHT_FAILING = { afterMs: 1500, nearerBy: 0.5 };
+/** Once fleeing is found not to work, there is no way out until the threat is this much further off. */
+const GROUND_MADE = 2;
 
 const idOf = (id: string) => Number(id.replace("entity:", ""));
 const kindOf = (e: Entity) => (e.type === "player" ? `player:${e.username ?? "unknown"}` : (e.name ?? "unknown"));
 
 export function createThreatSense(bot: Bot, options: ThreatSenseOptions): ThreatSense {
   const { settings, bravery, record, routes, locomotion } = options;
+  const places = createReachMemory();
   const log = options.log ?? (() => {});
   const met = new Map<number, Met>();
   const struck = new Map<number, number>();
@@ -160,11 +171,24 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
       const approach = was && seconds >= 0.1 ? (was.approach + (was.at.distanceTo(me) - entity.position.distanceTo(me)) / seconds) / 2 : (was?.approach ?? 0);
       const turned = facing(entity);
       const facingSince = turned ? (was?.facingSince ?? now) : null;
-      const memory = { kind, at: seconds >= 0.1 || !was ? entity.position.clone() : was.at, when: seconds >= 0.1 || !was ? now : was.when, approach, facingSince, lastSeen: now, damage: was?.damage ?? 0, hurtAt: was?.hurtAt ?? null, noticedAt: was?.noticedAt ?? null };
+      // Is fleeing getting the bot away? Chosen without a break for a while and the threat is nearer
+      // than when it began: no. That counts as no way out (whatever the route check says), so the
+      // chooser stops fleeing and holds or fights, until the bot has made ground on it.
+      const far = entity.position.distanceTo(me);
+      const fled = latest?.choice.mode === "flee" && latest.choice.target === thing.id;
+      const fleeing = fled ? (was?.fleeing ?? { since: now, from: far }) : undefined;
+      const failing = fleeing !== undefined && now - fleeing.since >= FLIGHT_FAILING.afterMs && far <= fleeing.from - FLIGHT_FAILING.nearerBy;
+      const noWayOutAt = was?.noWayOutAt !== undefined ? (far >= was.noWayOutAt + GROUND_MADE ? undefined : was.noWayOutAt) : failing ? far : undefined;
+      const memory: Met = { kind, at: seconds >= 0.1 || !was ? entity.position.clone() : was.at, when: seconds >= 0.1 || !was ? now : was.when, approach, facingSince, lastSeen: now, damage: was?.damage ?? 0, hurtAt: was?.hurtAt ?? null, noticedAt: was?.noticedAt ?? null, ...(fleeing ? { fleeing } : {}), ...(noWayOutAt === undefined ? {} : { noWayOutAt }) };
       met.set(entity.id, memory);
       remembered.set(thing.id, memory);
       const shoots = record.shoots(kind);
       const asked = checking && nearest.includes(entity.id);
+      // Whether it can walk here: the route check's answer (kept by place for the next time), else
+      // what was found for these two places before, else the cheap guess while the check is working.
+      const answer = asked ? routes.canReach(entity.id) : null;
+      if (answer !== null) places.note(entity.position, me, answer);
+      const walk = answer ?? places.recall(entity.position, me);
       return {
         id: thing.id,
         kind,
@@ -176,10 +200,11 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
         hurtMsAgo: was?.hurtAt != null ? now - was.hurtAt : null,
         engaged: now - (struck.get(entity.id) ?? -Infinity) <= ENGAGED_MS,
         noticedLately: was?.noticedAt != null && now - was.noticedAt <= NOTICED_FOR_MS,
-        canWalkTo: (asked ? routes.canReach(entity.id) : null) ?? thing.reachable,
+        canWalkTo: walk ?? thing.reachable,
+        settling: walk === null && asked && routes.settling(entity.id, now),
         clearLine: shoots ? hasLineOfSight(bot, entity) : thing.reachable,
         shoots,
-        escapable: settings.cornered <= 0 || ((asked ? routes.escapable(entity.id) : null) ?? true),
+        escapable: settings.cornered <= 0 || (noWayOutAt === undefined && ((asked ? routes.escapable(entity.id) : null) ?? true)),
         danger: record.danger(kind),
         beatable: record.beatable(kind),
       };
@@ -197,12 +222,14 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
 
     const view = assessDefence(data, withLooming(facts, looming), { bravery, strengths: settings });
     // Having noticed the bot is remembered for a few seconds: it does not lapse the moment the creature pauses.
-    for (const t of view.threats) if (t.noticed && t.noticedBy !== "lately") remembered.get(t.id)!.noticedAt = now;
-    // A threat that has not noticed: journeys are routed round a circle of its flight distance.
+    // One that was on the bot or coming at it counts the same: having just got clear of it, the bot
+    // does not take it for unaware (and turn back past it) the moment it is out of arm's reach.
+    for (const t of view.threats) if ((t.noticed && t.noticedBy !== "lately") || t.stage === "on_it" || t.stage === "coming") remembered.get(t.id)!.noticedAt = now;
+    // A threat that has not noticed, and could harm the bot: journeys are routed round a circle of its flight distance.
     if (settings.avoid > 0 && locomotion) {
       for (const t of view.threats) {
         const at = bot.entities[idOf(t.id)]?.position;
-        if (at && t.stage === "seen" && !t.noticed) locomotion.avoidArea(t.id, at, t.flightDistance, AVOID_MS);
+        if (at && t.stage === "seen" && !t.noticed && couldHarm(t)) locomotion.avoidArea(t.id, at, t.flightDistance, AVOID_MS);
       }
     }
     const learned = record.justLearned();

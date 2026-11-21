@@ -175,6 +175,50 @@ describe("createThreatSense", () => {
     expect(off.tick({ self: { bestWeapon: null } }).choice).toMatchObject({ mode: "flee", cornered: false });
   });
 
+  it("fleeing that is not getting the bot away counts as no way out, until it has made ground", () => {
+    const w = world(); // the route check says there is a way out
+    const zombie = w.add(1, "zombie", 7);
+    const walkTo = (x: number) => ((zombie.position = new Vec3(x + 0.5, 64, 0.5)), w.tick({ self: { bestWeapon: null } }));
+    w.tick();
+    w.tick();
+    // It comes on while the bot, choosing to flee each tick, gets nowhere.
+    expect(walkTo(6).choice).toMatchObject({ mode: "flee", cornered: false });
+    expect(walkTo(5.5).choice).toMatchObject({ mode: "flee", cornered: false }); // flee chosen for 0.5 s so far
+    walkTo(5);
+    walkTo(4.5);
+    expect(walkTo(4).choice).toMatchObject({ mode: "freeze", cornered: true }); // 1.5 s of fleeing, and it is nearer
+    // On the bot: it turns and fights, unarmed as it is.
+    expect(walkTo(2).choice).toMatchObject({ mode: "fight", cornered: true });
+    // Ground made (it is 2 blocks further off than when fleeing was given up): there is a way out again.
+    expect(walkTo(7).choice.cornered).toBe(false);
+  });
+
+  it("a threat the bot has just got clear of is not taken for unaware: it counts as having noticed for a few seconds", () => {
+    const w = world();
+    const zombie = w.add(1, "zombie", 2); // on the bot, though it stands still and has not noticed by any sign
+    expect(w.tick().threats[0]).toMatchObject({ stage: "on_it", noticedBy: null });
+    // The bot is put 10 blocks off (beyond the flight distance); the zombie has not moved.
+    zombie.position = new Vec3(10.5, 64, 0.5);
+    w.tick({ ms: 100 }); // the jump itself reads as movement, once
+    expect(w.tick({ ms: 2000 }).threats[0]).toMatchObject({ noticed: true, noticedBy: "lately" });
+    // A while later, with no further sign, it is unaware again.
+    expect(w.tick({ ms: 6000 }).threats[0]).toMatchObject({ noticed: false });
+  });
+
+  it("fleeing that is working is left alone", () => {
+    const w = world();
+    const zombie = w.add(1, "zombie", 7);
+    w.tick();
+    w.tick();
+    zombie.position = new Vec3(5.5, 64, 0.5);
+    w.tick();
+    // The bot runs: each tick the zombie is further off though it keeps coming.
+    for (const x of [6, 6.5, 7, 7.4]) {
+      zombie.position = new Vec3(x + 0.5, 64, 0.5);
+      expect(w.tick().choice.cornered).toBe(false);
+    }
+  });
+
   it("while a journey is being planned the checks are skipped and the cheap guess stands", () => {
     const w = world({ reach: "no", moving: true });
     w.add(1, "zombie", 5);

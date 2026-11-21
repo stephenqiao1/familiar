@@ -154,6 +154,15 @@ describe("createSkillExecutor", () => {
     expect(types()).toEqual(["mine:failed(cannot run)"]);
   });
 
+  it("passes on what a run says it was aimed at", async () => {
+    const fetch: Skill<Ctx> = { name: "fetch", description: "", canRun: () => true, run: async () => ({ status: "done", aimedAt: "pos:1,2,3" }) };
+    const { executor, events } = setup([fetch]);
+    await executor.start("fetch");
+    await tick();
+    expect(events.at(-1)).toMatchObject({ skill: "fetch", type: "done", aimedAt: "pos:1,2,3" });
+    expect(events[0]).not.toHaveProperty("aimedAt");
+  });
+
   it("passes on what a run changed", async () => {
     const dig: Skill<Ctx> = { name: "dig", description: "", canRun: () => true, run: async () => ({ status: "done", changes: { targetBlock: "air", asExpected: true } }) };
     const { executor, events } = setup([dig]);

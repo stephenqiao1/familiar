@@ -49,4 +49,15 @@ describe("sizeUp", () => {
   it("noticing does not lapse the moment it stops moving", () => {
     expect(sizeUp(facts({ dist: 6, noticedLately: true }), 0.5)).toMatchObject({ stage: "coming", noticedBy: "lately" });
   });
+
+  it("marks a threat as settling only when it is coming on a guess at its reach alone", () => {
+    const coming = { approach: 2, dist: 5, settling: true };
+    expect(sizeUp(facts(coming), 0.5)).toMatchObject({ stage: "coming", settling: true });
+    // Looming, or having just hurt the bot, is no guess.
+    expect(sizeUp(facts({ ...coming, looming: true }), 0.5)).not.toHaveProperty("settling");
+    expect(sizeUp(facts({ ...coming, hurtMsAgo: 5000 }), 0.5)).not.toHaveProperty("settling");
+    // Not coming, or the answer is in: nothing to wait for.
+    expect(sizeUp(facts({ dist: 10, settling: true }), 0.5)).not.toHaveProperty("settling");
+    expect(sizeUp(facts({ approach: 2, dist: 5 }), 0.5)).not.toHaveProperty("settling");
+  });
 });

@@ -29,8 +29,9 @@ describe("memory store", () => {
     const file = join(dir, "scorebook.json");
     await writeFile(file, "{not json");
     expect((await loadScorebook(file)).entries()).toEqual([]);
-    const good = { situation: "day", skill: "eat", expected: 0.2, benefit: 1.1, cost: 0.9 };
-    await writeFile(file, JSON.stringify([good, { situation: "day" }]));
+    const good = { feature: "eat | day", expected: 0.2, benefit: 1.1, cost: 0.9 };
+    // An entry from before the scorebook was kept by feature (one page per situation) is skipped too.
+    await writeFile(file, JSON.stringify([good, { feature: "eat" }, { situation: "day", skill: "eat", expected: 0.2, benefit: 1.1, cost: 0.9 }]));
     expect((await loadScorebook(file)).entries()).toEqual([{ ...good, runs: 0, successes: 0 }]);
   });
 

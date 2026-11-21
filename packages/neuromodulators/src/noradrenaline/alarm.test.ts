@@ -10,6 +10,13 @@ describe("createAlarm", () => {
     expect(alarm.update(0, false, 120_000)).toBeLessThan(0.1);
   });
 
+  it("drops at once on the all-clear, to the share it is told to keep", () => {
+    const alarm = createAlarm(DEFAULT_NORADRENALINE);
+    alarm.update(0.6, true, 0);
+    alarm.settle(0.25);
+    expect(alarm.level()).toBeCloseTo(0.15);
+  });
+
   it("does not fall while a threat is still present", () => {
     const alarm = createAlarm(DEFAULT_NORADRENALINE);
     alarm.update(0.6, true, 0);

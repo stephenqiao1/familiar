@@ -38,6 +38,11 @@ export interface NoradrenalineOptions {
   triggers: AlarmTrigger[];
   /** Whether a threat is present right now; alarm does not fade while one is. */
   threatPresent(state: State): boolean;
+  /**
+   * The all-clear: between these two states, what looked like a threat turned out unable to
+   * harm. Alarm then drops at once (to ALL_CLEAR_KEEPS of itself) instead of fading. Default: never.
+   */
+  allClear?(before: State, after: State): boolean;
   settings: NoradrenalineSettings;
   /** What moves search. Default: reward trend, failed predictions and goal progress. */
   searchInputs?: SearchInput[];
@@ -53,6 +58,9 @@ export interface NoradrenalineOptions {
 
 /** The region's name, also the `setBy` of the retreat goal it sets (which the planner's weight does not apply to). */
 export const NORADRENALINE = "noradrenaline";
+
+/** After an all-clear, alarm keeps this share of itself. */
+export const ALL_CLEAR_KEEPS = 0.25;
 
 // Alarm effect a: who is in charge.
 const OFFLINE_ABOVE = 0.8;
@@ -148,6 +156,10 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
           else delete raisedBy[trigger.name];
           sameCause[trigger.name] = other;
         }
+      }
+      if (before && options.allClear?.(before, after)) {
+        alarm.settle(ALL_CLEAR_KEEPS);
+        notes.allClear = "what looked like a threat cannot harm: alarm cut";
       }
       before = after;
       const threat = threatPresent(after);

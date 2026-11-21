@@ -8,6 +8,8 @@ export const SURPRISE_SIGNAL = "surprise";
 export const BAD_SURPRISE_SIGNAL = "bad_surprise";
 /** The workspace signal that carries this tick's novelty reward (0 when nothing new came into view). */
 export const NOVELTY_SIGNAL = "novelty";
+/** The signal that holds the strongest want on offer this tick, in reward units (0: nothing is wanted). */
+export const WANT_SIGNAL = "want";
 /** DA with no recent reward, unless a personality says otherwise. */
 export const RESTING_DA = 0.5;
 /** Guardrail against giving up forever: DA never drops below this, and drifts back to rest. */

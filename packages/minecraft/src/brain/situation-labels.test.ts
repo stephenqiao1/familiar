@@ -14,24 +14,33 @@ function state(p: Patch = {}): State {
 
 describe("situationOf", () => {
   it("labels a calm day on the surface", () => {
-    expect(situationOf(state())).toBe("day/safe/fed/surface/alone");
+    expect(situationOf(state())).toBe("day/safe/fed/surface/alone/steady");
   });
 
   it("labels a bad night underground with company", () => {
     const zombie = { id: "entity:1", type: "zombie", dist: 5, hostile: true, reachable: true };
     expect(situationOf(state({ isNight: true, mobs: [zombie], self: { food: 6, skyLight: 0 }, players: 2 }))).toBe(
-      "night/threatened/hungry/underground/with_others",
+      "night/threatened/hungry/underground/with_others/steady",
     );
   });
 
   it("counts being near base as at base, even with no sky above", () => {
-    expect(situationOf(state({ self: { distanceToBase: 3, skyLight: 0 } }))).toBe("day/safe/fed/at_base/alone");
+    expect(situationOf(state({ self: { distanceToBase: 3, skyLight: 0 } }))).toBe("day/safe/fed/at_base/alone/steady");
   });
 
   it("ignores far or friendly mobs", () => {
     const far = { id: "entity:1", type: "zombie", dist: 20, hostile: true, reachable: true };
     const cow = { id: "entity:2", type: "cow", dist: 2, hostile: false, reachable: true };
-    expect(situationOf(state({ mobs: [far, cow] }))).toBe("day/safe/fed/surface/alone");
+    expect(situationOf(state({ mobs: [far, cow] }))).toBe("day/safe/fed/surface/alone/steady");
+  });
+
+  it("says what the body is in the middle of", () => {
+    const body = (self: Partial<MinecraftStateData["self"]>) => situationOf(state({ self })).split("/").at(-1);
+    expect(body({ falling: true })).toBe("falling");
+    expect(body({ onFire: true })).toBe("burning");
+    expect(body({ inLava: true })).toBe("burning");
+    expect(body({ air: 12 })).toBe("underwater");
+    expect(body({ falling: true, onFire: true })).toBe("falling");
   });
 
   it("is unknown before the first Minecraft state", () => {

@@ -1,16 +1,19 @@
 import { createValueWeightedArbiter } from "@familiar/arbiter";
-import type { Arbiter, DecisionEngine, Planner, Region, Skill, Workspace } from "@familiar/contracts";
+import type { Arbiter, Candidate, DecisionEngine, Planner, Region, Skill, State, Workspace } from "@familiar/contracts";
 import { createMemoryRegion, memoryNotes, type MemoryStore } from "@familiar/memory";
 import {
   approachableThings,
+  rememberedThings,
   asleep,
   curiosity,
+  effortSpent,
   describeSituation,
   isShock,
   leaningOf,
   menuSkills,
   moved,
   placeOf,
+  falseAlarm,
   playerAlarms,
   playerBrainstem,
   playerFocus,
@@ -46,7 +49,12 @@ import {
 import {
   ALARM_JUMP_SIGNAL,
   ALARM_SIGNAL,
+  aimAt,
   brakeFactor,
+  holdNow,
+  pressingNow,
+  reliefOf,
+  WANT_SIGNAL,
   createDopamineRegion,
   createFocusRegion,
   createNoradrenalineRegion,
@@ -72,6 +80,7 @@ import {
   type FocusSettings,
   type NoradrenalineSettings,
   type NoveltyMemory,
+  type RewardMoment,
   type PatienceSettings,
   type Persistence,
   type Scorebook,
@@ -260,12 +269,15 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       personality,
       skillsToward: skillsToward(skills, ctx),
       asleep,
+      // A skill that lists no body parts (idle) is rest; one that does not say uses the whole body.
+      usesBody: (name) => skills.find((s) => s.name === name)?.parts?.length !== 0,
       // A learning window opens on a notable reward, an alarm jump or a cue.
       ...(focus.learningWindow > 0 ? { learningWindow: { ms: LEARNING_WINDOW_MS, notable: (ws: Workspace) => up(ws, ALARM_JUMP_SIGNAL) || up(ws, CUE_SIGNAL) } } : {}),
     }), //                                                                                  layer 0, every tick
     createNoradrenalineRegion({
       triggers: playerAlarms(focus.noisyOrChanged > 0),
       threatPresent,
+      allClear: falseAlarm,
       settings: noradrenaline,
       // Moved somewhere else all at once: whatever the plan was, the planner should look again.
       ...(posture.displaced > 0 ? { replanWhen: (ws: Workspace) => wasDisplaced(ws.state) } : {}),
@@ -329,16 +341,24 @@ export function createPlayerDopamine(parts: {
   learningWindow?: { ms: number; notable(ws: Workspace): boolean };
   /** Asleep: cues propose nothing. Default: never. */
   asleep?(ws: Workspace): boolean;
+  /** Whether a skill uses any part of the body: time on one that does not is rest, not effort. Default: every skill does. */
+  usesBody?(skill: string): boolean;
 }): Region {
   const { scorebook, novelty, personality, learningWindow } = parts;
+  // Memory of places: what it has learned about and cannot sense now, costed by the walk there.
+  const remembered = rememberedThings(() => scorebook.things(), personality.wastedEffort);
   return createDopamineRegion({
     rules: [...playerRewards, curiosity(novelty, personality.noveltyBonus)],
     situationOf,
     scorebook,
+    // Effort that comes to nothing costs something; the personality says how much (0: never).
+    ...(personality.wastedEffort > 0 ? { effortOf: (moment: RewardMoment) => personality.wastedEffort * effortSpent(moment, parts.usesBody) } : {}),
+    situationWorth: personality.situationWorth,
+    wanting: personality.wanting,
     learningRate: personality.learningRate,
     restingDA: personality.restingDA,
-    thingsOf: thingsInView,
-    cueThingsOf: approachableThings,
+    thingsOf: (state) => [...thingsInView(state), ...remembered(state)],
+    cueThingsOf: (state) => [...approachableThings(state), ...remembered(state)],
     skillsToward: parts.skillsToward,
     ...(parts.asleep ? { asleep: parts.asleep } : {}),
     ...(learningWindow ? { learningWindowMs: learningWindow.ms, notable: learningWindow.notable } : {}),
@@ -354,7 +374,10 @@ export function patienceOf(ws: Pick<Workspace, "signals">, patience: PatienceSet
  * THE ARBITER: picks by urgency, nudged by what dopamine has learned about each skill in the
  * current situation (weighed by the current DA level). Patience adds a bonus for staying with the
  * running skill (smaller when search is high or the body has an urge, so switching gets easier)
- * and brakes risky skills.
+ * and brakes risky skills. While something is wanted (a cue fired), each option of the deciding
+ * layers is weighed down by the worst need it would leave unmet (see holdNow): with a need
+ * desperate, a running skill that does not serve it gives way to the thing that does. Reflexes
+ * and the want itself are never weighed down, and with nothing on offer nothing changes.
  * A full-urgency reflex always wins.
  */
 export function createArbiter<Ctx>(parts: {
@@ -367,6 +390,18 @@ export function createArbiter<Ctx>(parts: {
 }): Arbiter {
   const { scorebook, personality, patience, persistence } = parts;
   const risky = new Set(parts.skills.filter((s) => s.risky).map((s) => s.name));
+  /** What is learned about a target: the thing in the state, else the remembered one. */
+  const aimOf = (state: State, target: string) => {
+    const seen = thingsInView(state).find((t) => t.id === target);
+    return seen ? aimAt(seen) : scorebook.things().find((t) => t.id === target);
+  };
+  /** How much hold a deciding layer's option keeps while something is wanted: less, the more pressing the worst need it is not expected to relieve. */
+  const hold = (skill: string, ws: Workspace, { layer, action }: Candidate) => {
+    if (layer < 1 || !((ws.signals[WANT_SIGNAL]?.value ?? 0) > 0)) return 1;
+    const target = "target" in action ? action.target : undefined;
+    const [situation, aim] = [situationOf(ws.state), target === undefined ? undefined : aimOf(ws.state, target)];
+    return holdNow(pressingNow(playerRewards, ws.state), (need) => scorebook.get(situation, reliefOf(skill, need), aim).expected, personality.wanting);
+  };
   return createValueWeightedArbiter({
     valueOf: (skill, ws) =>
       skillValue(scorebook.get(situationOf(ws.state), skill), ws.signals[DOPAMINE_SIGNAL]?.value ?? personality.restingDA),
@@ -376,6 +411,6 @@ export function createArbiter<Ctx>(parts: {
       (persistence?.stayBonus(skill, Date.now()) ?? 0) *
       switchMarginFactor(ws.signals[SWITCHING_SIGNAL]?.value ?? NEUTRAL_SEARCH) *
       (1 - (ws.signals[URGE_SIGNAL]?.value ?? 0)),
-    scaleOf: (skill, ws) => (risky.has(skill) ? brakeFactor(patienceOf(ws, patience), patience.brake) : 1),
+    scaleOf: (skill, ws, candidate) => (risky.has(skill) ? brakeFactor(patienceOf(ws, patience), patience.brake) : 1) * hold(skill, ws, candidate),
   });
 }

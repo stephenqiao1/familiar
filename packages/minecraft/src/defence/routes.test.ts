@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ASK_EVERY_MS, createRouteChecks, MAX_SLICES, SLICES_PER_TICK, type Answer, type RouteQueries } from "./routes.js";
+import { ASK_EVERY_MS, createRouteChecks, MAX_SLICES, SETTLE_MS, SLICES_PER_TICK, type Answer, type RouteQueries } from "./routes.js";
 
 /** Queries that answer after `slices` calls, and count how often each was started and worked on. */
 function fake(answers: { reach?: Answer; escape?: Answer } = {}, slices = 1) {
@@ -26,6 +26,28 @@ describe("createRouteChecks", () => {
     checks.work([7], 100, false);
     expect(checks.canReach(7)).toBe(false);
     expect(checks.escapable(7)).toBe(true);
+  });
+  it("is settling from the first question until its answer, a give-up, or the wait runs out", () => {
+    const slow = createRouteChecks(fake({ reach: "no" }, 3).queries);
+    expect(slow.settling(7, 0)).toBe(false); // never asked about
+    slow.work([7], 0, false);
+    expect(slow.settling(7, 0)).toBe(true);
+    for (let t = 100; t <= 600; t += 100) slow.work([7], t, false);
+    expect(slow.canReach(7)).toBe(false);
+    expect(slow.settling(7, 600)).toBe(false);
+    // Given up as unsure: the guess is all there will be.
+    const unsure = createRouteChecks(fake({ reach: "unsure" }).queries);
+    unsure.work([7], 0, false);
+    expect(unsure.settling(7, 0)).toBe(false);
+    // Never answering: waited for only so long.
+    const stuck = createRouteChecks(fake({}, 1000).queries);
+    stuck.work([7], 0, false);
+    expect(stuck.settling(7, SETTLE_MS)).toBe(true);
+    expect(stuck.settling(7, SETTLE_MS + 1)).toBe(false);
+    // Busy planning a journey: nothing is asked, so nothing is waited for.
+    const busy = createRouteChecks(fake().queries);
+    busy.work([7], 0, true);
+    expect(busy.settling(7, 0)).toBe(false);
   });
   it("asks about the nearest two only", () => {
     const { queries, started } = fake();

@@ -34,7 +34,7 @@ function input(name: string, read: (data: MinecraftStateData, ws: Workspace) => 
 /** No hostile close by, and health not low. */
 export const safety = input("safety", (d) => {
   const threat = nearestThreat(d);
-  return ((threat ? threat.dist / DANGER_DISTANCE : 1) + d.self.health / MAX_HEALTH) / 2;
+  return ((threat ? threat.dist / threat.within : 1) + d.self.health / MAX_HEALTH) / 2;
 });
 
 /** Food bar not low, and some food carried. */

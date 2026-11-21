@@ -1,8 +1,9 @@
 import type { State } from "@familiar/contracts";
 import { BAD_SURPRISE_SIGNAL, BIG_SURPRISE, changedThreshold, FOCUS_SIGNAL, type AlarmTrigger } from "@familiar/neuromodulators";
 import { LOOMING_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL } from "@familiar/region-brainstem";
+import { couldHarm } from "../defence/size-up.js";
 import { pressingThreat } from "./defence.js";
-import { minecraftDataOf } from "./read-state.js";
+import { defenceOf, minecraftDataOf } from "./read-state.js";
 
 // What raises the player's alarm. Each trigger says how much to add right now (0 to 1).
 // Add or remove one: write it here and edit playerAlarms. Every number is a first guess.
@@ -114,4 +115,17 @@ export function playerAlarms(surpriseByFocus = false): AlarmTrigger[] {
 export function threatPresent(state: State): boolean {
   const data = minecraftDataOf(state);
   return data !== null && pressingThreat(data) !== null;
+}
+
+/**
+ * The all-clear: a threat that was pressing (thought able to get to the bot, and coming or on it)
+ * is still there but has been found unable to harm it, and nothing else presses. This is the
+ * route check's answer coming back "it cannot reach you" after the bot had acted on a guess.
+ */
+export function falseAlarm(before: State, after: State): boolean {
+  const [a, b] = [minecraftDataOf(before), minecraftDataOf(after)];
+  const was = a && pressingThreat(a);
+  if (!was || !b || pressingThreat(b)) return false;
+  const now = defenceOf(b).threats.find((t) => t.id === was.id);
+  return now !== undefined && !couldHarm(now);
 }

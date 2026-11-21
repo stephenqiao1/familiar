@@ -165,11 +165,11 @@ export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): Sk
 }
 
 /** A skill that finished "done" keeps that result; otherwise an abort decides the outcome. */
-function finalResult(result: SkillResult, aborted: boolean, failure: string | undefined): Pick<SkillEvent, "type" | "reason" | "changes"> {
-  const { changes } = result;
-  if (result.status === "done" || !aborted) return { type: result.status, reason: result.reason, changes };
-  if (failure !== undefined) return { type: "failed", reason: failure, changes };
-  return { type: "interrupted", reason: result.reason, changes };
+function finalResult(result: SkillResult, aborted: boolean, failure: string | undefined): Pick<SkillEvent, "type" | "reason" | "changes" | "aimedAt"> {
+  const changes = { changes: result.changes, ...(result.aimedAt === undefined ? {} : { aimedAt: result.aimedAt }) };
+  if (result.status === "done" || !aborted) return { type: result.status, reason: result.reason, ...changes };
+  if (failure !== undefined) return { type: "failed", reason: failure, ...changes };
+  return { type: "interrupted", reason: result.reason, ...changes };
 }
 
 function errorMessage(error: unknown): string {

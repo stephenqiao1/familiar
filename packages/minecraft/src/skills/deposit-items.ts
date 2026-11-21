@@ -6,7 +6,7 @@ import { withJourney } from "../locomotion/index.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { countByName } from "../encode/encode-self.js";
 import { posId } from "../encode/scan-blocks.js";
-import { chosenContainer } from "./storage.js";
+import { atContainer, chosenContainer } from "./storage.js";
 
 
 type Deposit = { type: number; name: string; count: number };
@@ -29,30 +29,32 @@ export const depositItems: Skill<MinecraftCtx> = {
     if (toDeposit(ctx).length === 0) return { status: "done", reason: "nothing to store" };
     const chest = chosenContainer(ctx, target);
     if (!chest) return { status: "failed", reason: `no chest at ${target ?? "base"}` };
-    ctx.log(`deposit_items: heading for ${chest.name} at ${chest.position}`);
-    const walk = await ctx.locomotion.goTo(chest.position, { see: true }, signal);
-    if (walk.status !== "done") return walk;
+    return atContainer(chest, async () => {
+      ctx.log(`deposit_items: heading for ${chest.name} at ${chest.position}`);
+      const walk = await ctx.locomotion.goTo(chest.position, { see: true }, signal);
+      if (walk.status !== "done") return walk;
 
-    const block = bot.blockAt(chest.position);
-    if (!block || block.name !== chest.name) return { status: "failed", reason: `no chest at ${chest.position}` };
-    const window = await doOpen(bot, block, signal);
-    if (!window) return { status: "interrupted" };
-    try {
-      if (!("deposit" in window)) return { status: "failed", reason: "container cannot be stored in" };
-      for (const item of toDeposit(ctx)) {
-        if (signal.aborted) return { status: "interrupted" };
-        try {
-          await doMoveItem(window, item.type, item.count, "in");
-        } catch (error) {
-          return { status: "failed", reason: `could not store ${item.name}: ${error instanceof Error ? error.message : error}` };
+      const block = bot.blockAt(chest.position);
+      if (!block || block.name !== chest.name) return { status: "failed", reason: `no chest at ${chest.position}` };
+      const window = await doOpen(bot, block, signal);
+      if (!window) return { status: "interrupted" };
+      try {
+        if (!("deposit" in window)) return { status: "failed", reason: "container cannot be stored in" };
+        for (const item of toDeposit(ctx)) {
+          if (signal.aborted) return { status: "interrupted" };
+          try {
+            await doMoveItem(window, item.type, item.count, "in");
+          } catch (error) {
+            return { status: "failed", reason: `could not store ${item.name}: ${error instanceof Error ? error.message : error}` };
+          }
         }
+        ctx.chests.remember(posId(chest.position), countByName(window.containerItems()), Date.now());
+      } finally {
+        await doClose(bot);
       }
-      ctx.chests.remember(posId(chest.position), countByName(window.containerItems()), Date.now());
-    } finally {
-      await doClose(bot);
-    }
-    ctx.log("deposit_items: chest closed");
-    return withJourney({ status: "done" }, walk);
+      ctx.log("deposit_items: chest closed");
+      return withJourney({ status: "done" }, walk);
+    });
   },
 };
 
