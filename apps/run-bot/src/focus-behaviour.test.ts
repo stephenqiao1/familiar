@@ -81,7 +81,7 @@ function state(p: Patch, seconds: number): State {
 /** The bot's focus region (with real inputs) on one workspace, driven one second at a time. */
 function bot(memory = createMemory()) {
   const store = createWorkspace();
-  const region = createFocusRegion({ inputs: playerFocus(memory, skills), settings: DEFAULT_FOCUS, asleep, moved, watched: watchedThings, skillsToward: () => ["go_to"] });
+  const region = createFocusRegion({ inputs: playerFocus(memory), settings: DEFAULT_FOCUS, asleep, moved, watched: watchedThings, skillsToward: () => ["go_to"] });
   let seconds = 0;
   const live = async (patch: Patch = {}, forSeconds = 1, running?: string) => {
     let out = { proposals: [] as unknown[] };
@@ -105,16 +105,44 @@ function familiar() {
 }
 
 describe("focus behaviour", () => {
-  it("rises in the dark somewhere unfamiliar", async () => {
+  it("rises somewhere it knows nothing of", async () => {
     const { live, focus } = bot();
     await live({ isNight: true, light: 0 }, 120, "go_to");
     expect(focus()).toBeGreaterThan(0.85);
   });
 
-  it("falls doing nothing much somewhere well known by day", async () => {
+  it("falls somewhere well known, with nothing going against what it expects", async () => {
     const { live, focus } = bot(familiar());
     await live({}, 120, "idle");
     expect(focus()).toBeLessThan(0.15);
+  });
+
+  it("is the same idle or busy, by day or by night: what it knows is no different", async () => {
+    const levels: number[] = [];
+    for (const [patch, running] of [[{}, "idle"], [{}, "attack"], [{ isNight: true, light: 0 }, "go_to"]] as const) {
+      const { live, focus } = bot(familiar());
+      await live(patch, 60, running);
+      levels.push(focus());
+    }
+    expect(new Set(levels.map((l) => l.toFixed(3))).size).toBe(1);
+  });
+
+  it("rises when its predictions keep failing, though the place is well known, and settles once they hold again", async () => {
+    const { store, live, focus } = bot(familiar());
+    await live({}, 120);
+    const settled = focus();
+    for (let i = 0; i < 3; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      store.viewFor("dopamine").setSignal("surprise", 0.8);
+      await live({}, 20);
+    }
+    expect(focus()).toBeGreaterThan(settled + 0.3);
+    for (let i = 0; i < 6; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      store.viewFor("dopamine").setSignal("surprise", 0.01);
+      await live({}, 20);
+    }
+    expect(focus()).toBeLessThan(settled + 0.1);
   });
 
   it("is forced to 0.05 while asleep", async () => {

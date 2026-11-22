@@ -280,21 +280,6 @@ describe("createDopamineRegion", () => {
       expect(scorebook.get("day", "go_to").expected).toBeLessThan(0);
     });
 
-    it("opens a learning window when the waste is big enough to be notable", async () => {
-      const store = createWorkspace();
-      const scorebook = createScorebook([{ feature: "go_to", expected: 0.4, benefit: 1, cost: 1 }]);
-      const region = createDopamineRegion({ rules: [], situationOf: () => "day", scorebook, effortOf: () => 0.2, learningWindowMs: 2000 });
-      const tick = (n: number) => {
-        store.update(state(n), null);
-        return region.run(store.viewFor("dopamine"), signal);
-      };
-      await tick(10_000);
-      store.addEvent({ skill: "go_to", type: "started", timestamp: 0 });
-      await tick(20_000);
-      store.addEvent({ skill: "go_to", type: "done", timestamp: 0 });
-      expect((await tick(30_000)).trace).toMatchObject({ learningWindow: "opened" });
-      expect(scorebook.get("day", "go_to").expected).toBeCloseTo(0.4 + 0.19 * (-0.2 - 0.4)); // the full step, at both levels
-    });
   });
 
   describe("a skill is judged on the difference it made", () => {
@@ -457,13 +442,13 @@ describe("createDopamineRegion", () => {
     });
   });
 
-  describe("learning window", () => {
-    /** Runs eat for one tick with `gain` food arriving, optionally with a window. Returns what was learned. */
-    async function learnFrom(gain: number, window: { learningWindowMs: number; notable?: () => boolean } | null) {
+  describe("learning by surprise", () => {
+    /** Runs eat for one tick with `gain` food arriving, where 1 was expected. Returns what was learned. */
+    async function learnFrom(gain: number, surpriseLearning?: number) {
       const store = createWorkspace();
       const scorebook = createScorebook();
       scorebook.learn("day", "eat", 1 / 0.19, 0.1); // expects 1 (two levels, a tenth each)
-      const region = createDopamineRegion({ rules: [fed], situationOf: () => "day", scorebook, ...(window ?? {}) });
+      const region = createDopamineRegion({ rules: [fed], situationOf: () => "day", scorebook, ...(surpriseLearning === undefined ? {} : { surpriseLearning }) });
       const at = (food: number, ms: number): State => ({ schemaVersion: 1, tick: 0, timestamp: ms, data: { food } });
       const tick = (food: number, ms: number) => {
         store.update(at(food, ms), null);
@@ -474,30 +459,28 @@ describe("createDopamineRegion", () => {
       await tick(0, 500);
       store.addEvent({ skill: "eat", type: "done", timestamp: 0 });
       const out = await tick(gain, 1000);
-      return { expected: scorebook.get("day", "eat").expected, trace: out.trace! };
+      return { expected: scorebook.get("day", "eat").expected, episode: (out.trace!.episodes as { attention?: number }[])[0]! };
     }
 
-    it("applies the full update inside a window opened by a notable reward", async () => {
-      const { expected, trace } = await learnFrom(3, { learningWindowMs: 2000 });
-      expect(trace.learningWindow).toBe("opened");
-      expect(expected).toBeCloseTo(1 + 0.19 * (3 - 1));
+    it("a real surprise is learned from at the full step, with nothing else having to happen first", async () => {
+      for (const gain of [3, 0]) {
+        const { expected, episode } = await learnFrom(gain, 1);
+        expect(expected).toBeCloseTo(1 + 0.19 * (gain - 1));
+        expect(episode.attention).toBeUndefined();
+      }
     });
 
-    it("applies only a fifth of the update outside a window", async () => {
-      const { expected, trace } = await learnFrom(0, { learningWindowMs: 2000 }); // nothing notable happened
-      expect(trace.learnedOutsideWindow).toBe(true);
-      expect(expected).toBeCloseTo(1 + (1 - 0.98 ** 2) * (0 - 1));
+    it("a run that went about as expected moves the scorebook much less: noise is shrugged off", async () => {
+      const { expected, episode } = await learnFrom(1.03, 1);
+      expect(episode.attention).toBeCloseTo(0.28);
+      expect(expected - 1).toBeLessThan(0.4 * 0.19 * 0.03);
+      expect(expected).toBeGreaterThan(1);
     });
 
-    it("lets something else notable (an alarm jump, a cue) open the window", async () => {
-      const { expected } = await learnFrom(0, { learningWindowMs: 2000, notable: () => true });
-      expect(expected).toBeCloseTo(1 + 0.19 * (0 - 1));
-    });
-
-    it("always learns in full when no window is set", async () => {
-      const { expected, trace } = await learnFrom(0, null);
-      expect(expected).toBeCloseTo(0.81);
-      expect(trace.learnedOutsideWindow).toBeUndefined();
+    it("always learns in full when the effect is off", async () => {
+      const { expected, episode } = await learnFrom(1.03);
+      expect(expected).toBeCloseTo(1 + 0.19 * 0.03);
+      expect(episode.attention).toBeUndefined();
     });
   });
 

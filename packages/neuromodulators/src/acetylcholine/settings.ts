@@ -18,8 +18,8 @@ export interface FocusSettings {
   consolidation: number;
   /** Effect e: spotting something the bot was looking for is a cue to act on it at once. */
   cuePulse: number;
-  /** Effect f: skill values are only fully updated shortly after a notable event. */
-  learningWindow: number;
+  /** Effect f: how fast a run is learned from goes by how surprising it was (see attentionTo). */
+  surpriseLearning: number;
 }
 
 export const FOCUS_MIN = 0.05;
@@ -34,10 +34,10 @@ export const DEFAULT_FOCUS: FocusSettings = {
   memoryWrite: 1,
   consolidation: 1,
   cuePulse: 1,
-  learningWindow: 1,
+  surpriseLearning: 1,
 };
 
-const EFFECTS = ["sensesVsMemory", "attention", "memoryWrite", "consolidation", "cuePulse", "learningWindow"] as const;
+const EFFECTS = ["sensesVsMemory", "attention", "memoryWrite", "consolidation", "cuePulse", "surpriseLearning"] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function focusProblem(s: FocusSettings): string | null {

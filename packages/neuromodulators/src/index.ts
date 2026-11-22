@@ -23,5 +23,5 @@ export * from "./noradrenaline/signals.js";
 export { createAttention, NEUTRAL_BUDGET, type Attention, type AttentionBudget } from "./acetylcholine/attention.js";
 export { createCuePulse } from "./acetylcholine/cue-pulse.js";
 export { createFocus, CUE_SIGNAL, FOCUS_SIGNAL, LOW_FOCUS, trustOf } from "./acetylcholine/focus.js";
-export { createFocusRegion, type FocusInput } from "./acetylcholine/focus-region.js";
+export { createFocusRegion, predictionsFailing, type FocusInput } from "./acetylcholine/focus-region.js";
 export { DEFAULT_FOCUS, focusProblem, type FocusSettings } from "./acetylcholine/settings.js";

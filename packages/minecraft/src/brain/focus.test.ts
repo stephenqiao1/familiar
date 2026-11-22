@@ -1,30 +1,16 @@
-import type { Skill } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { createMemory } from "@familiar/memory";
 import { describe, expect, it } from "vitest";
 import { fakeState, type StatePatch } from "../encode/state.test-helper.js";
-import { asleep, darkness, moved, nightOrEnclosed, noisy, task, unfamiliarPlace, watchedThings } from "./focus.js";
+import { asleep, moved, playerFocus, unfamiliarPlace, watchedThings } from "./focus.js";
 
 function workspace(patch: StatePatch = {}, running?: string) {
   const store = createWorkspace();
   store.update(fakeState(patch), running ? { skill: running, target: undefined, startedAt: 0 } : null);
   return store;
 }
-const skill = (name: string, demanding = false): Skill<null> => ({ name, description: "", demanding, canRun: () => true, run: async () => ({ status: "done" }) });
 
 describe("player focus inputs", () => {
-  it("darkness rises as the light falls", () => {
-    expect(darkness.read(workspace().viewFor("a"), 0)).toBe(0);
-    expect(darkness.read(workspace({ time: { lightLevel: 0 } }).viewFor("a"), 0)).toBe(1);
-  });
-
-  it("night and closed-in spaces each add", () => {
-    const read = (patch: StatePatch) => nightOrEnclosed.read(workspace(patch).viewFor("a"), 0);
-    expect(read({})).toBe(0);
-    expect(read({ time: { isNight: true } })).toBe(0.5);
-    expect(read({ time: { isNight: true }, self: { enclosed: true } })).toBe(1);
-  });
-
   it("an unfamiliar place raises focus; a well-known one lowers it", () => {
     const memory = createMemory();
     const input = unfamiliarPlace(memory);
@@ -37,28 +23,19 @@ describe("player focus inputs", () => {
     expect(memory.entries().memories[0]!.strength).toBe(0.3);
   });
 
-  it("noisy: two medium surprises within two minutes raise focus; big or small ones do not count", () => {
+  it("failing predictions raise focus, holding ones lower it: the surprise of each run that ends is the evidence", async () => {
     const store = workspace();
-    const input = noisy();
+    const [, surprised] = playerFocus(createMemory());
     const feel = async (surprise: number, seconds: number) => {
       await new Promise((resolve) => setTimeout(resolve, 2)); // signals are told apart by when they were set
       store.viewFor("dopamine").setSignal("surprise", surprise);
-      return input.read(store.viewFor("a"), seconds * 1000);
+      return surprised!.read(store.viewFor("a"), seconds * 1000);
     };
-    return (async () => {
-      expect(await feel(0.4, 0)).toBe(0);
-      expect(await feel(0.9, 10)).toBe(0);
-      expect(await feel(0.5, 20)).toBe(1);
-      expect(await feel(0, 200)).toBe(0); // they have aged out
-    })();
-  });
-
-  it("task: a demanding skill raises focus; rest or nothing lowers it", () => {
-    const input = task([skill("attack", true), skill("go_to")]);
-    expect(input.read(workspace({}, "attack").viewFor("a"), 0)).toBe(1);
-    expect(input.read(workspace({}, "go_to").viewFor("a"), 0)).toBe(0);
-    expect(input.read(workspace({}, "idle").viewFor("a"), 0)).toBe(-1);
-    expect(input.read(workspace().viewFor("a"), 0)).toBe(-1);
+    expect(surprised!.read(store.viewFor("a"), 0)).toBe(0); // no run has ended: no evidence either way
+    expect(await feel(0.8, 0)).toBe(1);
+    expect(await feel(0.02, 10)).toBeGreaterThan(0); // one run as expected after a bad miss: still wary
+    expect(await feel(0.02, 20)).toBeLessThan(0);
+    expect(await feel(0.02, 30)).toBeLessThan(-0.5); // they keep holding: assume
   });
 });
 

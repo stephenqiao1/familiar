@@ -112,8 +112,6 @@ import { createInstinctRegion } from "@familiar/region-instinct";
 import { createPrefrontalRegion } from "@familiar/region-prefrontal";
 import { createReflexRegion, REFLEX_SIGNAL } from "@familiar/region-reflex";
 
-/** How long a learning window stays open after a notable event. */
-const LEARNING_WINDOW_MS = 2000;
 /** Alarm below this counts as calm enough to consolidate memories. */
 const CALM_ALARM = 0.2;
 /** The alarm level at which a reflex's gain is exactly 1 (0.6 + 0.8 × 0.5). */
@@ -254,7 +252,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       spoken: (ws) => up(ws, REFLEX_SIGNAL) || level(ws, STARTLE_SIGNAL) > FULL || up(ws, LOADED_SIGNAL),
     }), //                                                                                  layer 0, every tick
     createFocusRegion({
-      inputs: playerFocus(memory, skills),
+      inputs: playerFocus(memory),
       settings: focus,
       asleep,
       moved,
@@ -270,7 +268,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       // A skill that lists no body parts (idle) is rest; one that does not say uses the whole body.
       usesBody: (name) => skills.find((s) => s.name === name)?.parts?.length !== 0,
       // A learning window opens on a notable reward, an alarm jump or a cue.
-      ...(focus.learningWindow > 0 ? { learningWindow: { ms: LEARNING_WINDOW_MS, notable: (ws: Workspace) => up(ws, ALARM_JUMP_SIGNAL) || up(ws, CUE_SIGNAL) } } : {}),
+      surpriseLearning: focus.surpriseLearning,
     }), //                                                                                  layer 0, every tick
     createNoradrenalineRegion({
       // Alarm is read from the same needs; search from whether a pressing one is being answered.
@@ -344,14 +342,14 @@ export function createPlayerDopamine(parts: {
   personality: DopaminePersonality;
   /** The skills that would head toward a thing right now. */
   skillsToward(thing: Thing): string[];
-  /** Learn in full only for `ms` after a notable event. Default: always learn in full. */
-  learningWindow?: { ms: number; notable(ws: Workspace): boolean };
+  /** How far the size of a surprise sets how fast it is learned from (0 to 1). Default: 0 (always in full). */
+  surpriseLearning?: number;
   /** Asleep: cues propose nothing. Default: never. */
   asleep?(ws: Workspace): boolean;
   /** Whether a skill uses any part of the body: time on one that does not is rest, not effort. Default: every skill does. */
   usesBody?(skill: string): boolean;
 }): Region {
-  const { scorebook, novelty, personality, learningWindow } = parts;
+  const { scorebook, novelty, personality } = parts;
   // Memory of places: what it has learned about and cannot sense now, costed by the walk there.
   const remembered = rememberedThings(() => scorebook.things(), personality.wastedEffort);
   return createDopamineRegion({
@@ -368,7 +366,7 @@ export function createPlayerDopamine(parts: {
     cueThingsOf: (state) => [...approachableThings(state), ...remembered(state)],
     skillsToward: parts.skillsToward,
     ...(parts.asleep ? { asleep: parts.asleep } : {}),
-    ...(learningWindow ? { learningWindowMs: learningWindow.ms, notable: learningWindow.notable } : {}),
+    ...(parts.surpriseLearning === undefined ? {} : { surpriseLearning: parts.surpriseLearning }),
   });
 }
 

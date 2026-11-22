@@ -4,10 +4,40 @@ import { createCuePulse } from "./cue-pulse.js";
 import { createFocus, CUE_SIGNAL, FOCUS_SIGNAL, LOW_FOCUS } from "./focus.js";
 import type { FocusSettings } from "./settings.js";
 
-/** One thing that moves focus: above 0 pushes it up (unreliable, demanding), below 0 pulls it down (routine, rest). From -1 to 1. */
+/** One thing that moves focus: above 0 pushes it up (what the bot knows is not to be trusted here), below 0 pulls it down (it is). From -1 to 1. */
 export interface FocusInput {
   name: string;
   read(ws: Workspace, now: number): number;
+}
+
+/** A run this surprising counts as a prediction that failed outright. */
+const FAILED_AT = 0.5;
+/** What the bot last saw of its predictions counts for less as it ages: half as much after this long. */
+const EVIDENCE_HALF_LIFE_MS = 120_000;
+
+/**
+ * How well the bot's predictions have been holding: each run that ends says how far the outcome
+ * was from what was expected (`surpriseOf`, read once per run). Up while they are failing
+ * (look closely, learn this now), down while they hold (assume, as usual). Recent runs count
+ * most, and with no run lately there is no evidence either way (0).
+ */
+export function predictionsFailing(surpriseOf: (ws: Workspace) => { size: number; at: number } | null): FocusInput {
+  let seenAt = -1;
+  let failing = 0;
+  let lastAt: number | null = null;
+  return {
+    name: "predictions_failing",
+    read(ws, now) {
+      const surprise = surpriseOf(ws);
+      if (surprise && surprise.at !== seenAt && surprise.size > 0) {
+        seenAt = surprise.at;
+        const size = Math.min(1, surprise.size / FAILED_AT);
+        failing = lastAt === null ? size : (failing + size) / 2;
+        lastAt = now;
+      }
+      return lastAt === null ? 0 : 0.5 ** ((now - lastAt) / EVIDENCE_HALF_LIFE_MS) * (2 * failing - 1);
+    },
+  };
 }
 
 export interface FocusOptions {

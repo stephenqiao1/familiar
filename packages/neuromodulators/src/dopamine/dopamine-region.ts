@@ -3,7 +3,7 @@ import { aimAt, cueProposals, type Thing } from "./cues.js";
 import { aimOf, createEpisodeTracker, type EndedEpisode } from "./episodes.js";
 import { createMood } from "../mood.js";
 import { checkRules, needLevels, pressingNow, type LoggedReward, type RewardMoment, type RewardRule } from "./rewards.js";
-import { createScorebook, type Scorebook } from "./scorebook.js";
+import { type Aim, createScorebook, type Scorebook } from "./scorebook.js";
 import { effortOf, reliefIsTelling, reliefOf, retryAfter, trustAfter, withTheRest, type NeedLevels } from "./wanting.js";
 import { WASTED_EFFORT_RULE, wastedEffort } from "./wasted.js";
 import { BAD_SURPRISE_SIGNAL, createTonicDopamine, DOPAMINE_SIGNAL, NOVELTY_SIGNAL, RESTING_DA, REWARD_SIGNAL, SURPRISE_SIGNAL, WANT_SIGNAL } from "./tonic.js";
@@ -17,13 +17,12 @@ export interface DopamineOptions {
   /** How far each surprise moves the scorebook. Default: 0.1. */
   learningRate?: number;
   /**
-   * How long a learning window stays open after a notable event, in ms. With a window, skill values
-   * are fully updated only inside one and much less outside: the window says when to learn, the
-   * surprise how much. Default: no window (always learn in full).
+   * How far the size of a surprise sets how fast it is learned from (0 to 1). At 1 a run that
+   * went about as expected moves the scorebook a fifth as far as the usual step, and one that
+   * was a real surprise the whole step (see attentionTo): noise is shrugged off, news is taken
+   * in. Default: 0 (always learn in full).
    */
-  learningWindowMs?: number;
-  /** Something else notable happened this tick (e.g. an alarm jump or a cue): it opens a window too. Default: never. */
-  notable?(ws: Workspace): boolean;
+  surpriseLearning?: number;
   /**
    * The work the body did between two ticks, in reward units: what that stretch costs if the
    * running skill comes to nothing (see wastedEffort). Default: none, so nothing is ever wasted.
@@ -53,10 +52,18 @@ export interface DopamineOptions {
   layer?: number;
 }
 
-/** A reward at least this big (good or bad) is a notable event: it opens a learning window. */
-const NOTABLE_REWARD = 0.1;
-/** Outside a learning window, skill values move this much of the usual step. */
-const OUTSIDE_WINDOW = 0.2;
+/** A run that went exactly as expected is learned from at this share of the usual step... */
+const LEAST_ATTENTION = 0.2;
+/** ...rising to the whole step for a surprise this big or bigger. */
+const FULL_ATTENTION_AT = 0.3;
+
+/**
+ * How much of the usual learning step a surprise of this size gets (0.2 to 1). The surprise
+ * itself says how much there is to learn: nothing else has to have happened first.
+ */
+export function attentionTo(surprise: number): number {
+  return LEAST_ATTENTION + (1 - LEAST_ATTENTION) * Math.min(1, Math.abs(surprise) / FULL_ATTENTION_AT);
+}
 
 /** The scorebook's name for a situation by itself, whatever skill is running: what tends to follow from being in it. */
 export const SITUATION = "(situation)";
@@ -121,10 +128,12 @@ export function createDopamineRegion(options: DopamineOptions): Region {
   let levels: NeedLevels = {};
   const seen = new WeakSet<SkillEvent>();
 
-  /** Teaches the scorebook from one ended episode, also under the kind of thing it was aimed at. */
-  /** The learning step right now: full inside a learning window (or with none), reduced outside. */
-  let step = learningRate;
-  let windowUntil = -Infinity;
+  const surpriseLearning = Math.min(1, Math.max(0, options.surpriseLearning ?? 0));
+  /** Learns one outcome at the step its own surprise calls for; returns the surprise and the share of the usual step it got. */
+  function learnAt(situation: string, skill: string, outcome: number, aim: Aim | undefined) {
+    const attention = 1 - surpriseLearning * (1 - attentionTo(outcome - scorebook.get(situation, skill, aim).expected));
+    return { surprise: scorebook.learn(situation, skill, outcome, learningRate * attention, aim), attention };
+  }
 
   /** Wants that are waiting to be tried again (see retryAfter), by skill and thing, and until when. */
   const heldUntil = new Map<string, number>();
@@ -150,7 +159,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       if (got === 0 && expected === 0) continue;
       const relief = cut ? withTheRest(got, expected, trust) : got;
       if (!reliefIsTelling(atStart, relief, expected)) continue;
-      scorebook.learn(e.situation, reliefOf(e.skill, need), relief, step, aimOf(e));
+      learnAt(e.situation, reliefOf(e.skill, need), relief, aimOf(e));
       if (got !== 0) reliefs[need] = Math.round(got * 1000) / 1000;
     }
     return reliefs;
@@ -177,8 +186,8 @@ export function createDopamineRegion(options: DopamineOptions): Region {
     const reliefs = learnReliefs(e, now, cut, trust);
     // The work it took (a run cut short took at least what such runs usually take).
     const usualWork = scorebook.get(e.situation, effortOf(e.skill), aimOf(e)).expected;
-    if (e.effort > 0 || usualWork !== 0) scorebook.learn(e.situation, effortOf(e.skill), cut ? Math.max(e.effort, usualWork) : e.effort, step, aimOf(e));
-    const surprise = scorebook.learn(e.situation, e.skill, outcome, step, aimOf(e));
+    if (e.effort > 0 || usualWork !== 0) learnAt(e.situation, effortOf(e.skill), cut ? Math.max(e.effort, usualWork) : e.effort, aimOf(e));
+    const { surprise, attention } = learnAt(e.situation, e.skill, outcome, aimOf(e));
     mood.feel(surprise, before?.timestamp ?? 0);
     return {
       ...e,
@@ -187,6 +196,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       ...(shift !== 0 ? { shift } : {}),
       ...(unfinished > 0 ? { unfinished } : {}),
       ...(cut && trust < 1 ? { trust } : {}),
+      ...(attention < 1 ? { attention: Math.round(attention * 100) / 100 } : {}),
       ...(wasted > 0 ? { wasted } : {}),
       ...(Object.keys(reliefs).length ? { reliefs } : {}),
       ...scorebook.get(e.situation, e.skill, aimOf(e)),
@@ -242,16 +252,12 @@ export function createDopamineRegion(options: DopamineOptions): Region {
         fatal,
         about,
       });
-      // Effort that came to nothing is a reward like the rest: it opens a learning window and lowers DA.
+      // Effort that came to nothing is a reward like the rest: it lowers DA.
       for (const e of ended) {
         const wasted = wasteOf(e);
         if (wasted > 0) rewards.push(wastedReward(e, wasted));
       }
       const total = rewards.reduce((sum, r) => sum + r.amount, 0);
-      const opened = options.learningWindowMs !== undefined && (Math.abs(total) >= NOTABLE_REWARD || fatal || (options.notable?.(ws) ?? false));
-      if (opened) windowUntil = after.timestamp + options.learningWindowMs!;
-      const inWindow = options.learningWindowMs === undefined || after.timestamp <= windowUntil;
-      step = learningRate * (inWindow ? 1 : OUTSIDE_WINDOW);
       const blamed = fatal && !credited && lastEnded && after.timestamp - lastEnded.at <= BLAME_WINDOW_MS ? learn({ ...lastEnded.episode, fatal: true }, there, now) : null;
       const da = tonic.update(total, after.timestamp);
       ws.setSignal(DOPAMINE_SIGNAL, da);
@@ -282,8 +288,6 @@ export function createDopamineRegion(options: DopamineOptions): Region {
           rewards,
           total,
           mood: mood.level(after.timestamp),
-          ...(opened ? { learningWindow: "opened" } : {}),
-          ...(learned.length && !inWindow ? { learnedOutsideWindow: true } : {}),
           ...(learned.length ? { episodes: learned } : {}),
           ...(blamed ? { blamedForDeath: blamed } : {}),
           ...(cues.length ? { cues } : {}),

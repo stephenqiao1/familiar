@@ -38,7 +38,7 @@
       "memoryWrite": 1,
       "consolidation": 1,
       "cuePulse": 1,
-      "learningWindow": 1
+      "surpriseLearning": 1
     },
     "brainstem": {
       "bravery": 0.5,

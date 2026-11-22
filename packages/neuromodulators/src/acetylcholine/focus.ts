@@ -5,14 +5,15 @@ export const FOCUS_SIGNAL = "focus";
 /** 1 on the tick a cue fired: something the bot was looking for came into view. */
 export const CUE_SIGNAL = "cue";
 /** How far one input at full strength moves the level focus heads for. */
-const INPUT_WEIGHT = 0.25;
+const INPUT_WEIGHT = 0.5;
 /** The level at which consolidation may run, and below which only important events are recorded. */
 export const LOW_FOCUS = 0.2;
 
 /**
- * Focus (0.05 to 0.95), modelled on acetylcholine: "trust your senses and learn this now". It
- * heads for the resting level plus its inputs (unreliable or demanding conditions push it up,
- * routine and rest pull it down) with the given time constant. Asleep, it is forced to 0.05.
+ * Focus (0.05 to 0.95), modelled on acetylcholine: "trust your senses and learn this now", as
+ * against "assume what you already know". It heads for the resting level plus its inputs (what
+ * the bot knows not holding up, or there being little of it, push it up; predictions holding in
+ * a place it knows pull it down) with the given time constant. Asleep, it is forced to 0.05.
  */
 export interface Focus {
   /** Feeds the inputs' sum at time `at` (ms); returns the new level. */
