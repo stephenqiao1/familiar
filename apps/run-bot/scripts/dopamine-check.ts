@@ -179,7 +179,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     const { ticks } = await play(undefined, async () => {
       await starveTo(8);
       rcon(`damage ${BOT} 8`);
-      rcon("summon husk 63 151 40 {NoAI:1b}");
+      rcon("summon husk 63 151 40 {IsBaby:0b,NoAI:1b}");
       await sleep(4000);
       killedAt = Date.now();
       rcon(`kill ${BOT}`);
@@ -383,7 +383,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     const { ticks } = await play(undefined, async ({ say }) => {
       // A husk in a glass box 2 blocks off: it cannot reach the bot, and the bot does nothing about it.
       rcon("fill 62 151 39 64 153 41 glass hollow");
-      rcon("summon husk 63.5 151 40.5 {NoAI:1b}");
+      rcon("summon husk 63.5 151 40.5 {IsBaby:0b,NoAI:1b}");
       say("do idle");
       await sleep(5000);
       killedAt = Date.now();
@@ -540,14 +540,14 @@ scenes.threat_first = async () => {
     await sleep(8000); // short again, it fetches its bread by itself first
     // A husk that does not move, in a glass box 3 blocks off: it cannot get to the bot.
     rcon("fill 62 151 39 64 153 41 glass hollow");
-    rcon("summon husk 63.5 151 40.5 {NoAI:1b}");
+    rcon("summon husk 63.5 151 40.5 {IsBaby:0b,NoAI:1b}");
     await shortAgain();
     caged = Date.now();
     await sleep(40_000); // an alarm drops the goal that wants bread: the planner has to set it again first
     // The same husk with nothing between it and the bot.
     rcon("kill @e[type=husk]");
     rcon("fill 62 151 39 64 153 41 air");
-    rcon("summon husk 63.5 151 40.5 {NoAI:1b}");
+    rcon("summon husk 63.5 151 40.5 {IsBaby:0b,NoAI:1b}");
     await shortAgain();
     free = Date.now();
     await sleep(10_000);
@@ -579,7 +579,7 @@ const threatWithJev = (attacks: boolean) => async (): Promise<Row> => {
       await learnChest(say, 2);
       await sleep(8000); // short again, it fetches its bread first
       // A husk that does not move, 3 blocks off between the bot and the chest, with nothing in the way.
-      rcon(`summon husk 63.5 151 40.5${attacks ? "" : " {NoAI:1b}"}`); // no trailing space: the server refuses the command
+      rcon(`summon husk 63.5 151 40.5 {IsBaby:0b${attacks ? "" : ",NoAI:1b"}}`); // always an adult: a baby is fast enough to count as looming
       await shortAgain();
       free = Date.now();
       await sleep(15_000);

@@ -8,18 +8,15 @@ import {
   curiosity,
   effortSpent,
   describeSituation,
-  isShock,
   leaningOf,
   menuSkills,
   moved,
   placeOf,
-  falseAlarm,
-  playerAlarms,
+  startleOf,
   playerBrainstem,
   playerFocus,
   playerInstinct,
   playerMemories,
-  playerOutlook,
   createPlayerReflexes,
   DEFAULT_MEDULLA,
   medullaUrges,
@@ -42,7 +39,6 @@ import {
   situationOf,
   skillsToward,
   thingsInView,
-  threatPresent,
   watchedThings,
   type Storage,
 } from "@familiar/minecraft";
@@ -52,12 +48,14 @@ import {
   aimAt,
   brakeFactor,
   holdNow,
+  needsOf,
   pressingNow,
   reliefOf,
   WANT_SIGNAL,
   createDopamineRegion,
   createFocusRegion,
   createNoradrenalineRegion,
+  gettingNowhere,
   CUE_SIGNAL,
   createPatienceRegion,
   DOPAMINE_SIGNAL,
@@ -275,9 +273,10 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       ...(focus.learningWindow > 0 ? { learningWindow: { ms: LEARNING_WINDOW_MS, notable: (ws: Workspace) => up(ws, ALARM_JUMP_SIGNAL) || up(ws, CUE_SIGNAL) } } : {}),
     }), //                                                                                  layer 0, every tick
     createNoradrenalineRegion({
-      triggers: playerAlarms(focus.noisyOrChanged > 0),
-      threatPresent,
-      allClear: falseAlarm,
+      // Alarm is read from the same needs; search from whether a pressing one is being answered.
+      needs: (ws) => needsOf(playerRewards, ws.state),
+      startle: startleOf,
+      searchInputs: [gettingNowhere(unanswered, (_ws, now) => persistence.status(now)?.progress ?? 0)],
       settings: noradrenaline,
       // Moved somewhere else all at once: whatever the plan was, the planner should look again.
       ...(posture.displaced > 0 ? { replanWhen: (ws: Workspace) => wasDisplaced(ws.state) } : {}),
@@ -302,10 +301,9 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL)),
     }), //                                                                                  layer 1, every tick
     createPatienceRegion({
-      inputs: playerOutlook,
+      // The outlook is worked out from the same needs dopamine is paid for.
+      needs: (ws) => needsOf(playerRewards, ws.state),
       settings: patience,
-      // Sudden danger cuts patience: an alarm jump, or patience's own check when that link is off.
-      isShock: noradrenaline.patienceLink > 0 ? (_before, _after, ws) => up(ws, ALARM_JUMP_SIGNAL) : isShock,
       effects: () => ({ persistence: persistence.status(Date.now()) }),
     }), //                                                                                  layer 0, every tick
     createPrefrontalRegion({
@@ -328,6 +326,15 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const unknown = only.filter((name) => !all.some((r) => r.name === name));
   if (unknown.length) throw new Error(`Unknown region(s): ${unknown.join(", ")}. Use: ${all.map((r) => r.name).join(", ")}`);
   return all.filter((r) => only.includes(r.name));
+}
+
+/**
+ * How hard the worst unanswered need presses (0 to 1), for search: the ordinary needs as they
+ * press right now (silent while danger does: that is alarm's business), each by its weight.
+ */
+function unanswered(ws: Workspace): number {
+  const pressing = pressingNow(playerRewards, ws.state);
+  return Math.min(1, Math.max(0, ...needsOf(playerRewards, ws.state).filter((n) => n.rank === 0).map((n) => n.weight * (pressing[n.name] ?? 0))));
 }
 
 /** The player's dopamine region: every reward rule, the situation labels and cues, tuned by personality. */
@@ -374,7 +381,7 @@ export function patienceOf(ws: Pick<Workspace, "signals">, patience: PatienceSet
  * THE ARBITER: picks by urgency, nudged by what dopamine has learned about each skill in the
  * current situation (weighed by the current DA level). Patience adds a bonus for staying with the
  * running skill (smaller when search is high or the body has an urge, so switching gets easier)
- * and brakes risky skills. While something is wanted (a cue fired), each option of the deciding
+ * and holds back what has been learned to be costly (deciding layers only). While something is wanted (a cue fired), each option of the deciding
  * layers is weighed down by the worst need it would leave unmet (see holdNow): with a need
  * desperate, a running skill that does not serve it gives way to the thing that does. Reflexes
  * and the want itself are never weighed down, and with nothing on offer nothing changes.
@@ -395,14 +402,24 @@ export function createArbiter<Ctx>(parts: {
     const seen = thingsInView(state).find((t) => t.id === target);
     return seen ? aimAt(seen) : scorebook.things().find((t) => t.id === target);
   };
-  /** How much hold a deciding layer's option keeps while something is wanted: less, the more pressing the worst need it is not expected to relieve. */
-  const hold = (skill: string, ws: Workspace, { layer, action }: Candidate) => {
-    if (layer < 1 || !((ws.signals[WANT_SIGNAL]?.value ?? 0) > 0)) return 1;
+  /**
+   * What the modulators make of one option of the deciding layers (a reflex is never touched: 1).
+   *   Hold: while something is wanted, less the more pressing the worst need the option is not
+   *     expected to relieve.
+   *   Restraint: patience holds back (or, when low, lets loose) an option by how costly it has
+   *     been learned to be here, aimed at this. A skill marked risky starts as costly and one
+   *     not marked as harmless; what happens then moves both.
+   */
+  const modulated = (skill: string, ws: Workspace, { layer, action }: Candidate) => {
+    if (layer < 1) return 1;
     const target = "target" in action ? action.target : undefined;
     const [situation, aim] = [situationOf(ws.state), target === undefined ? undefined : aimOf(ws.state, target)];
-    return holdNow(pressingNow(playerRewards, ws.state), (need) => scorebook.get(situation, reliefOf(skill, need), aim).expected, personality.wanting);
+    const wanted = (ws.signals[WANT_SIGNAL]?.value ?? 0) > 0;
+    const hold = wanted ? holdNow(pressingNow(playerRewards, ws.state), (need) => scorebook.get(situation, reliefOf(skill, need), aim).expected, personality.wanting) : 1;
+    const costly = Math.min(1, Math.max(0, (risky.has(skill) ? 1 : 0) + scorebook.get(situation, skill, aim).cost - 1));
+    return hold * brakeFactor(patienceOf(ws, patience), patience.brake * costly);
   };
-  return createValueWeightedArbiter({
+  const arbiter = createValueWeightedArbiter({
     valueOf: (skill, ws) =>
       skillValue(scorebook.get(situationOf(ws.state), skill), ws.signals[DOPAMINE_SIGNAL]?.value ?? personality.restingDA),
     // A body that is asking for something loosens the hold of whatever is running: the stay bonus
@@ -411,6 +428,23 @@ export function createArbiter<Ctx>(parts: {
       (persistence?.stayBonus(skill, Date.now()) ?? 0) *
       switchMarginFactor(ws.signals[SWITCHING_SIGNAL]?.value ?? NEUTRAL_SEARCH) *
       (1 - (ws.signals[URGE_SIGNAL]?.value ?? 0)),
-    scaleOf: (skill, ws, candidate) => (risky.has(skill) ? brakeFactor(patienceOf(ws, patience), patience.brake) : 1) * hold(skill, ws, candidate),
+    scaleOf: modulated,
   });
+  // The running skill is always in the vote. A deciding layer is not asked every tick; while the
+  // one that chose the running skill says nothing, its choice stands as it was made, so the skill
+  // is not dropped for whatever else happens to speak. Once that layer speaks again, what it says counts.
+  let standing: Candidate | null = null;
+  return {
+    ...arbiter,
+    pick(candidates, ws) {
+      // A skill just given up on waits before a deciding layer may start it again (a reflex may at once).
+      candidates = candidates.filter((c) => !(c.layer >= 1 && "skill" in c.action && persistence?.heldBack(c.action.skill, Date.now())));
+      const kept = standing;
+      const silent = kept !== null && "skill" in kept.action && ws.current?.skill === kept.action.skill && !candidates.some((c) => c.region === kept.region);
+      const winner = arbiter.pick(silent ? [...candidates, kept] : candidates, ws);
+      const chosen = winner && [...candidates, ...(silent ? [kept] : [])].find((c) => c.region === winner.region && c.action === winner.action);
+      if (chosen && chosen.layer >= 1 && "skill" in chosen.action) standing = chosen === kept ? kept : { ...chosen, reason: `${chosen.reason} (still under way)` };
+      return winner;
+    },
+  };
 }

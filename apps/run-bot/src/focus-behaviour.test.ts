@@ -11,16 +11,14 @@ import {
   describeSituation,
   moved,
   placeOf,
-  playerAlarms,
   playerFocus,
   playerMemories,
   SCHEMA_VERSION,
-  threatPresent,
   watchedThings,
   withTrust,
   type MinecraftStateData,
 } from "@familiar/minecraft";
-import { createFocusRegion, createNoradrenalineRegion, DEFAULT_FOCUS, DEFAULT_NORADRENALINE, trustOf } from "@familiar/neuromodulators";
+import { createFocusRegion, DEFAULT_FOCUS, trustOf } from "@familiar/neuromodulators";
 import { describe, expect, it } from "vitest";
 
 const signal = new AbortController().signal;
@@ -162,31 +160,6 @@ describe("senses versus memory: a stale chest", () => {
     const { text, lookups } = plannerSees(0.8);
     expect(text).toContain("Storage: no chest opened yet, so their contents are unknown.");
     expect(lookups).toEqual([{ what: "chest pos:1,63,1", used: false }]);
-  });
-});
-
-describe("noisy or changed", () => {
-  /** Alarm after one surprise of this size, at this focus. */
-  async function alarmAfter(surprise: number, focus: number, byFocus = true) {
-    const store = createWorkspace();
-    const region = createNoradrenalineRegion({ triggers: playerAlarms(byFocus), threatPresent, settings: DEFAULT_NORADRENALINE });
-    for (const seconds of [0, 1]) {
-      store.update(state({}, seconds), null);
-      store.viewFor("acetylcholine").setSignal("focus", focus);
-      store.viewFor("dopamine").setSignal("bad_surprise", seconds === 1 ? surprise : 0);
-      await region.run(store.viewFor("noradrenaline"), signal);
-    }
-    return store.signals().alarm!.value;
-  }
-
-  it("the same surprise trips alarm at low focus and does not at high focus", async () => {
-    expect(await alarmAfter(0.5, 0.2)).toBeGreaterThan(0);
-    expect(await alarmAfter(0.5, 0.9)).toBe(0);
-  });
-
-  it("with the effect off, the old fixed bar applies whatever focus is", async () => {
-    expect(await alarmAfter(0.5, 0.2, false)).toBe(0);
-    expect(await alarmAfter(0.7, 0.9, false)).toBeGreaterThan(0);
   });
 });
 

@@ -40,6 +40,12 @@ export interface RewardRule {
    * vital need presses at all, a lesser one is silent: staying alive comes before stocking up.
    */
   rank?: number;
+  /**
+   * How much the need darkens the outlook when it is unmet (default 1). A need about the body
+   * right now counts in full; one about being provided for (tools, a stock of food) counts for
+   * less, since lacking it does not make the next minutes bad; a threat to life counts for more.
+   */
+  weight?: number;
 }
 
 /** A reward as logged: with its rule and need. */
@@ -60,18 +66,29 @@ export function checkRules(rules: RewardRule[], moment: RewardMoment) {
   return { rewards, errors };
 }
 
-/** How pressing each need is in a state, by rule name: every rule that reads a level. A rule that throws, or does not apply, is left out. */
-export function needLevels(rules: RewardRule[], state: State): Record<string, number> {
-  const levels: Record<string, number> = {};
-  for (const rule of rules) {
+/** One need as it stands in a state: how pressing it is (0 to 1), and how vital it is next to the others. */
+export interface Need {
+  name: string;
+  level: number;
+  rank: number;
+  weight: number;
+}
+
+/** Every need in a state: each rule that reads a level. A rule that throws, or does not apply, is left out. */
+export function needsOf(rules: RewardRule[], state: State): Need[] {
+  return rules.flatMap((rule) => {
     try {
       const level = rule.level?.(state);
-      if (typeof level === "number" && Number.isFinite(level)) levels[rule.name] = Math.min(1, Math.max(0, level));
+      return typeof level === "number" && Number.isFinite(level) ? [{ name: rule.name, level: Math.min(1, Math.max(0, level)), rank: rule.rank ?? 0, weight: rule.weight ?? 1 }] : [];
     } catch {
-      // The same failure is named in the trace when the rule is checked.
+      return []; // the same failure is named in the trace when the rule is checked
     }
-  }
-  return levels;
+  });
+}
+
+/** How pressing each need is in a state, by rule name. */
+export function needLevels(rules: RewardRule[], state: State): Record<string, number> {
+  return Object.fromEntries(needsOf(rules, state).map((n) => [n.name, n.level]));
 }
 
 /**
@@ -82,8 +99,6 @@ export function needLevels(rules: RewardRule[], state: State): Record<string, nu
  * use `needLevels` for those.
  */
 export function pressingNow(rules: RewardRule[], state: State): Record<string, number> {
-  const levels = needLevels(rules, state);
-  const rank = (name: string) => rules.find((r) => r.name === name)?.rank ?? 0;
-  const silenced = (name: string) => Object.keys(levels).some((other) => rank(other) > rank(name) && levels[other]! > 0);
-  return Object.fromEntries(Object.entries(levels).map(([name, level]) => [name, silenced(name) ? 0 : level]));
+  const needs = needsOf(rules, state);
+  return Object.fromEntries(needs.map((n) => [n.name, needs.some((other) => other.rank > n.rank && other.level > 0) ? 0 : n.level]));
 }

@@ -1,131 +1,23 @@
-import type { State } from "@familiar/contracts";
-import { BAD_SURPRISE_SIGNAL, BIG_SURPRISE, changedThreshold, FOCUS_SIGNAL, type AlarmTrigger } from "@familiar/neuromodulators";
-import { LOOMING_SIGNAL, STARTLE_FROM, STARTLE_SIGNAL } from "@familiar/region-brainstem";
-import { couldHarm } from "../defence/size-up.js";
+import type { State, Workspace } from "@familiar/contracts";
+import { STARTLE_SIGNAL } from "@familiar/region-brainstem";
 import { pressingThreat } from "./defence.js";
-import { defenceOf, minecraftDataOf } from "./read-state.js";
+import { minecraftDataOf } from "./read-state.js";
 
-// What raises the player's alarm. Each trigger says how much to add right now (0 to 1).
-// Add or remove one: write it here and edit playerAlarms. Every number is a first guess.
+// What the player's alarm reads beside its needs. Alarm itself follows the needs (see the
+// noradrenaline region): a mob appearing, a blow or something rushing in is a need suddenly
+// worse. What no need shows (a bang, a blow out of nowhere) reaches it as the body's startle.
 
-const MAX_HEALTH = 20;
-/** Losing a third of full health in one tick is a full alarm; half a heart is a small one. */
-const DAMAGE_FOR_FULL_ALARM = MAX_HEALTH / 3;
-/** Enough on its own to count as a sudden jump (more than 0.5), so the bot drops what it was doing. */
-const HOSTILE_APPEARED = 0.6;
-/** A startle of full size adds this (smaller ones in proportion). */
-const STARTLED = 0.4;
-/** Signals set this close together were set on the same tick. */
-const SAME_TICK_MS = 100;
-/** Something looming at full strength adds this. */
-const LOOMED = 0.6;
-/** A mob seen as a threat within this long is the same threat coming back, not a new one. */
-const SAME_THREAT_MS = 30_000;
-
-/** Damage taken since the last tick, scaled by how much. */
-export const damage: AlarmTrigger = {
-  name: "damage",
-  check({ before, after }) {
-    const [a, b] = [minecraftDataOf(before), minecraftDataOf(after)];
-    if (!a || !b) return 0;
-    return Math.min(1, Math.max(0, a.self.health - b.self.health) / DAMAGE_FOR_FULL_ALARM);
-  },
-};
+/** The body's startle this tick, 0 to 1. */
+export const startleOf = (ws: Workspace): number => ws.signals[STARTLE_SIGNAL]?.value ?? 0;
 
 /**
- * A threat that can get to the bot starts coming for it when none was. The same mob stepping out of range and back in
- * within half a minute is not a new threat.
- */
-export function hostileAppeared(): AlarmTrigger {
-  const lastSeen = new Map<string, number>();
-  return {
-    name: "hostile_appeared",
-    check({ before, after }) {
-      const [a, b] = [minecraftDataOf(before), minecraftDataOf(after)];
-      const threat = b && pressingThreat(b);
-      if (!a || !threat) return 0;
-      const known = after.timestamp - (lastSeen.get(threat.id) ?? -Infinity) <= SAME_THREAT_MS;
-      lastSeen.set(threat.id, after.timestamp);
-      return !pressingThreat(a) && !known ? HOSTILE_APPEARED : 0;
-    },
-  };
-}
-
-/**
- * A big bad surprise: a skill's outcome fell well short of what dopamine expected. A pleasant
- * surprise does not count: escaping a zombie, or finding something new, should not alarm the bot.
- * With `byFocus`, how big counts as "the world changed" depends on focus: the surprise must be
- * above focus / (0.5 + focus). Somewhere known to be chaotic focus is high, so ordinary surprises
- * don't keep tripping the alarm; somewhere calm and familiar a smaller one is enough.
- */
-export function bigSurprise(byFocus = false): AlarmTrigger {
-  return {
-    name: "big_surprise",
-    check({ ws }) {
-      const surprise = ws.signals[BAD_SURPRISE_SIGNAL]?.value ?? 0;
-      const focus = ws.signals[FOCUS_SIGNAL]?.value;
-      const changed = byFocus && focus !== undefined ? surprise > changedThreshold(focus) : surprise >= BIG_SURPRISE;
-      return changed ? surprise / 2 : 0;
-    },
-  };
-}
-
-/**
- * The brainstem startled this tick: adds 0.4 × the startle's size. A startle and the thing that
- * set it off are one event, so where that thing has an alarm trigger of its own (a hit, a mob
- * appearing, something looming) alarm takes the larger of the two, not their sum.
- */
-export const startled: AlarmTrigger = {
-  name: "startle",
-  check: ({ ws }) => STARTLED * (ws.signals[STARTLE_SIGNAL]?.value ?? 0),
-  sameCauseAs({ ws }) {
-    const startle = ws.signals[STARTLE_SIGNAL];
-    if (!startle || startle.value <= 0) return null;
-    const from = Object.entries(ws.signals).find(([name, signal]) => name.startsWith(STARTLE_FROM) && signal.value > 0 && Math.abs(signal.at - startle.at) <= SAME_TICK_MS);
-    return from ? from[0].slice(STARTLE_FROM.length) : null;
-  },
-};
-
-/** Something is coming at the bot fast (the colliculus's `looming` signal): once, as it starts. Enough on its own to count as a sudden jump. */
-export function looming(): AlarmTrigger {
-  let was = 0;
-  return {
-    name: "looming",
-    check({ ws }) {
-      const level = ws.signals[LOOMING_SIGNAL]?.value ?? 0;
-      const rose = level > 0 && was === 0;
-      was = level;
-      return rose ? LOOMED * level : 0;
-    },
-  };
-}
-
-// TODO(alarm): a hostile mob targeting the bot (the state doesn't say who a mob is after).
-// TODO(alarm): another player being attacked (not sensed yet). Explosions and thunder reach alarm through startle.
-
-/** Everything that raises the player's alarm. `surpriseByFocus`: let focus set how big a surprise counts. */
-export function playerAlarms(surpriseByFocus = false): AlarmTrigger[] {
-  return [damage, hostileAppeared(), startled, looming(), bigSurprise(surpriseByFocus)];
-}
-
-/**
- * A threat is present (alarm does not fade): one that can get to the bot, or hit it from where
- * it is, and is coming or on it. One that cannot reach the bot, or has not noticed it, does not hold alarm up.
+ * A threat is present: one that can get to the bot, or hit it from where it is, and is coming or
+ * on it. One that cannot reach the bot, or has not noticed it, does not count.
  */
 export function threatPresent(state: State): boolean {
   const data = minecraftDataOf(state);
   return data !== null && pressingThreat(data) !== null;
 }
 
-/**
- * The all-clear: a threat that was pressing (thought able to get to the bot, and coming or on it)
- * is still there but has been found unable to harm it, and nothing else presses. This is the
- * route check's answer coming back "it cannot reach you" after the bot had acted on a guess.
- */
-export function falseAlarm(before: State, after: State): boolean {
-  const [a, b] = [minecraftDataOf(before), minecraftDataOf(after)];
-  const was = a && pressingThreat(a);
-  if (!was || !b || pressingThreat(b)) return false;
-  const now = defenceOf(b).threats.find((t) => t.id === was.id);
-  return now !== undefined && !couldHarm(now);
-}
+// TODO(alarm): a hostile mob targeting the bot (the state doesn't say who a mob is after).
+// TODO(alarm): another player being attacked (not sensed yet). Explosions and thunder reach alarm through startle.

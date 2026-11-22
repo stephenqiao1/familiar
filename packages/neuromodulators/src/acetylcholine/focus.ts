@@ -36,11 +36,6 @@ export function createFocus(settings: Pick<FocusSettings, "resting" | "timeConst
   };
 }
 
-/** Effect g: how big a surprise must be to count as "the world changed" at this focus. */
-export function changedThreshold(focus: number): number {
-  return focus / (0.5 + focus);
-}
-
 /** Effect a: trust in something remembered `ageMs` ago; it halves every half-life. */
 export function trustOf(ageMs: number, halfLifeMs: number): number {
   return 0.5 ** (Math.max(0, ageMs) / halfLifeMs);

@@ -15,6 +15,8 @@
     "skill-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/primitive-check.ts",
     "demo": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/demo.ts",
     "dopamine-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/dopamine-check.ts",
+    "serotonin-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/serotonin-check.ts",
+    "noradrenaline-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/noradrenaline-check.ts",
     "medulla-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/medulla-check.ts",
     "posture-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/posture-check.ts",
     "colliculus-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/colliculus-check.ts",

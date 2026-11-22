@@ -228,7 +228,7 @@ const scenes: Record<string, () => Promise<Row>> = {
         await sleep(75_000);
         rcon("difficulty easy");
         huskAt = Date.now();
-        rcon("summon husk 66.5 151 40.5");
+        rcon("summon husk 66.5 151 40.5 {IsBaby:0b}");
         await sleep(6000);
         rcon("kill @e[type=husk]");
       },
@@ -265,7 +265,7 @@ const scenes: Record<string, () => Promise<Row>> = {
         await sleep(8000);
         rcon("difficulty easy");
         swarmAt = Date.now();
-        for (const at of ["64.5 151 40.5", "56.5 151 40.5", "60.5 151 43.5"]) rcon(`summon husk ${at}`);
+        for (const at of ["64.5 151 40.5", "56.5 151 40.5", "60.5 151 43.5"]) rcon(`summon husk ${at} {IsBaby:0b}`);
         await sleep(15_000);
         rcon("kill @e[type=husk]");
       },

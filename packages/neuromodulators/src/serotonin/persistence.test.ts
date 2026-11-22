@@ -1,6 +1,6 @@
 import type { SkillEvent } from "@familiar/contracts";
 import { describe, expect, it } from "vitest";
-import { createPersistence, MAX_STAY_BONUS } from "./persistence.js";
+import { createPersistence, MAX_STAY_BONUS, PROGRESS_WINDOW_MS } from "./persistence.js";
 
 const BASE = 120_000;
 const event = (skill: string, type: SkillEvent["type"], timestamp: number): SkillEvent => ({ skill, type, timestamp });
@@ -42,14 +42,59 @@ describe("createPersistence", () => {
     expect(persistence.giveUpReason(2 * BASE - 1000)).not.toBeNull();
   });
 
-  it("protects the running skill with a bonus that fades as its time runs out", () => {
+  it("protects the running skill while it is getting somewhere: the bonus fades within seconds of no progress", () => {
     const { persistence, start } = setup(0.5);
     expect(persistence.stayBonus("go_to", 0)).toBe(0);
     start("go_to");
     expect(persistence.stayBonus("go_to", 0)).toBe(MAX_STAY_BONUS);
-    expect(persistence.stayBonus("go_to", BASE / 2)).toBeCloseTo(MAX_STAY_BONUS / 2);
-    expect(persistence.stayBonus("go_to", BASE)).toBe(0);
+    expect(persistence.stayBonus("go_to", PROGRESS_WINDOW_MS / 2)).toBeCloseTo(MAX_STAY_BONUS / 2);
+    expect(persistence.stayBonus("go_to", PROGRESS_WINDOW_MS)).toBe(0);
     expect(persistence.stayBonus("idle", 0)).toBe(0);
+    // It gets somewhere: protected in full again, and not given up on any sooner.
+    persistence.progress(PROGRESS_WINDOW_MS);
+    expect(persistence.stayBonus("go_to", PROGRESS_WINDOW_MS)).toBe(MAX_STAY_BONUS);
+    expect(persistence.status(PROGRESS_WINDOW_MS)).toMatchObject({ progress: 1, waitedSeconds: 0 });
+  });
+
+  it("a patient bot keeps the protection longer without progress, an impatient one drops it sooner", () => {
+    const at = (patience: number) => {
+      const { persistence, start } = setup(patience);
+      start("go_to");
+      return persistence.stayBonus("go_to", PROGRESS_WINDOW_MS);
+    };
+    expect(at(0.9)).toBeGreaterThan(0);
+    expect(at(0.5)).toBe(0);
+    expect(at(0.1)).toBe(0);
+  });
+
+  it("a skill given up on may not be started again at once: 8 s the first time, longer each time in a row, until a run finishes", () => {
+    const { persistence } = setup(0.5);
+    /** Runs the skill from `at` until it is given up on; returns when that was. */
+    const giveUp = (at: number) => {
+      persistence.observe(event("go_to", "started", at));
+      expect(persistence.giveUpReason(at + BASE)).toMatch(/^gave up/);
+      persistence.observe(event("go_to", "failed", at + BASE));
+      return at + BASE;
+    };
+    expect(persistence.heldBack("go_to", 0)).toBe(false);
+    const first = giveUp(0);
+    expect(persistence.heldBack("go_to", first + 7999)).toBe(true);
+    expect(persistence.heldBack("go_to", first + 8000)).toBe(false);
+    expect(persistence.heldBack("idle", first)).toBe(false);
+    const second = giveUp(first + 10_000);
+    expect(persistence.heldBack("go_to", second + 15_999)).toBe(true);
+    expect(persistence.heldBack("go_to", second + 16_000)).toBe(false);
+    // A run that finishes ends it, and the next give-up starts from 8 s again.
+    persistence.observe(event("go_to", "started", second + 20_000));
+    persistence.observe(event("go_to", "done", second + 21_000));
+    const third = giveUp(second + 30_000);
+    expect(persistence.heldBack("go_to", third + 8000)).toBe(false);
+  });
+
+  it("a skill that failed for another reason is not held back", () => {
+    const { persistence, run } = setup(0.5);
+    const ended = run("go_to", "failed", 0);
+    expect(persistence.heldBack("go_to", ended)).toBe(false);
   });
 
   it("waits longer for a skill with a better chance of payoff", () => {

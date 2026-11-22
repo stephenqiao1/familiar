@@ -5,9 +5,10 @@
 import type { Candidate, Skill, State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { createMemory, createMemoryRegion, feelingNear, memoryNotes } from "@familiar/memory";
-import { placeOf, playerAlarms, playerInstinct, playerMemories, SCHEMA_VERSION, threatPresent, type MinecraftStateData } from "@familiar/minecraft";
+import { playerRewards, placeOf, playerInstinct, playerMemories, SCHEMA_VERSION, type MinecraftStateData } from "@familiar/minecraft";
 import {
   createNoradrenalineRegion,
+  needsOf,
   createPersistence,
   createScorebook,
   DEFAULT_NORADRENALINE,
@@ -19,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import { createArbiter } from "./brain.js";
 
 const signal = new AbortController().signal;
-const OFF: NoradrenalineSettings = { ...DEFAULT_NORADRENALINE, inCharge: 0, interrupt: 0, focus: 0, memoryTag: 0, patienceLink: 0, switching: 0, widerOptions: 0, tellPlanner: 0 };
+const OFF: NoradrenalineSettings = { ...DEFAULT_NORADRENALINE, inCharge: 0, interrupt: 0, focus: 0, memoryTag: 0, switching: 0, widerOptions: 0, tellPlanner: 0 };
 const zombie = { id: "entity:1", type: "zombie", dist: 3, hostile: true, reachable: true };
 
 type Patch = { health?: number; x?: number; mobs?: MinecraftStateData["nearby"]["mobs"] };
@@ -83,7 +84,7 @@ function bot(settings: NoradrenalineSettings = DEFAULT_NORADRENALINE) {
   const store = createWorkspace();
   const memory = createMemory();
   const regions = [
-    createNoradrenalineRegion({ triggers: playerAlarms(), threatPresent, settings }),
+    createNoradrenalineRegion({ needs: (ws) => needsOf(playerRewards, ws.state), settings }),
     createMemoryRegion({ memory, triggers: playerMemories(), placeOf, ...(settings.memoryTag > 0 ? { alarmOf: (ws) => ws.signals.alarm?.value ?? 0 } : {}) }),
   ];
   let seconds = 0;
@@ -104,12 +105,21 @@ function bot(settings: NoradrenalineSettings = DEFAULT_NORADRENALINE) {
 }
 
 describe("alarm behaviour", () => {
-  it("a big hit raises alarm at once; with the threat gone it falls under 0.1 within about 2 minutes", async () => {
+  it("a big hit raises alarm at once, by how much health it took; with nothing threatening it is gone within seconds", async () => {
     const { live, value } = bot();
     await live();
     await live({ health: 12 });
-    expect(value("alarm")).toBe(1);
-    await live({ health: 12 }, 120);
+    expect(value("alarm")).toBeCloseTo(0.4);
+    await live({ health: 12 }, 20);
+    expect(value("alarm")).toBeLessThan(0.02);
+  });
+
+  it("stays up while a threat is on the bot, however long, and goes within seconds of the threat going", async () => {
+    const { live, value } = bot();
+    await live();
+    await live({ mobs: [zombie] }, 90);
+    expect(value("alarm")).toBeGreaterThan(0.6);
+    await live({}, 15);
     expect(value("alarm")).toBeLessThan(0.1);
   });
 
@@ -120,14 +130,13 @@ describe("alarm behaviour", () => {
     setGoal();
     expect(asked().prompt).toContain("Current goal: Build a shelter");
 
-    // A zombie appears and hits hard: alarm jumps, the plan is cancelled, the planner goes offline.
+    // A zombie appears and hits hard: alarm jumps, the planner goes offline. The goal is kept for later.
     await live({ mobs: [zombie], health: 13 });
     expect(value("alarm")).toBe(1);
     expect([value("interrupt"), value("planner_offline"), value("planner_weight")]).toEqual([1, 1, 0]);
-    expect(store.goal()).toBeNull();
+    expect(store.goal()?.text).toBe("Build a shelter");
 
-    // Even if a goal were set now, Jev would not be shown it while the planner is offline.
-    setGoal();
+    // Jev is not shown the goal while the planner is offline.
     await live({ mobs: [zombie], health: 13 });
     expect(asked().prompt).not.toContain("Current goal");
 

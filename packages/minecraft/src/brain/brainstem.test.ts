@@ -3,38 +3,11 @@ import { createWorkspace } from "@familiar/core";
 import { describe, expect, it } from "vitest";
 import { fakeData, fakeState, type StatePatch } from "../encode/state.test-helper.js";
 import { menuSkills } from "../skills/index.js";
-import { startled } from "./alarm.js";
 import { HOLDABLE, leaningOf, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
 
 const ws = createWorkspace().viewFor("brainstem");
 const zombie = (dist: number, id = 1) => ({ id: `entity:${id}`, type: "zombie", dist, hostile: true, reachable: true });
 const moment = (before: StatePatch, after: StatePatch) => ({ before: fakeState(before), after: fakeState(after), ws });
-
-describe("the startle alarm trigger", () => {
-  it("adds 0.4 × the startle's size on the tick the brainstem startles", () => {
-    const store = createWorkspace();
-    const check = () => startled.check({ before: fakeState(), after: fakeState(), ws: store.viewFor("noradrenaline") });
-    expect(check()).toBe(0);
-    store.viewFor("brainstem").setSignal("startle", 1);
-    expect(check()).toBe(0.4);
-    store.viewFor("brainstem").setSignal("startle", 0.5);
-    expect(check()).toBe(0.2);
-    store.viewFor("brainstem").setSignal("startle", 0);
-    expect(check()).toBe(0);
-  });
-
-  it("names the trigger that shares its cause this tick, if there is one", () => {
-    const store = createWorkspace();
-    const moment = { before: fakeState(), after: fakeState(), ws: store.viewFor("noradrenaline") };
-    expect(startled.sameCauseAs!(moment)).toBeNull();
-    store.viewFor("brainstem").setSignal("startle", 0.8);
-    expect(startled.sameCauseAs!(moment)).toBeNull(); // a bang: nothing else was set off by it
-    store.viewFor("brainstem").setSignal("startle_from_damage", 0.8);
-    expect(startled.sameCauseAs!(moment)).toBe("damage");
-    store.viewFor("brainstem").setSignal("startle_from_damage", 0);
-    expect(startled.sameCauseAs!(moment)).toBeNull();
-  });
-});
 
 describe("playerBrainstem", () => {
   const skill = (name: string, flags: Partial<Skill<null>> = {}): Skill<null> => ({ name, description: "", canRun: (_ctx, target) => target !== "pos:0,0,0", run: async () => ({ status: "done" }), ...flags });

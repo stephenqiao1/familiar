@@ -255,7 +255,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     let loomAt = 0;
     const ticks = await play(async (say) => {
       // Something to fight, close in front, that neither moves nor dies quickly.
-      rcon("summon zombie 60.5 151 38.5 {NoAI:1b,Silent:1b,PersistenceRequired:1b,attributes:[{id:\"minecraft:max_health\",base:200}],Health:200f}");
+      rcon("summon zombie 60.5 151 38.5 {IsBaby:0b,NoAI:1b,Silent:1b,PersistenceRequired:1b,attributes:[{id:\"minecraft:max_health\",base:200}],Health:200f}");
       rcon(`give ${BOT} iron_sword`);
       await sleep(2500);
       say("do attack");
@@ -289,7 +289,7 @@ const scenes: Record<string, () => Promise<Row>> = {
           await sleep(6000);
           at = Date.now();
           // Sixteen blocks straight behind (beyond the 8 at which it would be "heard"), walking up. A husk does not burn by day.
-          rcon("summon husk 72.5 151 40.5 {Silent:1b}");
+          rcon("summon husk 72.5 151 40.5 {IsBaby:0b,Silent:1b}");
           await sleep(25_000);
         },
         { bot, jev: true, start: "56.5 151 40.5 90 0" },

@@ -26,7 +26,7 @@ export interface Scene {
 
 const near = (value: unknown, lo: number, hi: number) => typeof value === "number" && value >= lo && value <= hi;
 const count = (value: unknown, name: string) => (value as Record<string, number> | undefined)?.[name] ?? 0;
-const ZOMBIE = `summon zombie 60.5 151 38.5 {NoAI:1b,PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
+const ZOMBIE = `summon zombie 60.5 151 38.5 {IsBaby:0b,NoAI:1b,PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
 const hungry = async () => {
   rcon(`effect give ${BOT} hunger 4 255 true`);
   await sleep(4500);

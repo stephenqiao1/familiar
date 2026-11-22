@@ -226,14 +226,6 @@ describe("encodeState", () => {
     expect((state.data as unknown as MinecraftStateData).memory).toEqual({ nearby: "bad", kind: "danger" });
   });
 
-  it("narrows attention to threats when asked: no friendly mobs, no useful blocks", () => {
-    const bot = fakeBot({ blocks: { "3,63,0": "chest", "0,62,5": "lava" }, entities: [mob(42, "zombie", "hostile", 6, 0), mob(43, "cow", "animal", 0, -4)] });
-    const data = encodeState(bot, 0, { base, current: null, deaths: 0, narrow: true }).data as unknown as MinecraftStateData;
-    expect(data.nearby.mobs.map((m) => m.type)).toEqual(["zombie"]);
-    expect(data.nearby.blocks).toEqual([]);
-    expect(data.nearby.hazards).toHaveLength(1);
-  });
-
   it("reports the running skill", () => {
     const startedAt = Date.now() - 4200;
     const data = encodeState(fakeBot(), 0, { base, current: { skill: "go_to", target: "pos:1,2,3", startedAt }, deaths: 0 })

@@ -1,4 +1,4 @@
-export { falseAlarm, playerAlarms, threatPresent } from "./alarm.js";
+export { startleOf, threatPresent } from "./alarm.js";
 export { HOLDABLE, leaningOf, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
 export { asleep, moved, playerFocus, watchedThings } from "./focus.js";
 export { approachableThings, rememberedThings, skillsToward, thingsInView } from "./cues.js";
@@ -7,11 +7,11 @@ export { DEFAULT_POSTURE, postureProblem, wasDisplaced, type PostureSettings } f
 export { DEFAULT_MEDULLA, HEALING_FOOD, isHarmful, medullaProblem, medullaUrges, playerVitals, type MedullaSettings } from "./medulla.js";
 export { placeOf, playerMemories } from "./memories.js";
 export { playerInstinct } from "./instinct.js";
-export { isShock, playerOutlook } from "./outlook.js";
 export { DEFAULT_REFLEXES, REFLEX_SKILLS, reflexesProblem, type ReflexSettings } from "./protective-reflexes.js";
 export { createPlayerReflexes, playerReflexes } from "./reflexes.js";
 export { corneredIn, DEFENCE_REFLEXES, DEFENCE_SKILL, defenceMoment, defenceOf, defenceReflexes, onIt, playerDefence, pressingThreat, RECUPERATE, threatLevel } from "./defence.js";
 export { effortSpent } from "./effort-spent.js";
+export { madeProgress } from "./progress.js";
 export { curiosity, playerRewards } from "./rewards.js";
 export { describeSituation, type Storage } from "./situation.js";
 export { situationOf } from "./situation-labels.js";

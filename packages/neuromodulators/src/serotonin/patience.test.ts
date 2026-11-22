@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPatience } from "./patience.js";
+import { createPatience, FALL_SECONDS, outlookFrom } from "./patience.js";
 import { DEFAULT_PATIENCE } from "./settings.js";
 
 /** Feeds the same outlook once a second for `seconds`; returns the final patience. */
@@ -25,10 +25,16 @@ describe("createPatience", () => {
     expect(hold(createPatience(DEFAULT_PATIENCE), 0, 3600)).toBe(0.05);
   });
 
-  it("drops by 0.2 at once on a shock", () => {
+  it("falls to a worse outlook within seconds, and climbs back to a better one slowly", () => {
     const patience = createPatience(DEFAULT_PATIENCE);
-    patience.shock();
-    expect(patience.level()).toBeCloseTo(0.3);
+    const calm = hold(patience, 0.9, 300);
+    // The outlook turns bad: most of the way down in a few seconds.
+    const shaken = hold(patience, 0.2, FALL_SECONDS, 301);
+    expect(calm - shaken).toBeGreaterThan(0.5);
+    // It turns good again: after the same few seconds patience has hardly moved (but for the nudge).
+    const soon = hold(patience, 0.9, FALL_SECONDS, 301 + FALL_SECONDS + 1);
+    expect(soon - shaken).toBeLessThan(0.15);
+    expect(hold(patience, 0.9, 180, 320)).toBeGreaterThan(0.8);
   });
 
   it("is nudged up while the outlook rises and down while it falls, by at most 0.1", () => {
@@ -54,3 +60,27 @@ describe("createPatience", () => {
     expect(slow).toBeLessThan(hold(createPatience(DEFAULT_PATIENCE), 1, 60));
   });
 });
+
+describe("outlookFrom", () => {
+  const need = (level: number, weight = 1) => ({ level, weight });
+  it("is 1 with every need met, and there is none with no needs known", () => {
+    expect(outlookFrom([need(0), need(0)])).toBe(1);
+    expect(outlookFrom([])).toBeNull();
+  });
+
+  it("one need at its worst halves it, however many others are fine: nothing is watered down", () => {
+    expect(outlookFrom([need(1)])).toBe(0.5);
+    expect(outlookFrom([need(1), need(0), need(0), need(0), need(0)])).toBe(0.5);
+  });
+
+  it("each further trouble lowers it, and a mild one hardly counts", () => {
+    expect(outlookFrom([need(1), need(1)])).toBeCloseTo(1 / 3);
+    expect(outlookFrom([need(0.25)])).toBeGreaterThan(0.94);
+  });
+
+  it("goes by each need's weight: a threat to life counts for more, being short of provisions for little", () => {
+    expect(outlookFrom([need(0.5, 2)])).toBe(0.5);
+    expect(outlookFrom([need(1, 0.25), need(1, 0.25), need(1, 0.25)])).toBeGreaterThan(0.8);
+  });
+});
+

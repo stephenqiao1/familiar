@@ -149,7 +149,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     await freshLane();
     const { ticks } = await play(async () => {
       await sleep(2000);
-      rcon("summon husk 70.5 151 40.5 {NoAI:1b,Rotation:[-90f,0f]}");
+      rcon("summon husk 70.5 151 40.5 {IsBaby:0b,NoAI:1b,Rotation:[-90f,0f]}");
       await sleep(9000);
     });
     const frozen = ticks.filter((t) => modeOf(t) === "freeze");
@@ -166,7 +166,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     const husk = { x: 60.5, z: 43.5 };
     const { ticks, output } = await play(
       async (say) => {
-        rcon(`summon husk ${husk.x} 151 ${husk.z} {NoAI:1b,Rotation:[0f,0f]}`);
+        rcon(`summon husk ${husk.x} 151 ${husk.z} {IsBaby:0b,NoAI:1b,Rotation:[0f,0f]}`);
         await sleep(1500);
         say("do go_to pos:78,151,40");
         await sleep(12_000);
@@ -189,7 +189,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     await freshLane();
     const { ticks } = await play(async () => {
       await sleep(1500);
-      rcon("summon husk 79.5 151 40.5");
+      rcon("summon husk 79.5 151 40.5 {IsBaby:0b}");
       await sleep(11_000);
     });
     const first = ticks.find((t) => modeOf(t) === "flee");
@@ -207,7 +207,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     const { ticks } = await play(
       async () => {
         await sleep(1500);
-        rcon("summon husk 79.5 151 40.5");
+        rcon("summon husk 79.5 151 40.5 {IsBaby:0b}");
         await sleep(9000);
       },
       { knows: { husk: { seen: 5, hurts: 6, damage: 40, deaths: 2, danger: 0.9 } } },
@@ -226,7 +226,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     const { ticks } = await play(
       async () => {
         await sleep(1500);
-        rcon("summon husk 61.5 151 41.5");
+        rcon("summon husk 61.5 151 41.5 {IsBaby:0b}");
         await sleep(12_000);
         rcon("kill @e[type=husk]");
       },
@@ -248,7 +248,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     const { ticks, learned } = await play(
       async () => {
         await sleep(1500);
-        rcon("summon husk 62.5 151 40.5");
+        rcon("summon husk 62.5 151 40.5 {IsBaby:0b}");
         await sleep(12_000);
       },
       { give: ["iron_sword"] },
@@ -265,7 +265,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     for (const command of ["fill 64 149 39 66 150 41 air", "fill 64 148 39 66 148 41 stone", "fill 63 148 38 67 148 42 stone"]) rcon(command);
     const { ticks } = await play(async () => {
       await sleep(1500);
-      rcon("summon husk 65.5 149 40.5");
+      rcon("summon husk 65.5 149 40.5 {IsBaby:0b}");
       await sleep(14_000);
     });
     const sized = ticks.filter((t) => defenceOf(t)?.threats.length);
@@ -285,12 +285,12 @@ const scenes: Record<string, () => Promise<Row>> = {
     let second = 0;
     const { ticks } = await play(async () => {
       await sleep(1500);
-      rcon("summon husk 65.5 149 40.5");
+      rcon("summon husk 65.5 149 40.5 {IsBaby:0b}");
       await sleep(8000);
       rcon("kill @e[type=husk]");
       await sleep(3000);
       second = Date.now();
-      rcon("summon husk 65.5 149 40.5");
+      rcon("summon husk 65.5 149 40.5 {IsBaby:0b}");
       await sleep(8000);
     });
     const later = ticks.filter((t) => t.timestamp > second && defenceOf(t)?.threats.length);
@@ -330,7 +330,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     const { ticks, learned } = await play(
       async () => {
         await sleep(1500);
-        rcon("summon husk 66.5 151 40.5");
+        rcon("summon husk 66.5 151 40.5 {IsBaby:0b}");
         await sleep(12_000);
       },
       { bot: BLANK },
@@ -352,7 +352,7 @@ const scenes: Record<string, () => Promise<Row>> = {
     let healedAt = 0;
     const { ticks } = await play(async () => {
       await sleep(1500);
-      rcon("summon husk 68.5 151 40.5");
+      rcon("summon husk 68.5 151 40.5 {IsBaby:0b}");
       await sleep(5000);
       hurtAt = Date.now();
       rcon(`damage ${GUARD} 15 minecraft:generic`);

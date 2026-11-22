@@ -20,8 +20,6 @@ export interface FocusSettings {
   cuePulse: number;
   /** Effect f: skill values are only fully updated shortly after a notable event. */
   learningWindow: number;
-  /** Effect g: how big a surprise must be to trip alarm depends on focus. */
-  noisyOrChanged: number;
 }
 
 export const FOCUS_MIN = 0.05;
@@ -37,10 +35,9 @@ export const DEFAULT_FOCUS: FocusSettings = {
   consolidation: 1,
   cuePulse: 1,
   learningWindow: 1,
-  noisyOrChanged: 1,
 };
 
-const EFFECTS = ["sensesVsMemory", "attention", "memoryWrite", "consolidation", "cuePulse", "learningWindow", "noisyOrChanged"] as const;
+const EFFECTS = ["sensesVsMemory", "attention", "memoryWrite", "consolidation", "cuePulse", "learningWindow"] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function focusProblem(s: FocusSettings): string | null {

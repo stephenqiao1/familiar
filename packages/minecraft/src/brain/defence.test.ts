@@ -8,7 +8,7 @@ import type { ThreatFacts } from "../defence/size-up.js";
 import { SCHEMA_VERSION } from "../encode/encode-state.js";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { fakeData } from "../encode/state.test-helper.js";
-import { falseAlarm, hostileAppeared, threatPresent } from "./alarm.js";
+import { threatPresent } from "./alarm.js";
 import { DEFENCE_REFLEXES, defenceOf, defenceReflexes, pressingThreat, threatLevel } from "./defence.js";
 import { corneredFight, lastStand, playerReflexes } from "./reflexes.js";
 
@@ -140,14 +140,6 @@ describe("alarm agrees with defence", () => {
     expect(threatPresent(stateOf(data({ mobs: [zombie] })))).toBe(true);
     expect(threatPresent(stateOf(sensed({ dist: 6, canWalkTo: false })))).toBe(false);
   });
-  it("the all-clear: a threat that was pressing is found unable to get to the bot, and nothing else presses", () => {
-    const [guessed, answered] = [stateOf(sensed({ dist: 5 })), stateOf(sensed({ dist: 5, canWalkTo: false }))];
-    expect(falseAlarm(guessed, answered)).toBe(true);
-    // Still able to reach, never pressing, or simply gone: no all-clear.
-    expect(falseAlarm(guessed, guessed)).toBe(false);
-    expect(falseAlarm(answered, answered)).toBe(false);
-    expect(falseAlarm(guessed, stateOf(data()))).toBe(false);
-  });
   it("one that shoots and has a clear line holds alarm up from where it is", () => {
     expect(threatPresent(stateOf(sensed({ dist: 7, canWalkTo: false, shoots: true, facing: true, approach: 0 })))).toBe(true);
   });
@@ -155,10 +147,5 @@ describe("alarm agrees with defence", () => {
     const unaware = { ...zombie, dist: 6, seen: true, closing: 0, bearing: { side: "ahead" as const, angle: 0 } };
     expect(threatPresent(stateOf(data({ mobs: [unaware] })))).toBe(false);
     expect(threatPresent(stateOf(data({ mobs: [{ ...unaware, closing: 2 }] })))).toBe(true);
-  });
-  it("hostile_appeared fires for a threat that can reach the bot, not for one that cannot", () => {
-    const appeared = (mob: Mob) => hostileAppeared().check({ before: stateOf(data()), after: stateOf(data({ mobs: [mob] }), 1000), ws: workspace(data()).viewFor("noradrenaline") });
-    expect(appeared(zombie)).toBeGreaterThan(0.5);
-    expect(appeared({ ...zombie, reachable: false })).toBe(0);
   });
 });

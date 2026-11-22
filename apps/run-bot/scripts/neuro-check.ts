@@ -70,7 +70,7 @@ interface Scene {
   checks(run: Run): [string, boolean, string?][];
 }
 
-const ZOMBIE = `summon zombie ~2 ~ ~ {PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
+const ZOMBIE = `summon zombie ~2 ~ ~ {IsBaby:0b,PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
 /** A quiet day with no mobs spawning (1.21.11 names the rule spawn_mobs). */
 const CALM = ["gamerule spawn_mobs false", "difficulty peaceful", "time set 1000", "weather clear", "kill @e[type=item]"];
 
@@ -90,7 +90,7 @@ const PLAZA = [
 ];
 const TO_PLAZA = `tp ${BOT} 60.5 151 40.5`;
 const CLEAR_PLAZA = ["kill @e[type=!player,x=60,y=150,z=40,distance=..48]", "fill 40 151 36 80 160 44 air", "fill 40 149 36 80 150 44 stone"];
-const HELMET = `{PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
+const HELMET = `{IsBaby:0b,PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
 const selfOf = (t: Tick) => t.state.data.self;
 const hostiles = (t: Tick) => t.state.data.nearby.mobs.filter((m) => m.hostile);
 type Fired = { rule: string; kind: "hard" | "soft"; skill: string | null; base: number; gain: number; urgency: number };
@@ -178,13 +178,15 @@ const scenes: Scene[] = [
       const danger = recorded.filter((r) => /damage|Died|surprised by/.test(r.summary));
       const lastAlarm = alarm.at(-1) ?? 1;
       const patience = run.signal("patience");
-      const patienceDrop = max(patience.slice(1).map((p, i) => patience[i]! - p));
+      // Patience falls to a worse outlook within about three seconds (there is no one-tick cut any more).
+      const times = run.ticks.map((t) => run.at(t));
+      const patienceDrop = max(patience.map((p, i) => p - min(patience.filter((_, j) => j >= i && times[j]! - times[i]! <= 3))));
       return [
         ["alarm is low before the ambush", max(run.ticks.filter((t) => run.at(t) < 22).map((t) => t.signals.alarm?.value ?? 0)) < 0.3],
         ["alarm spikes above 0.5 within 10 s of the zombie appearing", firstHigh !== undefined && run.at(firstHigh) < 35, firstHigh ? `at ${run.at(firstHigh).toFixed(1)} s` : "never"],
         ["a reflex, or a response the startle released, takes over", reflexWon],
         ["the planner's weight drops", min(run.signal("planner_weight")) < 0.8, `min ${min(run.signal("planner_weight")).toFixed(2)}`],
-        ["patience is cut by about 0.2 when alarm jumps", patienceDrop > 0.15, `largest drop in one tick ${patienceDrop.toFixed(2)}`],
+        ["patience falls by 0.2 or more within three seconds of the ambush", patienceDrop >= 0.2, `largest fall in three seconds ${patienceDrop.toFixed(2)}`],
         ["the danger is remembered, more strongly than a calm event", danger.some((d) => d.strength > 0.35), danger.map((d) => `${d.summary} [${d.strength.toFixed(2)}]`).join("; ") || "nothing recorded"],
         ["alarm has faded by the end", lastAlarm < 0.4, `ends at ${lastAlarm.toFixed(2)}`],
         ["the planner is back in charge by the end", (run.signal("planner_offline").at(-1) ?? 1) === 0],
@@ -461,7 +463,7 @@ const scenes: Scene[] = [
       const logged = /DIED WITH DEFENCE OVERRULED/.test(run.output);
       return [
         ["the goal holds back flee", run.ticks.some((t) => t.goal?.holdBack?.includes("flee"))],
-        ["the goal survives the fright", kept || run.ticks.at(-1)?.goal?.holdBack?.includes("flee") === true, kept ? "kept through an interrupt" : "no interrupt fired"],
+        ["the goal survives the fright", kept || run.ticks.at(-1)?.goal?.holdBack?.includes("flee") === true, "a fright no longer clears a goal"],
         ["the flee reflex fired, held back", softFlee.length > 0 && softFlee.every((f) => f.gain <= 0.46), softFlee.length ? `${softFlee.length} firings, gain ${Math.min(...softFlee.map((f) => f.gain)).toFixed(2)} to ${Math.max(...softFlee.map((f) => f.gain)).toFixed(2)}, urgency up to ${Math.max(...softFlee.map((f) => f.urgency)).toFixed(2)}` : "never fired"],
         ["it stood its ground: no flee before last_stand", early.length === 0, `${early.length} early flees`],
         ["last_stand fired at low health, at urgency 1", lastStand.length > 0 && lastStand.every((f) => f.urgency === 1 && selfOf(f.t).health <= 6), `${lastStand.length} firings`],
@@ -507,7 +509,7 @@ const scenes: Scene[] = [
       [6, `give ${BOT} bread 16`],
       [8, `effect give ${BOT} hunger 7 255 true`],
       // The meal starts about 12 to 13 s in and lasts about 8 s: the zombie appears in the middle of it.
-      [16, `execute at ${BOT} run summon zombie ~12 151 ~ {NoAI:1b,PersistenceRequired:1b}`],
+      [16, `execute at ${BOT} run summon zombie ~12 151 ~ {IsBaby:0b,NoAI:1b,PersistenceRequired:1b}`],
       [28, "kill @e[type=zombie]"],
       [30, HOME],
     ],

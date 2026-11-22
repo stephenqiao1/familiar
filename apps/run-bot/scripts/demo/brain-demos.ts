@@ -8,7 +8,7 @@ import { OVERVIEW, type Demo } from "./types.ts";
 
 const BOT = "Tester";
 const CONTAINER = process.env.MC_CONTAINER ?? "familiar-m6";
-const HELMET = `{PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
+const HELMET = `{IsBaby:0b,PersistenceRequired:1b,equipment:{head:{id:"minecraft:leather_helmet",count:1}}}`;
 const TO_PLAZA = `tp ${BOT} 60.5 151 40.5`;
 const HOME = `tp ${BOT} -8 69 14`;
 /** Every run starts with the bot whole: full health, fed, nothing left over from the last demo. */

@@ -297,32 +297,30 @@ describe("startle", () => {
     expect(value("startle")).toBe(0);
   });
 
-  it("alarm takes the larger of the startle and its cause, not the sum: a close ambush no longer takes the planner offline", async () => {
+  it("alarm takes the larger of the startle and its cause, not the sum: the startle adds nothing to an ambush", async () => {
     const withStartle = bot();
     const without = bot({ brainstem: { startle: 0 } });
     for (const b of [withStartle, without]) await b.tick();
     const out = await withStartle.tick(ambush);
     await without.tick(ambush);
-    // 0.4 × 0.62 is less than the 0.6 the mob's appearing already gave: the startle adds nothing on top.
-    expect(out.traces.noradrenaline?.raisedBy).toEqual({ hostile_appeared: 0.6 });
-    expect(out.traces.noradrenaline?.sameCause).toEqual({ startle: "hostile_appeared" });
-    expect(withStartle.value("alarm")).toBeCloseTo(0.6);
+    // 0.4 × 0.62 is less than what the danger's own jump already gave: the startle adds nothing on top.
+    expect(out.traces.noradrenaline?.raisedBy).toEqual({ danger: expect.any(Number) });
+    expect(withStartle.value("alarm")).toBeGreaterThan(0.8); // a zombie two blocks off is nearly as pressing as danger gets
     expect(withStartle.value("alarm")).toBe(without.value("alarm"));
-    expect(withStartle.value("planner_offline")).toBe(0);
   });
 
-  it("different causes still add: a bang (nothing else set off by it) adds its own 0.4 × size", async () => {
+  it("a bang (nothing else set off by it) raises alarm by 0.4 × its size; with a mob appearing too, the larger of the two counts", async () => {
     const { tick, value } = bot();
     await tick();
     const out = await tick(bangAt(0.9));
     expect(out.traces.noradrenaline?.raisedBy).toEqual({ startle: expect.closeTo(0.36) });
-    // A bang while a mob also appears close: the mob's own trigger and the bang's startle are two things.
+    // A bang while a mob also appears close: alarm goes by the larger, the danger.
     const both = bot();
     await both.tick();
     const two = await both.tick({ ...bangAt(0.9), mobs: [mob("zombie", 6)] });
     expect(two.traces.brainstem?.startle).toMatchObject({ by: "loud_nearby" });
-    expect(two.traces.noradrenaline?.raisedBy).toEqual({ hostile_appeared: 0.6, startle: expect.closeTo(0.36) });
-    expect(both.value("alarm")).toBeCloseTo(0.96);
+    expect(two.traces.noradrenaline?.raisedBy).toEqual({ danger: expect.any(Number) });
+    expect(both.value("alarm")).toBeGreaterThan(0.36);
     expect(value("alarm")).toBeCloseTo(0.36);
   });
 
@@ -333,7 +331,9 @@ describe("startle", () => {
     expect(value("startle")).toBeCloseTo(0.67);
     expect(out.traces.brainstem?.startle).toMatchObject({ by: "hurt_unseen", source: { id: "entity:9", kind: "skeleton" }, size: "full", cause: "damage" });
     expect(out.winner).toMatchObject({ action: { skill: "brace", target: "entity:9" } });
-    expect(out.traces.noradrenaline?.raisedBy).toEqual({ damage: expect.closeTo(0.45) });
+    // Three points of health is a small worsening (0.15); the startle (0.4 × 0.67) is the larger.
+    expect(out.traces.noradrenaline?.raisedBy).toEqual({ health: expect.closeTo(0.15), startle: expect.closeTo(0.27, 1) });
+    expect(value("alarm")).toBeCloseTo(0.27, 1);
   });
 
   it("a mild bang is a flinch, proposed below urgency 1, toward where it came from", async () => {
@@ -607,17 +607,21 @@ describe("the colliculus through the real brain", () => {
     expect(out.traces.colliculus?.winner).toMatchObject({ id: "pos:0,63,9", via: "sound" });
   });
 
-  it("looming raises alarm at once, and makes a far thing count as coming in the defence reflexes", async () => {
+  it("looming makes a far thing count as coming in the defence reflexes, and raises alarm through the startle", async () => {
     const { tick, value } = bot({ brainstem: { startle: 0 } });
     await tick({ mobs: [mob("skeleton", 14)] });
-    expect(value("alarm")).toBe(0);
+    expect(value("alarm")).toBeCloseTo(0.125); // a skeleton far off, aware of the bot, presses a little
     const calm = await tick({ mobs: [mob("skeleton", 14)] });
     expect(calm.reflexes).toEqual([]);
     // An arrow heading this way: the far skeleton is now something to get away from.
     const arrow = { id: "entity:9", what: "looming" as const, bearing: LEFT, dist: 12 };
     const out = await tick({ mobs: [mob("skeleton", 14)], sudden: [arrow] });
     expect(value("looming")).toBe(1);
-    expect(value("alarm")).toBeGreaterThanOrEqual(0.6);
+    // With the startle on (as it is by default), the arrow's startle raises alarm at once.
+    const startled = bot();
+    await startled.tick({ mobs: [mob("skeleton", 14)] });
+    await startled.tick({ mobs: [mob("skeleton", 14)], sudden: [arrow] });
+    expect(startled.value("alarm")).toBeGreaterThan(value("alarm")! + 0.1);
     expect(out.reflexes).toMatchObject([{ rule: "defence_flee", skill: "flee" }]);
     expect(out.candidates).toContainEqual(expect.objectContaining({ region: "reflex", action: { skill: "flee", target: "entity:1" } }));
     expect(out.traces.colliculus?.winner).toMatchObject({ id: "entity:9", why: "sight: looming" });
@@ -870,7 +874,7 @@ describe("the defence circuit through the real brain", () => {
     expect(freezeHeld.gain).toBeCloseTo(freezeFree.gain);
   });
 
-  it("alarm fades with a threat that cannot reach the bot, and holds with one that can", async () => {
+  it("alarm goes with a threat that cannot reach the bot, and holds with one that can", async () => {
     const alarmAfter = async (reachable: boolean) => {
       const { tick, value } = bot({ brainstem: { startle: 0 } });
       await tick();
@@ -880,8 +884,9 @@ describe("the defence circuit through the real brain", () => {
       return { raised, later: value("alarm")! };
     };
     const [can, cannot] = [await alarmAfter(true), await alarmAfter(false)];
-    expect(can.later).toBeGreaterThanOrEqual(can.raised - 0.01);
-    expect(cannot.later).toBeLessThan(0.2);
+    // With the threat still there and able to reach, alarm is what the danger presses at: it does not fade.
+    expect(can.later).toBeGreaterThan(0.5);
+    expect(cannot.later).toBeLessThan(0.05);
   });
 
   it("pain is dulled while fleeing or fighting and felt afterwards; the hard reflexes still see the damage", async () => {

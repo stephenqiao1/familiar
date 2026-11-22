@@ -45,8 +45,6 @@ export interface EncodeContext {
   defence?: (data: MinecraftStateData, now: number) => Defence;
   /** How many of each kind of nearby thing to keep (focus sets it). Default: 10. */
   limit?: number;
-  /** Narrow attention (high alarm): keep threats, drop friendly mobs and useful blocks. Default: false. */
-  narrow?: boolean;
 }
 
 /** Not travelling. */
@@ -57,8 +55,8 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
   const now = Date.now();
   const limit = ctx.limit ?? DEFAULT_LIMIT;
   const { senses } = ctx;
-  const mobs = scanMobs(bot, limit).filter((m) => !ctx.narrow || m.hostile).map((m) => sighted(bot, m, senses));
-  const blocks = (ctx.narrow ? [] : scanUsefulBlocks(bot, limit)).map((b) => sighted(bot, b, senses));
+  const mobs = scanMobs(bot, limit).map((m) => sighted(bot, m, senses));
+  const blocks = scanUsefulBlocks(bot, limit).map((b) => sighted(bot, b, senses));
   const players = scanPlayers(bot, limit).map((p) => sighted(bot, p, senses));
   const things = [...mobs, ...players, ...blocks];
   const data: MinecraftStateData = {

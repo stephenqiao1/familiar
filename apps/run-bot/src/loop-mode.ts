@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import type { Action, Candidate, SkillEvent, TickLog } from "@familiar/contracts";
+import type { Action, Candidate, SkillEvent, State, TickLog } from "@familiar/contracts";
 import { createBrainLoop, createChainSkill, createLogger, createSkillExecutor, createWorkspace, defaultLogPath } from "@familiar/core";
 import { feelingNear, type Place } from "@familiar/memory";
 import {
@@ -32,6 +32,7 @@ import {
   tidyBody,
   posId,
   situationOf,
+  madeProgress,
   threatPresent,
   trackBodyEvents,
   withTrust,
@@ -96,8 +97,6 @@ const SAVE_LEARNING_MS = 30_000;
 /** The regular time between ticks, and the shortest it gets at full alarm. */
 const TICK_MS = 500;
 const FASTEST_TICK_MS = 150;
-/** Above this alarm the bot attends only to threats. */
-const NARROW_ABOVE = 0.6;
 /** One in-game day, in ms. */
 const GAME_DAY_MS = 1_200_000;
 
@@ -297,6 +296,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
 
   const alarm = () => view.signals[ALARM_SIGNAL]?.value ?? 0;
   let lastReward = 0;
+  let lastState: State | null = null;
   let lastInterrupt = 0;
   /** The skill that was running when this tick's state was read. */
   let runningAtTick: string | undefined;
@@ -312,6 +312,9 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     const reward = view.signals[REWARD_SIGNAL];
     if (reward && reward.at !== lastReward && reward.value > 0) persistence.progress(now);
     lastReward = reward?.at ?? lastReward;
+    // So does a need easing or ground covered: the skill is getting somewhere.
+    if (lastState && madeProgress(lastState, view.state)) persistence.progress(now);
+    lastState = view.state;
     // Asleep and undisturbed is the skill working, however long the night: its clock restarts.
     if ((view.signals[UPPER_PAUSED_SIGNAL]?.value ?? 0) > 0) persistence.progress(now);
     const gaveUp = persistence.giveUpReason(now);
@@ -386,7 +389,6 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         senses,
         defence: threats.assess,
         memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
-        narrow: noradrenaline.focus > 0 && alarm() > NARROW_ABOVE,
         limit,
       });
       if (focusSettings.attention > 0) {

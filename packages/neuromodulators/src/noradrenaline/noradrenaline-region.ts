@@ -1,6 +1,7 @@
-import type { Region, SkillEvent, State, Workspace } from "@familiar/contracts";
+import type { Region, Workspace } from "@familiar/contracts";
+import type { Need } from "../dopamine/rewards.js";
 import { createAlarm } from "./alarm.js";
-import { createSearch, createSearchInputs, noveltyBump, type SearchInput } from "./search.js";
+import { createSearch, noveltyBump, type SearchInput } from "./search.js";
 import type { NoradrenalineSettings } from "./settings.js";
 import {
   ALARM_JUMP_SIGNAL,
@@ -15,36 +16,13 @@ import {
   SWITCHING_SIGNAL,
 } from "./signals.js";
 
-/** What an alarm trigger looks at: the last tick's state, this tick's, and the workspace. */
-export interface AlarmMoment {
-  before: State;
-  after: State;
-  ws: Workspace;
-}
-
-/** One thing that raises alarm: how much to add right now (0 to 1), or 0. */
-export interface AlarmTrigger {
-  name: string;
-  check(moment: AlarmMoment): number;
-  /**
-   * The name of another trigger that this one shares its cause with on this tick, or null. The two
-   * are then one event: alarm takes the larger of them, not their sum. Default: never.
-   */
-  sameCauseAs?(moment: AlarmMoment): string | null;
-}
-
 export interface NoradrenalineOptions {
-  /** What raises alarm. Add or remove one to change what alarms the bot. */
-  triggers: AlarmTrigger[];
-  /** Whether a threat is present right now; alarm does not fade while one is. */
-  threatPresent(state: State): boolean;
-  /**
-   * The all-clear: between these two states, what looked like a threat turned out unable to
-   * harm. Alarm then drops at once (to ALL_CLEAR_KEEPS of itself) instead of fading. Default: never.
-   */
-  allClear?(before: State, after: State): boolean;
+  /** The bot's needs right now (the same ones dopamine is paid for and patience follows): alarm is read from them. */
+  needs(ws: Workspace): Need[];
+  /** The body's startle this tick, 0 to 1 (a bang, a blow out of nowhere). Default: none. */
+  startle?(ws: Workspace): number;
   settings: NoradrenalineSettings;
-  /** What moves search. Default: reward trend, failed predictions and goal progress. */
+  /** What moves search (see gettingNowhere). Default: nothing, so it rests. */
   searchInputs?: SearchInput[];
   /** Something else that calls for planning again this tick (the body was moved somewhere else, say). Default: nothing. */
   replanWhen?(ws: Workspace): boolean;
@@ -59,8 +37,8 @@ export interface NoradrenalineOptions {
 /** The region's name, also the `setBy` of the retreat goal it sets (which the planner's weight does not apply to). */
 export const NORADRENALINE = "noradrenaline";
 
-/** After an all-clear, alarm keeps this share of itself. */
-export const ALL_CLEAR_KEEPS = 0.25;
+/** A startle of full size raises alarm by this (smaller ones in proportion). */
+const STARTLED = 0.4;
 
 // Alarm effect a: who is in charge.
 const OFFLINE_ABOVE = 0.8;
@@ -71,7 +49,6 @@ const RECOVERY_SECONDS = 10;
 const JUMP = 0.5;
 const JUMP_WINDOW_MS = 1000;
 const INTERRUPT_GAP_MS = 20_000;
-const CALM_BELOW = 0.5;
 // Search effect c: tell the planner.
 const RETHINK_ABOVE = 0.7;
 const RETHINK_AFTER_MS = 30_000;
@@ -81,51 +58,49 @@ const PANIC_AFTER_MS = 60_000;
 const GUARD_WINDOW_MS = 300_000;
 const MAX_INTERRUPTS = 5;
 const JUMPY_THRESHOLD = 0.7;
-const MAX_SWITCHES = 4;
-const SWITCHING_ABOVE = 0.6;
 
 /**
- * Noradrenaline: two dials, shared as signals each tick.
+ * Noradrenaline: how much this moment calls for a change of course, read from evidence the
+ * brain already has. Two dials, shared as signals each tick.
  *
- * Alarm (fast): raised at once by its triggers, fading once no threat is present. It
+ * Alarm (fast, "change now") follows the vital needs: it is never below what they press at, a
+ *   need suddenly getting worse (or a startle) adds a jump, and it fades within seconds once the
+ *   cause has gone. It
  *   a) takes the planner out of charge: weight = 1 − alarm²; above 0.8 the planner goes offline
  *      until alarm is back under 0.5, and its weight then returns over about 10 seconds;
  *   b) on a jump of more than 0.5 within a second, fires an interrupt (at most one per 20 s): the
- *      goal is cleared, and once alarm is under 0.5 the planner is asked to plan afresh;
- *   and its level and jumps are read by the loop (faster ticks), memory and patience.
+ *      running skill is stopped. The goal is kept;
+ *   and its level and jumps are read by the loop (faster ticks) and memory.
  *
- * Search (slow): pushed up when the current goal stops paying off, pulled down by steady success.
- *   It eases switching away from the running skill, widens the options offered, and after 30 s
- *   above 0.7 tells the planner to rethink (at most once per 2 minutes).
+ * Search (slow, "change soon") follows its inputs: up while a need presses and the bot is getting
+ *   nowhere, down while things move. It eases switching away from the running skill, widens the
+ *   options offered, and after 30 s above 0.7 tells the planner to rethink (at most once per 2
+ *   minutes).
  *
  * Guardrails: a retreat goal after a minute of very high alarm; a higher jump threshold after too
- * many interrupts; half the switching effect after too many switches. It never proposes an action,
- * and nothing here touches a full-urgency reflex.
+ * many interrupts. It never proposes an action, and nothing here touches a full-urgency reflex.
  */
 export function createNoradrenalineRegion(options: NoradrenalineOptions): Region {
-  const { triggers, threatPresent, settings, searchInputs = createSearchInputs(), name = NORADRENALINE, layer = 0 } = options;
+  const { settings, searchInputs = [], name = NORADRENALINE, layer = 0 } = options;
   const retreatGoal = options.retreatGoal ?? { text: "Retreat to safety: get away from the danger and somewhere secure.", steps: [] };
   const alarm = createAlarm(settings);
   const search = createSearch(settings);
   const novelty = noveltyBump();
   const on = (effect: number) => effect > 0;
 
-  let before: State | null = null;
+  /** Each need's level at the last tick. */
+  let levels = new Map<string, number>();
   let lastAt: number | null = null;
   let recent: { at: number; level: number }[] = [];
   let offline = false;
   let weight = 1;
   let interrupts: number[] = [];
   let jumpyUntil = -Infinity;
-  let pendingReplan = false;
   let veryHighSince: number | null = null;
   let panicked = false;
   let searchHighSince: number | null = null;
   let rethinkAt = -Infinity;
   let rethinking: { goalSetAt: number | null } | null = null;
-  let switches: number[] = [];
-  let hoppingUntil = -Infinity;
-  const seenEvents = new WeakSet<SkillEvent>();
 
   return {
     name,
@@ -138,32 +113,20 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
       lastAt = now;
       const notes: Record<string, unknown> = {};
 
-      // Alarm.
+      // Alarm: never below what the vital needs press at; a need suddenly worse, or a startle, adds a jump.
+      const needs = options.needs(ws);
+      const sustained = Math.max(0, ...needs.filter((n) => n.rank > 0).map((n) => n.level));
       const raisedBy: Record<string, number> = {};
-      const sameCause: Record<string, string> = {};
-      if (before) {
-        const moment = { before, after, ws };
-        for (const trigger of triggers) {
-          const bump = trigger.check(moment);
-          if (bump > 0) raisedBy[trigger.name] = bump;
-        }
-        // Two triggers set off by one event count once, at the larger: the second adds only what it has over the first.
-        for (const trigger of triggers) {
-          const other = raisedBy[trigger.name] !== undefined ? trigger.sameCauseAs?.(moment) : null;
-          if (!other || raisedBy[other] === undefined) continue;
-          const over = raisedBy[trigger.name]! - raisedBy[other];
-          if (over > 0) raisedBy[trigger.name] = over;
-          else delete raisedBy[trigger.name];
-          sameCause[trigger.name] = other;
-        }
+      for (const n of needs) {
+        const worse = n.weight * (n.level - (levels.get(n.name) ?? n.level));
+        if (worse > 0) raisedBy[n.name] = worse;
       }
-      if (before && options.allClear?.(before, after)) {
-        alarm.settle(ALL_CLEAR_KEEPS);
-        notes.allClear = "what looked like a threat cannot harm: alarm cut";
-      }
-      before = after;
-      const threat = threatPresent(after);
-      const level = alarm.update(Object.values(raisedBy).reduce((sum, b) => sum + b, 0), threat, now);
+      levels = new Map(needs.map((n) => [n.name, n.level]));
+      const worsened = Math.min(1, Object.values(raisedBy).reduce((sum, w) => sum + w, 0));
+      // A startle and the thing that set it off are one event: alarm takes the larger, not their sum.
+      const startle = STARTLED * (options.startle?.(ws) ?? 0);
+      if (startle > worsened) raisedBy.startle = startle;
+      const level = alarm.update(sustained, settings.alarmGain * Math.max(worsened, startle), now);
 
       // A jump: alarm rose by more than the threshold within the last second.
       recent = [...recent.filter((r) => now - r.at <= JUMP_WINDOW_MS), { at: now, level }];
@@ -171,23 +134,16 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
       const jumped = level - Math.min(...recent.map((r) => r.level)) > threshold;
       if (jumped) recent = [{ at: now, level }];
 
-      // Effect b: interrupt, then re-plan once calm.
+      // Effect b: interrupt. The running skill is stopped; the goal is kept, and stands again once alarm falls.
       interrupts = interrupts.filter((at) => now - at <= GUARD_WINDOW_MS);
       const interrupt = on(settings.interrupt) && jumped && now - (interrupts.at(-1) ?? -Infinity) >= INTERRUPT_GAP_MS;
       if (interrupt) {
         interrupts.push(now);
-        // A goal that prepared for trouble (it loaded a response or holds a reflex back) is kept:
-        // cancelling it at the first fright would undo the very thing it was set up for.
-        const prepared = ws.goal !== null && (ws.goal.ifThen.length > 0 || ws.goal.holdBack.length > 0);
-        if (prepared) notes.keptGoal = "the goal prepared for this (loaded response or hold-back), so it stays";
-        else ws.clearGoal();
-        pendingReplan = true;
         if (interrupts.length > MAX_INTERRUPTS) {
           jumpyUntil = now + GUARD_WINDOW_MS;
           notes.jumpy = `${interrupts.length} interrupts in 5 minutes: needing a bigger jump for the next 5`;
         }
       }
-      if (pendingReplan && ws.goal !== null) pendingReplan = false;
 
       // Effect a: who is in charge.
       if (level > OFFLINE_ABOVE) offline = true;
@@ -221,19 +177,6 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
         notes.rethink = "search above 0.7 for 30 seconds: telling the planner the goal isn't paying off";
       }
 
-      // Guardrail: goal-hopping. Count skills dropped for another while search is high.
-      const fresh = ws.recentEvents.filter((e) => !seenEvents.has(e));
-      for (const e of fresh) seenEvents.add(e);
-      const dropped = fresh.filter((e) => e.type === "interrupted").length;
-      switches = switches.filter((at) => now - at <= GUARD_WINDOW_MS);
-      if (searching > SWITCHING_ABOVE) for (let i = 0; i < dropped; i++) switches.push(now);
-      if (switches.length > MAX_SWITCHES && now >= hoppingUntil) {
-        hoppingUntil = now + GUARD_WINDOW_MS;
-        switches = [];
-        notes.goalHopping = "over 4 switches in 5 minutes with search high: halving its effect on switching for 5 minutes";
-      }
-      const switching = settings.switching * (now < hoppingUntil ? 0.5 : 1);
-
       ws.setSignal(ALARM_SIGNAL, level);
       ws.setSignal(SEARCH_SIGNAL, searching);
       ws.setSignal(PLANNER_WEIGHT_SIGNAL, weight);
@@ -242,17 +185,16 @@ export function createNoradrenalineRegion(options: NoradrenalineOptions): Region
       ws.setSignal(INTERRUPT_SIGNAL, interrupt ? 1 : 0);
       const asked = options.replanWhen?.(ws) ?? false;
       if (asked) notes.replanAsked = true;
-      ws.setSignal(REPLAN_SIGNAL, (pendingReplan && level < CALM_BELOW) || rethinking || asked ? 1 : 0);
+      ws.setSignal(REPLAN_SIGNAL, rethinking || asked ? 1 : 0);
       ws.setSignal(RETHINK_SIGNAL, rethinking ? 1 : 0);
-      ws.setSignal(SWITCHING_SIGNAL, NEUTRAL_SEARCH + (searching - NEUTRAL_SEARCH) * switching);
+      ws.setSignal(SWITCHING_SIGNAL, NEUTRAL_SEARCH + (searching - NEUTRAL_SEARCH) * settings.switching);
 
       return {
         proposals: [],
         trace: {
           alarm: level,
           ...(Object.keys(raisedBy).length ? { raisedBy } : {}),
-          ...(Object.keys(sameCause).length ? { sameCause } : {}),
-          threat,
+          sustained,
           plannerWeight: weight,
           ...(plannerOffline ? { plannerOffline: true } : {}),
           ...(interrupt ? { interrupt: true } : {}),

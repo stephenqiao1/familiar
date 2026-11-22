@@ -52,9 +52,10 @@ export function newLife(moment: Pick<RewardMoment, "before" | "after">): boolean
 /**
  * A need: `level` reads how pressing it is (0 to 1) from a state, or null where it does not
  * apply. The reward is the signed change in that level, described by `say`. `rank` says how
- * vital it is next to the others (see pressingNow): a higher one quietens the lower.
+ * vital it is next to the others (see pressingNow): a higher one silences the lower. `weight`
+ * says how much it darkens the outlook when unmet (see outlookFrom).
  */
-function need(name: string, kind: string, level: (d: MinecraftStateData) => number | null, say: (a: MinecraftStateData, b: MinecraftStateData) => string, rank = 0): RewardRule {
+function need(name: string, kind: string, level: (d: MinecraftStateData) => number | null, say: (a: MinecraftStateData, b: MinecraftStateData) => string, { rank = 0, weight = 1 }: { rank?: number; weight?: number } = {}): RewardRule {
   const paid = rule(name, kind, (a, b, moment) => {
     const [before, after] = [level(a), level(b)];
     if (before === null || after === null || before === after || newLife(moment)) return null;
@@ -63,6 +64,7 @@ function need(name: string, kind: string, level: (d: MinecraftStateData) => numb
   return {
     ...paid,
     rank,
+    weight,
     level(state) {
       const data = minecraftDataOf(state);
       return data && level(data);
@@ -105,7 +107,7 @@ export const danger = need(
     if (!now) return `${was?.type ?? "threat"} gone`;
     return was ? `${now.type} at ${was.dist} → ${now.dist} blocks` : `${now.type} at ${now.dist} blocks`;
   },
-  1,
+  { rank: 1, weight: 2 },
 );
 
 /** At night, how dark it is where the bot stands (the nearest thing to shelter the state shows). By day it does not apply. */
@@ -131,6 +133,9 @@ export const sleptThroughNight = rule("slept_through_night", "rest", (a, b, { ev
 
 // Having enough
 
+/** Being provided for: lacking it does not make the next minutes bad, so it darkens the outlook only a little. */
+const PROVISION = { weight: 0.25 };
+
 /** How many kinds of tool (sword, pickaxe, axe, shovel) the bot has none of. */
 export const tools = need(
   "tools",
@@ -141,21 +146,21 @@ export const tools = need(
     const gained = has.filter((kind) => !had.includes(kind));
     const lost = had.filter((kind) => !has.includes(kind));
     return [gained.length ? `now has a ${gained.join(", ")}` : "", lost.length ? `no ${lost.join(", ")} any more` : ""].filter(Boolean).join("; ");
-  },
+  },  PROVISION,
 );
 
 export const foodStock = need(
   "food_stock",
   "having_enough",
   (d) => shortOf(d.self.foodItems, FOOD_STOCK_TARGET),
-  (a, b) => `food items ${a.self.foodItems} → ${b.self.foodItems}`,
+  (a, b) => `food items ${a.self.foodItems} → ${b.self.foodItems}`,  PROVISION,
 );
 
 export const torches = need(
   "torches",
   "having_enough",
   (d) => shortOf(d.self.inventory.torch ?? 0, TORCH_TARGET),
-  (a, b) => `torches ${a.self.inventory.torch ?? 0} → ${b.self.inventory.torch ?? 0}`,
+  (a, b) => `torches ${a.self.inventory.torch ?? 0} → ${b.self.inventory.torch ?? 0}`,  PROVISION,
 );
 
 // Curiosity

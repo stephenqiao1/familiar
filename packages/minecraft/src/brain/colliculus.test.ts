@@ -2,7 +2,6 @@ import { createWorkspace } from "@familiar/core";
 import { DEFAULT_COLLICULUS, FEATURES, salienceOf } from "@familiar/region-brainstem";
 import { describe, expect, it } from "vitest";
 import { fakeData, fakeState, inView } from "../encode/state.test-helper.js";
-import { looming } from "./alarm.js";
 import { createScan, featuresOf, perceptsOf, playerColliculus, type Physical } from "./colliculus.js";
 import { defenceReflexes } from "./defence.js";
 
@@ -151,20 +150,5 @@ describe("looming in the defence reflexes and in alarm", () => {
     expect(check({ nearby: { mobs: [charging], sudden: [{ ...arrow, id: "entity:2", dist: 15 }] } })).toMatchObject({ action: { skill: "flee", target: "entity:2" } });
     // A projectile with nothing hostile in sight: nothing to run from.
     expect(check({ nearby: { sudden: [arrow] } })).toBeNull();
-  });
-
-  it("looming raises alarm once, as it starts", () => {
-    const trigger = looming();
-    const store = createWorkspace();
-    const ws = store.viewFor("noradrenaline");
-    const moment = { before: fakeState(), after: fakeState(), ws };
-    expect(trigger.check(moment)).toBe(0);
-    store.viewFor("colliculus").setSignal("looming", 1);
-    expect(trigger.check(moment)).toBe(0.6);
-    expect(trigger.check(moment)).toBe(0);
-    store.viewFor("colliculus").setSignal("looming", 0);
-    trigger.check(moment);
-    store.viewFor("colliculus").setSignal("looming", 0.5);
-    expect(trigger.check(moment)).toBe(0.3);
   });
 });

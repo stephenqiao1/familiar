@@ -256,7 +256,7 @@ const scenes: Record<string, () => Promise<Row>> = {
       async () => {
         await sleep(17_000);
         appearedAt = Date.now();
-        rcon("summon zombie 60.5 151 37.5 {NoAI:1b,Silent:1b}");
+        rcon("summon zombie 60.5 151 37.5 {IsBaby:0b,NoAI:1b,Silent:1b}");
         await sleep(4000);
       },
       { plan },
@@ -275,7 +275,7 @@ const scenes: Record<string, () => Promise<Row>> = {
       async () => {
         await sleep(8000);
         at = Date.now();
-        rcon(`execute at ${BOT} run summon zombie ~ ~ ~2 {Silent:1b}`);
+        rcon(`execute at ${BOT} run summon zombie ~ ~ ~2 {IsBaby:0b,Silent:1b}`);
         await sleep(12_000);
       },
       { whole: true },
@@ -286,8 +286,9 @@ const scenes: Record<string, () => Promise<Row>> = {
     const onArrival = firstTick?.signals.alarm?.value ?? 0;
     const peak = Math.max(0, ...since.map((t) => t.signals.alarm?.value ?? 0));
     const offline = since.filter((t) => (t.signals.planner_offline?.value ?? 0) > 0).length;
-    const before = 0.9; // 0.6 for the mob appearing plus the old fixed 0.3 for the startle
-    return row("ambush (whole brain)", onArrival > 0 && onArrival <= 0.8, `alarm on the tick it appeared: ${onArrival.toFixed(2)} (raised by ${JSON.stringify(firstTick ? traceOf(firstTick, "noradrenaline").raisedBy : {})}); before this change that tick gave ${before}. Peak over the fight: ${peak.toFixed(2)}; planner offline ${offline} of ${since.length} ticks; lowest health ${Math.min(...since.map((t) => t.state.data.self.health))}`, first?.s, first ? startMs(ticks, first) : null);
+    // Alarm follows the danger itself now; what is checked is that the startle adds nothing on top of it.
+    const raisedBy = (firstTick ? traceOf(firstTick, "noradrenaline").raisedBy : undefined) ?? {};
+    return row("ambush (whole brain)", onArrival > 0 && raisedBy.startle === undefined, `alarm on the tick it appeared: ${onArrival.toFixed(2)} (raised by ${JSON.stringify(raisedBy)}); peak ${peak.toFixed(2)}; planner offline on ${offline} of ${since.length} ticks; lowest health ${Math.min(...since.map((t) => t.state.data.self.health))}`, first?.s, first ? startMs(ticks, first) : null);
   },
 
   /** 9. Starving for a minute: at most one startle. */

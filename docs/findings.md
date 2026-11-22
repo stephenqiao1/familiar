@@ -146,6 +146,178 @@ entries named in brackets hold the evidence.*
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
 
+## Noradrenaline: alarm follows the danger, search follows getting nowhere
+
+*Built and run live 2026-11-22.*
+
+**The problem.** Alarm kept its own books on danger: five hand-set triggers raised it and only
+a clock lowered it. Over 120 live logs it was above 0.6 on 4,801 ticks, 73% of them with no
+threat present, and while it was high the bot ticked faster, stopped being told of chests, and
+had its planner taken out of charge. A fright cleared the goal (53 times), which left the bot
+wanting nothing for 10 to 20 s. A disappointing chest trip raised alarm as a zombie would.
+Search, the other dial, stayed between 0.17 and 0.47 for 16,000 ticks, below every level at
+which it does anything.
+
+**The rule now.** Noradrenaline says how much this moment calls for a change of course, read
+from evidence the brain already has. Alarm is "change now" and follows the danger itself.
+Search is "change soon" and follows whether the bot is getting anywhere.
+
+1. **Alarm follows the vital needs, up and down** (`noradrenaline-region.ts`, `alarm.ts`). It
+   is never below what a vital need (rank above 0: danger) presses at, and what is left once
+   the cause has gone fades with a 5 s constant (was 30). A new vital need raises alarm with no
+   further code.
+2. **One kind of jump: a need suddenly worse.** The jump is the sum over all needs of weight ×
+   how much worse the need got this tick (capped at 1), or 0.4 × the body's startle if that is
+   larger. A mob appearing, a blow, a fall are all this. Jumps do not pile up: a need a little
+   worse every tick is not alarm. The triggers `hostile_appeared`, `damage`, `looming` and
+   `big_surprise` are gone, with the all-clear added two days ago (it is now automatic).
+3. **A failed skill is search's business.** Nothing about a skill's outcome raises alarm.
+4. **A fright stops the running skill and keeps the goal.** The planner is asked again only
+   when it is told the goal is not paying off, or the bot was moved.
+5. **Search follows getting nowhere** (`gettingNowhere` in `search.ts`). Up by how hard the
+   worst unanswered ordinary need presses, while the running skill makes no progress (the
+   measure built for serotonin); down while it is getting somewhere, or while nothing presses.
+   The dial now runs from rest to the top, so its effects are within reach.
+6. **Alarm no longer hides things.** The state used to drop friendly mobs and useful blocks
+   above alarm 0.6. Need priority already silences lesser wants while danger presses, so this
+   only made things vanish and then look new.
+
+Also gone: the goal-hopping guard (the wait before retrying does that job), and the settings
+`acetylcholine.noisyOrChanged` and its surprise threshold (they only fed the old trigger).
+
+**Seen live** (`pnpm noradrenaline-check`, new, four scenes).
+
+| Scene | Before | After |
+|---|---|---|
+| `after_threat`: a husk attacks for 6 s and is removed | Alarm 0.99 when it went; still above 0.3 after 25 s; above 0.6 on 70 of 98 ticks; planner offline on 88 | 0.55 when it went; under 0.3 after 4.5 s; above 0.6 on 0 of 54; planner offline on 2 |
+| `goal_kept`: a fright with a goal set | No goal for 10 s | Goal there on every tick |
+| `let_down`: a trip to a chest emptied behind its back | Alarm raised to 0.37 | Alarm raised by nothing |
+| `stuck`: starving, nothing to eat, 84 s | Search 0.32 → 0.20 | Search 0.36 → 0.84 |
+| `neuro-check` calm, ambush, remembered, hunger, night | Pass | Pass |
+| `defence-check` (11 scenes), `startle-check` (9), `serotonin-check` (4), three dopamine scenes | | Pass, all of them |
+| `arousal-check`, ten scenes | | Eight pass; `depth` and `hungry` failed (flaky, see limits) |
+
+**Limits.**
+- **Danger means a mob that could harm the bot.** Lava, fire, drowning and a long fall are not
+  vital needs yet, so alarm knows of them only through the hurt they do (a need suddenly worse)
+  and the startle. The plan was to add them; not done.
+- **A threat right on the bot takes the planner offline while it is there.** A zombie 2 blocks
+  off presses at about 0.9, above the 0.8 that does it. An earlier finding had tuned an ambush
+  to stay under that; with alarm following danger it does not, but the planner is back within
+  seconds of the threat going and the goal is kept.
+- **A blow no longer adds to alarm that danger already holds up.** Hit while a mob presses at
+  0.5, alarm stays 0.5 unless the hit is worth more.
+- **Losing things suddenly is a small alarm.** The scene's own `clear` raised it to 0.25.
+- **Search's effects still switch on at fixed levels** (wider options at 0.6, a rethink after
+  30 s above 0.7). The plan said graded; only switching is.
+- **Search rises for an idle bot that lacks provisions**: no tools or torches press at 0.25,
+  which heads search for about 0.48. That makes it a little readier to switch; not seen to
+  cause hopping, and not run for long.
+- **Search does not read failed or cut-short runs directly**, only the lack of progress.
+- **Not seen live:** the rethink, wider options, the panic lock, and search with Jev running.
+- **"An untried chest is never tried" is not solved by this**, though the design note said
+  search might.
+- **`arousal-check hungry` fails about one run in two, with these changes and without** (two
+  runs each way, the second against the last commit). In the failed runs the bot is out of bed
+  a fraction of a second after lying down, as the scene's own commands land. `depth` failed
+  once the same way and passed on the rerun. Not fixed.
+- **Two checks were changed to the new rule**: `startle-check`'s whole-brain ambush asked for
+  alarm of 0.8 or less on arrival and now asks that the startle adds nothing to the danger's
+  own jump; `neuro-check hold` no longer looks for the note that a goal was kept.
+- **Other regions read alarm** (reflex gains, startle, waking, tick rate). They now see an
+  alarm that falls in seconds; their checks were rerun (table above), not retuned.
+
+**Status.** Built. Open: the limits above.
+
+## Serotonin: patience from the needs, protection for what is working, restraint by what was learned
+
+*Built and run live 2026-11-22.*
+
+**The problem.** Patience acted on labels, not evidence. It protected whatever was running (a
+`flee` going nowhere kept its stay bonus and outvoted the cornered fight), it held back any
+skill marked risky whoever proposed it (the defence circuit's own fight, on all 31 ticks of a
+live fight), and it followed an average of five readings that was a second, cruder opinion of
+how things stood (starving with no food, the outlook still read 0.58, and after a calm spell
+patience was at its highest just as a threat appeared).
+
+**The rule now.** How long the bot stays with something depends on what it expects to gain,
+whether it is getting anywhere, and how long it can afford to wait. Serotonin supplies only the
+last.
+
+1. **One opinion of how things stand** (`outlookFrom` in `serotonin/patience.ts`). The outlook
+   is worked out from the same needs dopamine is paid for: 1 / (1 + the sum of each need's
+   weighted level squared). One need at its worst gives 0.5, each further trouble lowers it,
+   and none is watered down by the ones that are fine. Each need has a `weight`: a threat to
+   life 2, the body's own needs 1, provisions (tools, a stock of food, torches) 0.25. The five
+   outlook readings and the "input stuck at 0" warning are gone. A new need is followed with
+   no further code.
+2. **Patience falls fast and rises slowly.** It reaches a worse outlook in about 3 s and climbs
+   back over the bot's time constant (a minute). The fixed shock cut and the alarm link
+   (`patienceLink`) are gone.
+3. **Protection goes to what is working** (`persistence.ts`, `brain/progress.ts`). The stay
+   bonus is full when the running skill has just got somewhere and fades to nothing over 10 s
+   without (5 to 15 s by patience). Getting somewhere is a reward, a need easing or ground
+   covered. The give-up time is as before.
+4. **Restraint by learned cost, for the deciding layers only** (`createArbiter`). Patience
+   holds back an option by how costly it has been learned to be here, aimed at this (the
+   scorebook's cost). A skill marked risky starts as costly, any other as harmless, and what
+   happens then moves both. A reflex is never touched.
+5. **A skill given up on waits before a deciding layer may start it again**: 8 s, then 16, 32,
+   up to a minute (the same `retryAfter` as a thwarted want). A run that finishes ends it.
+6. **The running skill is always in the vote.** While the layer that chose it says nothing
+   (it is not asked every tick), its choice stands as made. Once it speaks again, its word
+   counts.
+
+**Seen live** (`pnpm serotonin-check`, new, five scenes).
+
+| Scene | Before | After |
+|---|---|---|
+| `armed`: sword in hand, a husk on the bot | The fight reflex was scaled down on 31 of 31 ticks (to ×0.95) | On 0 of 34 ticks |
+| `starving`: food bar empty, no food, nothing else wrong | Outlook 0.58 (four good readings and one bad) | Outlook 0.45; patience 0.35 |
+| `threat`: 45 s of calm, then a husk | Patience 0.59 a second after, 0.37 by the end | 0.52 a second after, 0.21 by the end |
+| `nowhere`: idling | Stay bonus faded over two minutes | 0.120 at 2 s, 0.007 at 10 s, 0 at 18 s |
+| `nowhere`: an 18-block walk | | Stay bonus never below 0.140 |
+| `give_up`: idling with nothing to show | Never seen live | Given up on after 144 s (patience 0.70) |
+| `neuro-check` calm, ambush, remembered, hunger, night; three dopamine scenes; `medulla-check` (7 scenes) | Pass | Pass (the ambush check now asks for a fall of 0.2 within 3 s, not in one tick) |
+| `defence-check`, eleven scenes | Ten pass | Nine pass; `shooter` and `around` failed (both flaky, see limits) |
+| `arousal-check`, ten scenes | | Seven passed the first time; the three that failed passed on a rerun, with and without these changes |
+
+**Limits.**
+- **Each need now carries a third number** (`weight`, beside `rank`). Rank is strict priority
+  for action; weight is how much the need darkens the outlook. With one number for both, a
+  bot with no torches would have had a bad outlook for ever.
+- **"About three seconds", not "that tick".** The design said patience would drop the tick a
+  vital need presses. It falls a third of the way each second instead, so one bad reading does
+  not throw it.
+- **Progress is only what can be seen.** A skill that works without covering ground, easing a
+  need or earning a reward (digging, waiting on purpose) loses its protection after 10 s. A
+  skill cannot yet report its own progress.
+- **Pacing counts as getting somewhere.** Ground covered is any ground, not ground toward the
+  goal.
+- **The body's urge still shrinks the stay bonus**, as before. The plan was to drop that patch;
+  it stays until `medulla-check` is rerun without it.
+- **Restraint needs experience.** A skill not marked risky is not held back until it has cost
+  the bot something.
+- **The wait after giving up is by skill, not by target**: giving up on one journey holds back
+  every `go_to` for 8 s.
+- **The standing choice only shows when a deciding layer is silent for a tick.** With Jev asked
+  every tick it changes nothing; not seen live.
+- **Curiosity is not among the needs the outlook reads** (it reads the body's and the stock's).
+- **Three checks turned out to be flaky, none from this change** (each was run with these
+  changes and without them, on the commit before):
+  - `defence-check around` fails about one run in two either way: it depends on whether the
+    husk is seen before the route is planned.
+  - `arousal-check` bedtime, depth and hungry failed once (the bed could not be reached for a
+    moment, and sleep was not tried again) and passed on the rerun either way.
+  - A summoned husk or zombie is a baby one time in twenty. A baby moves at 6 blocks a second,
+    which counts as looming from 15 blocks off, and failed `open` and `dangerous` once. Every
+    scene now summons an adult (`IsBaby:0b`).
+- **Giving up on idling takes 144 s** at patience 0.70. Nothing here shortened it.
+- **The behaviour tests for the planning horizon were not touched**, and the horizon was not
+  run live.
+
+**Status.** Built. Open: the limits above.
+
 ## Dopamine: a want that cannot be carried out is neither hammered at nor unlearned
 
 *Built and run live 2026-11-21. Closes "a want that cannot be carried out is retried at once
@@ -2431,7 +2603,7 @@ cancel the current plan step and clear short-term working notes: neither exists 
 
 **What would fix it.** Nothing until those exist. When they do, clear them where the goal is cleared.
 
-**Status.** Open.
+**Status.** Closed 2026-11-22: an interrupt stops the running skill and keeps the goal.
 
 ## Alarm: narrowing attention hides things, which then look new again
 
@@ -2447,7 +2619,7 @@ state has no notion of an escape route.
 **What would fix it.** Keep the full state for the brain's own bookkeeping and narrow only what Jev
 is shown; add an escape-route sense (e.g. the nearest open direction away from the threat).
 
-**Status.** Open.
+**Status.** Closed 2026-11-22: alarm no longer drops anything from the state.
 
 ## Alarm: some triggers can't be sensed yet
 
@@ -2509,7 +2681,7 @@ minutes. It counts every skill dropped for another while search is above 0.6, wh
 **What would fix it.** Have the arbiter say when the reduced stay bonus changed the winner, and
 count only those.
 
-**Status.** Open.
+**Status.** Closed 2026-11-22: the guard is gone; a skill given up on, and a thwarted want, wait before they are tried again.
 
 ## Memory: recalling keeps the same few memories strong
 
@@ -2581,7 +2753,7 @@ the open and dark, and `fed` is 0 for a starving bot with no food.
 is 0 while the state it reads from says otherwise. Kept on purpose for now: a bot standing in the
 dark all night is worth noticing too, and the warning says "check", not "broken".
 
-**Status.** Open, low priority.
+**Status.** Closed 2026-11-22: the outlook inputs and their warning are gone; the outlook is worked out from the needs.
 
 ## Mood can't be shared between brain parts yet
 
@@ -2660,7 +2832,7 @@ options, and the running skill is not always among them.
 **What would fix it.** Always put the running skill among the candidates (a "keep doing this"
 proposal at a modest urgency), so the stay bonus always has something to lift.
 
-**Status.** Open.
+**Status.** Closed 2026-11-22: the running skill is always in the vote while the layer that chose it is silent.
 
 ## Patience: a skill the bot gave up on can be picked again at once
 
@@ -2677,7 +2849,7 @@ success, the over-persisting guardrail ignores patience.
 **What would fix it.** A short cool-off after giving up: leave the skill out of instinct's options,
 or have the arbiter score it down, for a while.
 
-**Status.** Open.
+**Status.** Closed 2026-11-22: a skill given up on waits 8 s (then 16, 32, up to a minute) before a deciding layer may start it again.
 
 ## Dopamine: disappointment fades the urge to check, but never ends it
 

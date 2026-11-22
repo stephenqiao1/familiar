@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAttention, NEUTRAL_BUDGET } from "./attention.js";
 import { createCuePulse } from "./cue-pulse.js";
-import { changedThreshold, createFocus, trustOf } from "./focus.js";
+import { createFocus, trustOf } from "./focus.js";
 import { DEFAULT_FOCUS, focusProblem } from "./settings.js";
 
 describe("createFocus", () => {
@@ -27,13 +27,6 @@ describe("createFocus", () => {
     const focus = createFocus(DEFAULT_FOCUS);
     hold(focus, 4, 600);
     expect(focus.update(4, true, 601_000)).toBe(0.05);
-  });
-});
-
-describe("changedThreshold", () => {
-  it("asks for a bigger surprise the higher focus is", () => {
-    expect(changedThreshold(0.5)).toBe(0.5);
-    expect(changedThreshold(0.9)).toBeGreaterThan(changedThreshold(0.1));
   });
 });
 

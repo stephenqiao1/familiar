@@ -17,14 +17,13 @@
     },
     "noradrenaline": {
       "alarmGain": 1,
-      "alarmDecaySeconds": 30,
+      "alarmDecaySeconds": 5,
       "searchResting": 0.3,
-      "searchTimeConstantSeconds": 90,
+      "searchTimeConstantSeconds": 60,
       "inCharge": 1,
       "interrupt": 1,
       "focus": 1,
       "memoryTag": 1,
-      "patienceLink": 1,
       "switching": 1,
       "widerOptions": 1,
       "tellPlanner": 1
@@ -39,8 +38,7 @@
       "memoryWrite": 1,
       "consolidation": 1,
       "cuePulse": 1,
-      "learningWindow": 1,
-      "noisyOrChanged": 1
+      "learningWindow": 1
     },
     "brainstem": {
       "bravery": 0.5,
