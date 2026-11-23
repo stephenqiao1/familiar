@@ -4,7 +4,7 @@ export { skillValue } from "./dopamine/effort.js";
 export { needChangeReward } from "./dopamine/need-change.js";
 export { createNoveltyMemory, createNoveltyRule, type NoveltyMemory } from "./dopamine/novelty.js";
 export { DEFAULT_PERSONALITY, personalityProblem, type DopaminePersonality } from "./dopamine/personality.js";
-export { needLevels, needsOf, pressingNow, type Need } from "./dopamine/rewards.js";
+export { needLevels } from "./dopamine/rewards.js";
 export type { Reward, RewardMoment, RewardRule } from "./dopamine/rewards.js";
 export { effortOf, reliefOf, trustAfter, holdNow, wantNow, type NeedLevels } from "./dopamine/wanting.js";
 export { MAX_WASTE, WASTED_EFFORT_RULE, wastedEffort } from "./dopamine/wasted.js";

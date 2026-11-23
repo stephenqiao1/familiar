@@ -4,8 +4,9 @@
 
 import type { Candidate, RegionOutput, SkillEvent, State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
-import { SCHEMA_VERSION, situationOf, type MinecraftStateData } from "@familiar/minecraft";
-import { createNoveltyMemory, createScorebook, DEATH_OUTCOME, DEFAULT_PATIENCE, DEFAULT_PERSONALITY, DOPAMINE_SIGNAL } from "@familiar/neuromodulators";
+import { needsNow, playerDayTime, playerNeeds, SCHEMA_VERSION, situationOf, type MinecraftStateData } from "@familiar/minecraft";
+import { createNoradrenalineRegion, createNoveltyMemory, createPatienceRegion, createScorebook, DEATH_OUTCOME, DEFAULT_NORADRENALINE, DEFAULT_PATIENCE, DEFAULT_PERSONALITY, DOPAMINE_SIGNAL } from "@familiar/neuromodulators";
+import { createHypothalamusRegion, DEFAULT_DRIVES, DRIVES_OFF } from "@familiar/region-hypothalamus";
 import { describe, expect, it } from "vitest";
 import { createArbiter, createPlayerDopamine } from "./brain.js";
 
@@ -392,6 +393,64 @@ describe("dopamine behaviour", () => {
       const out = tick({ deaths: 1 });
       expect(out.trace?.blamedForDeath).toMatchObject({ skill: "idle", outcome: DEATH_OUTCOME });
       expect(scorebook.get(situation, "idle").expected).toBeLessThan(0);
+    });
+  });
+
+  describe("the hypothalamus: one shared reading of the needs", () => {
+    /** The same day lived twice: with the hypothalamus reading the needs, and with it left out. */
+    function live(withHypothalamus: boolean, settings = DRIVES_OFF) {
+      const store = createWorkspace();
+      const regions = [
+        ...(withHypothalamus ? [createHypothalamusRegion({ needs: playerNeeds, settings, dayTime: playerDayTime })] : []),
+        createPlayerDopamine({ scorebook: createScorebook(), novelty: createNoveltyMemory(), personality: DEFAULT_PERSONALITY, skillsToward: () => ["go_to"] }),
+        createNoradrenalineRegion({ needs: needsNow, settings: DEFAULT_NORADRENALINE }),
+        createPatienceRegion({ needs: needsNow, settings: DEFAULT_PATIENCE }),
+      ];
+      const husk = (dist: number) => ({ id: "entity:9", type: "husk", dist, hostile: true, reachable: true });
+      const day: [Patch, Omit<SkillEvent, "timestamp">[]][] = [
+        [{}, []],
+        [{}, []],
+        [{ foodItems: 0 }, [{ skill: "go_to", target: CHEST, type: "started" }]],
+        [{ foodItems: 0, x: 3 }, []],
+        [{ foodItems: 4, x: 6 }, [{ skill: "go_to", type: "done" }]],
+        [{ foodItems: 4, food: 6 }, []],
+        [{ foodItems: 3, food: 12 }, []],
+        [{ foodItems: 3, food: 12, mobs: [husk(6)] }, []],
+        [{ foodItems: 3, food: 12, health: 14, mobs: [husk(2)] }, [{ skill: "flee", type: "started" }]],
+        [{ foodItems: 3, food: 12, health: 14, x: 12, mobs: [husk(9)] }, []],
+        [{ foodItems: 3, food: 12, health: 14, x: 20 }, [{ skill: "flee", type: "done" }]],
+        [{ foodItems: 0, food: 12, health: 16, x: 20 }, []],
+        [{ foodItems: 0, food: 12, health: 20, deaths: 1 }, []],
+        [{ foodItems: 0 }, []],
+      ];
+      let now = 0;
+      return day.map(([patch, events]) => {
+        for (const e of events) store.addEvent({ ...e, timestamp: now });
+        now += 500;
+        store.update(state(patch, now), null);
+        const outs = regions.map((region) => region.run(store.viewFor(region.name), signal) as RegionOutput);
+        const [dopamine, noradrenaline, serotonin] = outs.slice(-3) as [RegionOutput, RegionOutput, RegionOutput];
+        // Everything the needs feed: rewards and what was learned, cues and proposals, alarm, search, the outlook and patience.
+        return { rewards: dopamine.trace?.rewards, episodes: dopamine.trace?.episodes, cues: dopamine.trace?.cues, proposals: dopamine.proposals, alarm: noradrenaline.trace?.alarm, raisedBy: noradrenaline.trace?.raisedBy, search: noradrenaline.trace?.search, outlook: serotonin.trace?.outlook, patience: serotonin.trace?.patience, needs: serotonin.trace?.needs, shared: store.needs() !== null };
+      });
+    }
+
+    it("gives the same rewards, wants, alarm, search and outlook with the region as with it left out", () => {
+      const [withIt, without] = [live(true), live(false)];
+      expect(withIt.every((t) => t.shared)).toBe(true);
+      expect(without.some((t) => t.shared)).toBe(false);
+      expect(withIt.map(({ shared: _shared, ...t }) => t)).toEqual(without.map(({ shared: _shared, ...t }) => t));
+      // And the day had something in it to compare: needs were paid for, a threat raised alarm, the outlook moved.
+      const rewards = withIt.flatMap((t) => (t.rewards as { rule: string }[] | undefined) ?? []).map((r) => r.rule);
+      expect(rewards).toEqual(expect.arrayContaining(["food_stock", "food_bar", "health", "danger", "died"]));
+      expect(Math.max(...withIt.map((t) => t.alarm as number))).toBeGreaterThan(0.5);
+      expect(new Set(withIt.map((t) => t.outlook)).size).toBeGreaterThan(3);
+    });
+
+    it("with every drive on, each reward is still paid on the real level: looking ahead changes what is wanted, never what is paid", () => {
+      const [ahead, plain] = [live(true, DEFAULT_DRIVES), live(true)];
+      expect(ahead.map((t) => t.rewards)).toEqual(plain.map((t) => t.rewards));
+      expect(ahead.map((t) => t.episodes)).toEqual(plain.map((t) => t.episodes));
     });
   });
 });

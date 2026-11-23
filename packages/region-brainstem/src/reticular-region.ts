@@ -8,6 +8,8 @@ import { AROUSAL_SIGNAL, DEPTH_SIGNAL, FRAZZLED_SIGNAL, PAIN_SIGNAL, QUIET_SIGNA
 /** What the reticular formation needs to know of the moment. */
 export interface Moment {
   night: boolean;
+  /** How far night has come, 0 (day) to 1 (night), rising over dusk and falling over dawn, when the body has a clock. Default: all or nothing, by `night`. */
+  nightness?: number;
   /** How far through the night it is, 0 (dusk) to 1 (dawn). */
   nightProgress: number;
   /** Nothing threatening in view. */
@@ -32,6 +34,8 @@ export interface ReticularOptions {
   alarmOf(ws: Workspace): number;
   /** Whether a hard reflex fired this tick. Default: never. */
   hardReflex?(ws: Workspace): boolean;
+  /** Slow stress, 0 to 1: a stressed body does not get sleepy. Default: none. */
+  stressOf?(ws: Workspace): number;
   /** The moment, or null before the first state. */
   moment(ws: Workspace): Moment | null;
   /** The skill that is going to bed, and why it cannot be started right now (or null if it can). Default: bed is never proposed. */
@@ -102,7 +106,9 @@ export function createReticularRegion(options: ReticularOptions): Region {
       const novel = ws.attended !== null && now - ws.attended.since <= NOVEL_MS;
       const wake = wakeDrive({ alarm: options.alarmOf(ws), threat, startle, pain: level(PAIN_SIGNAL), urge: level(URGE_SIGNAL), novel, demanding: moment.demanding });
       const strength = wakeDrive({ alarm: options.alarmOf(ws), threat, startle, pain: level(PAIN_SIGNAL), urge: level(URGE_SIGNAL) });
-      const sleepy = sleepyOf(level(TIRED_SIGNAL), moment.night, threat >= THREAT.coming, settings.sleepPressure);
+      // Stress acts on the sleep side only: alarm, which it shares its causes with, is already in the wake drive.
+      const stress = Math.min(1, Math.max(0, options.stressOf?.(ws) ?? 0));
+      const sleepy = sleepyOf(level(TIRED_SIGNAL), moment.nightness ?? moment.night, threat >= THREAT.coming, settings.sleepPressure) * (1 - settings.stress * stress);
       const safe = moment.safe && threat < THREAT.seen;
       const rest = restful({ night: moment.night, safe, idle: moment.idle, recovering: level(RECOVERING_SIGNAL) > 0 });
       const sleep = sleepDrive(sleepy, rest);

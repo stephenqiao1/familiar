@@ -34,6 +34,8 @@ export interface ThreatSenseOptions {
   settings: DefenceSettings;
   /** The bot's bravery, 0 to 1. */
   bravery: number;
+  /** How far a desperate need shortens the flight distance right now (1: not at all). The hard reflexes do not use the flight distance. Default: never. */
+  flightScale?(): number;
   record: ThreatRecord;
   /** The route checks. Default: none (the cheap guess at reach, and never cornered). */
   routes?: RouteChecks;
@@ -102,7 +104,8 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
     record.killed(kindOf(entity));
   });
 
-  const flight = (kind: string) => flightDistance(record.danger(kind), bravery, settings.flightDistance);
+  const flightScale = () => Math.min(1, Math.max(0, options.flightScale?.() ?? 1));
+  const flight = (kind: string) => flightScale() * flightDistance(record.danger(kind), bravery, settings.flightDistance);
 
   /** Whether the creature is turned toward the bot. */
   function facing(e: Entity): boolean {
@@ -220,7 +223,7 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
       hostileFlags.delete(id);
     }
 
-    const view = assessDefence(data, withLooming(facts, looming), { bravery, strengths: settings });
+    const view = assessDefence(data, withLooming(facts, looming), { bravery, strengths: settings, flightScale: flightScale() });
     // Having noticed the bot is remembered for a few seconds: it does not lapse the moment the creature pauses.
     // One that was on the bot or coming at it counts the same: having just got clear of it, the bot
     // does not take it for unaware (and turn back past it) the moment it is out of arm's reach.

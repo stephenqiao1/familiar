@@ -78,13 +78,13 @@ export function couldHarm(threat: Pick<Threat, "canReach" | "stage" | "kind">): 
  *             coming (looming, or noticed and able to reach inside the flight distance),
  *             seen (in view), else possible.
  */
-export function sizeUp(facts: ThreatFacts, bravery: number, flightStrength = 1): ThreatView {
+export function sizeUp(facts: ThreatFacts, bravery: number, flightStrength = 1, flightScale = 1): ThreatView {
   const { id, kind, dist, seen, shoots, escapable, danger, beatable } = facts;
   const hurtLately = facts.hurtMsAgo !== null && facts.hurtMsAgo <= HURT.noticedMs;
   const noticedBy = hurtLately ? "hurt" : facts.engaged ? "struck" : facts.approach >= NOTICED_APPROACH ? "approach" : facts.facing && seen ? "facing" : facts.noticedLately ? "lately" : null;
   const noticed = noticedBy !== null;
   const canReach = facts.canWalkTo || (shoots && facts.clearLine);
-  const flight = flightDistance(danger, bravery, flightStrength);
+  const flight = flightScale * flightDistance(danger, bravery, flightStrength);
   const justHurt = facts.hurtMsAgo !== null && facts.hurtMsAgo <= HURT.onItMs;
   const stage: Stage =
     (dist <= CONTACT_DISTANCE && canReach) || (justHurt && dist <= CONTACT_DISTANCE + 1) || (facts.engaged === true && canReach && dist <= ENGAGED_DISTANCE)

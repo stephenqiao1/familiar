@@ -5,10 +5,9 @@
 import type { Candidate, Skill, State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { createMemory, createMemoryRegion, feelingNear, memoryNotes } from "@familiar/memory";
-import { playerRewards, placeOf, playerInstinct, playerMemories, SCHEMA_VERSION, type MinecraftStateData } from "@familiar/minecraft";
+import { needsNow, placeOf, playerInstinct, playerMemories, SCHEMA_VERSION, type MinecraftStateData } from "@familiar/minecraft";
 import {
   createNoradrenalineRegion,
-  needsOf,
   createPersistence,
   createScorebook,
   DEFAULT_NORADRENALINE,
@@ -84,7 +83,7 @@ function bot(settings: NoradrenalineSettings = DEFAULT_NORADRENALINE) {
   const store = createWorkspace();
   const memory = createMemory();
   const regions = [
-    createNoradrenalineRegion({ needs: (ws) => needsOf(playerRewards, ws.state), settings }),
+    createNoradrenalineRegion({ needs: needsNow, settings }),
     createMemoryRegion({ memory, triggers: playerMemories(), placeOf, ...(settings.memoryTag > 0 ? { alarmOf: (ws) => ws.signals.alarm?.value ?? 0 } : {}) }),
   ];
   let seconds = 0;

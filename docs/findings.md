@@ -96,22 +96,27 @@ entries named in brackets hold the evidence.*
    during a journey as well.
 
 9. **Most thresholds are hand-set, and several strengths are on or off.** Zone distances (8, 16,
-   48, 64 blocks), sound weights, balance numbers, time windows, the need weights (2, 1, 0.25),
-   the waits before a retry and the 0.5 that speaks for staying asleep were chosen by hand, each
-   tuned in its own scene. Nothing checks them against each other, and a change to one moves
-   which proposal wins elsewhere (problem 1). *(Startle limits: "those weights are hand-set";
-   posture limits: "the balance numbers are hand-set"; "Most strengths are on or off";
-   locomotion limits; serotonin: "each need now carries a third number".)*
+   48, 64 blocks), sound weights, balance numbers, time windows, the waits before a retry and
+   the 0.5 that speaks for staying asleep were chosen by hand, each tuned in its own scene.
+   Nothing checks them against each other, and a change to one moves which proposal wins
+   elsewhere (problem 1). *(Startle limits: "those weights are hand-set"; posture limits: "the
+   balance numbers are hand-set"; "Most strengths are on or off"; locomotion limits.)*
+   **Partly closed by the hypothalamus (2026-11-23):** the need weights (2, 1, 0.25) are now the
+   setting `drives.weights`, a need can carry its own, and every part of the drives has a
+   strength from 0 to 1. Its other numbers sit in six named tables (`AHEAD`, `CLOCK`, `STRESS`,
+   `COMPETE`, `LEARNING`, and `COMING` and `ADJUST` on the Minecraft side). They are still
+   hand-set, and still not checked against the numbers of other regions.
    **Would fix:** one table of the numbers with what each was tuned against; a whole-brain
    regression that reports wins and losses when one changes.
 
-10. **Signals are built before anything reads them.** `cold`, `reserve`, `vitals`, `stuck`,
-    `headroom` and mood are worked out and logged with no reader; `sore` changes two numbers.
-    Mood cannot be shared at all, because signals are forced into 0 to 1. The lower layers were
-    built ahead of the drives region meant to use them. *(Medulla limits: "nothing acts on
-    `cold`, `tired`, `reserve` or `vitals`"; locomotion limits: "the `stuck` signal has no
-    reader"; "Mood can't be shared between brain parts yet".)*
-    **Would fix:** build the drives region next, or stop adding signals until it exists.
+10. **Signals are built before anything reads them.** `stuck`, `headroom` and mood are worked
+    out and logged with no reader; `sore` changes two numbers. *(Locomotion limits: "the `stuck`
+    signal has no reader"; "Mood can't be shared between brain parts yet".)*
+    **Partly closed by the hypothalamus (2026-11-23):** `cold`, `tired`, `sick`, `reserve` and
+    `vitals` are read now (as the needs warmth, rest and illness, as hunger's look-ahead, and as
+    a source of stress). What does not fit in 0 to 1 is shared as data in `ws.needs` beside the
+    signals, which is how mood could be shared too.
+    **Would fix:** give `stuck` and `headroom` a reader or drop them.
 
 11. **There is too little to do for the upper layers to show anything.** There are only a few
     skills and none gathers, builds or explores, so a safe bot idles at base. The planner's
@@ -141,6 +146,107 @@ entries named in brackets hold the evidence.*
     **Would fix:** add the other dangers as vital needs, and put a time on every memory.
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
+
+## Hypothalamus: one owner for the needs, and what it adds
+
+*Built and run live 2026-11-22 and 23.*
+
+**The problem.** The needs were worked out inside dopamine's reward rules, and noradrenaline,
+serotonin and the arbiter each read them from there. A need was "how far from a fixed target,
+right now": nothing looked ahead, nothing changed with the time of day, a bad stretch left no
+trace once the danger was gone, and the body's own readings (`cold`, `tired`, `sick`,
+`reserve`, `vitals`) had no reader.
+
+**The rule now.** The hypothalamus (`packages/region-hypothalamus`) reads every need once a tick
+and shares the reading in `ws.needs`. Each part has a strength in `drives` in `bots.json`; with
+all at 0 the bot does what it did before.
+
+1. **Body readings are needs**: warmth, rest and illness, from the medulla's signals.
+2. **Targets move**: more food is enough when hurt and as night comes, more torches toward dusk
+   and underground; running out while the need it serves presses raises the target by a
+   quarter (up to three times), and it drifts back.
+3. **Looking ahead**: a need presses at the larger of its level and 0.7 of where it will be in a
+   minute, and a third less while a skill that relieves it is under way. Rewards stay on the
+   real level.
+4. **A body clock**: rest presses more by night, curiosity and stocking by day; the dark starts
+   to count over the last three minutes of the day.
+5. **Stress**: builds in about a minute under threat, pain or a poor body, fades in about five.
+6. **Competition**: one top drive, held with some stickiness; `desperate`; `unmet`.
+
+**Seen live** (`pnpm drives-check --runs 3`, new; each scene three times).
+
+| Scene | With the part on | With it at 0 |
+|---|---|---|
+| `dusk`: a lit spot it was taught, night coming | The dark pressed 155 s before night; it set off 121 s before nightfall (2 of 3 runs) | Pressed and set off as night fell (2 of 3) |
+| `hungry_soon`: reserve gone, bar still 15 to 18 | Hunger 0.10 to 0.25 pressed at 0.35 to 0.40; went for bread at once | Went too: empty pockets press by themselves |
+| `hurt`: nine bread, then health 7 | Enough went 8 → 12; healthy it stayed put, hurt it fetched 16 more (3 of 3, after the scene was fixed) | (not run) |
+| `learned_target`: runs out twice while hungry | Enough went 8 → 10 → 12.5, saved as × 1.56 (3 of 3) | (not run) |
+| `bad_night`: three attacks, then quiet | Stress peaked at 0.45 to 0.47; alarm was 0 a minute on with stress still 0.36; patience 0.54 → 0.70 → 0.81 → 0.83 and curiosity 0.79 → 0.89 of its level over five minutes as stress fell to 0.21 (3 of 3, after the scene was fixed) | (not run) |
+| `cold`: standing in powder snow | Warmth 1.0 and on top within 1 s; out in 9 to 10 s (3 of 3) | (not run) |
+| `desperate`: starving, bread past a husk | Flight distance 8 → 6 to 6.5; got the 16 bread (3 of 3) | Turned back at 8.5 blocks, no bread (3 of 3) |
+| `unmet`: starving, nothing known that helps | Search above 0.6 after 22 to 23 s | After 27 to 44 s |
+| Existing serotonin, noradrenaline and dopamine checks, all drives 0, three times | Serotonin and noradrenaline pass 3 of 3. Dopamine: 13 of 16 scenes pass in all three; see the first limit | |
+| The same with the hypothalamus left out (`LESION=hypothalamus`) | Pass (serotonin and noradrenaline three times, dopamine once) | |
+| The same with the drives on, once | Pass after one check was corrected (below) | |
+
+**Limits.**
+- **Two dopamine scenes failed with the drives at 0 and not on the code as it was before.**
+  `threat_with_jev_live` failed 2 of 3 ("set off for the chest with a threat beside it") and
+  `two_chests` 1 of 3 ("went back to a chest it had found empty"); on the old code both passed
+  3 of 3, with the hypothalamus left out once, and with the drives on once. In both threat
+  failures it was one tick: a trip dopamine had started with the husk past 16 blocks went on
+  for a tick (by Jev's pick) as the husk crossed to 15, and danger took over on the next. With
+  the drives at 0 the fast tests show the same decisions as with the region left out, so this
+  looks like timing at the 16-block line, but three runs against three do not prove it.
+- **The dusk scene did nothing in one run of three, in both arms.** The bot's own later trips to
+  the lit spot paid nothing (it was day), so what the two taught trips had shown wore off and
+  there was no want left to bring forward. Looking ahead moves a want earlier; it does not
+  make one.
+- **`hungry_soon` does not show looking ahead by itself.** Hunger did press early, but a bot with
+  no bread goes for bread anyway. A scene where only the food bar could send it is not built.
+- **In the cold it was the pain reflex that got it out** (`withdraw`), not the warmth need:
+  nothing has learned what relieves cold, and there is no skill for "get warm". The need was on
+  top the whole time and changed nothing by itself.
+- **A want is weaker while the trip that answers it is under way.** The want goes by the square
+  of how hard the need presses, so easing by a third takes the pull from 0.89 to 0.42. The bot
+  still finished every trip, but something else could more easily cut in. The dopamine check's
+  `no_path` scene read this as unlearning and was corrected to leave those ticks out.
+- **`desperate` shortens the flight distance; it does not lift danger's silencing of wants.**
+  Inside the shorter distance the bot still flees and wants nothing. Provisions never make it
+  desperate (the level is counted by weight, at most 1).
+- **`unmet` is also on at a fresh start**: with nothing learned, nothing is known to relieve the
+  top need, so search rises from the first minute.
+- **Stress is counted in part.** In the outlook only what is above the danger of the moment
+  counts, and toward staying awake only what is above tiredness, so that alarm and tiredness
+  are not counted twice. A change of top drive does not ask for a new plan while danger
+  presses. These depart from the spec as written.
+- **Stress does not fade while the body is still poor.** In the first bad-night runs the bot
+  had no food: hungry or hurt, stress stayed at 0.47 five minutes on (it fell to 0.21 once the
+  scene fed it). Dusk arriving in the same minutes also lowered patience and curiosity, so the
+  scene now runs fed and by day.
+- **The hurt scene only shows the raised target while the bot stays hurt.** In one early run it
+  ate, healed past 10 in three seconds, and enough fell back to 8 before it had set off.
+- **Sleep now pays by how tired the bot was** (about 0.11 for an ordinary night) where it paid 1
+  for any night slept through, when rest is a need.
+- **The dark now costs gradually over dusk** where it arrived at once at nightfall, and a spot
+  lit by a lamp is known from the block light, which is new in the state (schema change).
+- **`take_items` takes what the goal asks for, not what is now enough.** A raised target makes
+  the bot go again; it does not make one trip bigger.
+- **The `hunger` effect used in scenes also makes the bot ill** (illness 0.5), which moves the
+  outlook and alarm in every starving scene.
+- **Needs that move in steps give jumpy projections**: the food bar falls a point at a time, so
+  the rate over a minute is 0 and then large.
+- **A signal's freshness goes by the wall clock**, so in a fast test two ticks can share one
+  moment and a one-tick bump is lost. Not changed.
+- **The other live checks run without the hypothalamus** (arousal, defence, medulla, posture,
+  colliculus, startle, acetylcholine keep their own region lists), so they show nothing about it.
+- **Speed.** Over 19,881 live ticks, 35 (0.18%) took more than 2 ms and the worst took 39 ms;
+  none was a tick that saved a learned target. Alone in a benchmark the median is 0.017 ms and
+  the 99th percentile 0.085 ms. The slow ticks are most likely pauses of the whole process
+  (the game server and client run on the same machine), which was not proven.
+- **The numbers are still hand-set**, in settings and six named tables (problem 9).
+
+**Status.** Built. Open: the limits above.
 
 ## Acetylcholine: focus follows how well predictions hold, and learning goes by the surprise
 

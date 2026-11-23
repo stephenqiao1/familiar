@@ -16,13 +16,14 @@ import {
   DEFAULT_PERSONALITY,
 } from "@familiar/neuromodulators";
 import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type ArousalSettings, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
+import { DEFAULT_DRIVES, DRIVES_OFF, type DriveSettings } from "@familiar/region-hypothalamus";
 import type { FiredReflex } from "@familiar/region-reflex";
 import { describe, expect, it } from "vitest";
 import { createArbiter, createBrain } from "./brain.js";
 
 const signal = new AbortController().signal;
 const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, potentiation: 0, warning: 0, habituation: 0, selfCaused: 0, startReact: 0, loadedResponses: 0, holdBack: 0, arousalStartle: 0, bodySignals: 0 };
-const AROUSAL_OFF: ArousalSettings = { resting: 0.5, sleepPressure: 0, bedtime: 0, wakeThreshold: 0.5, inertia: 0, gate: 0, quietRest: 0, frazzled: 0 };
+const AROUSAL_OFF: ArousalSettings = { resting: 0.5, sleepPressure: 0, bedtime: 0, wakeThreshold: 0.5, inertia: 0, gate: 0, quietRest: 0, frazzled: 0, stress: 0 };
 type Mob = MinecraftStateData["nearby"]["mobs"][number];
 const mob = (type: string, dist: number, id = 1): Mob => ({ id: `entity:${id}`, type, dist, hostile: true, reachable: true });
 
@@ -98,7 +99,7 @@ const skills = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
   const store = createWorkspace();
   const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
   const engine: DecisionEngine = {
@@ -138,6 +139,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       colliculus: { ...DEFAULT_COLLICULUS, ...options.colliculus },
       defence: { ...DEFAULT_DEFENCE, ...options.defence },
       arousal: { ...DEFAULT_AROUSAL, ...options.arousal },
+      ...(options.drives ? { drives: options.drives } : {}),
       sameTime: options.sameTime ?? false,
       memory: createMemory(),
       persistence,
@@ -1009,5 +1011,54 @@ describe("arousal through the real brain", () => {
     expect(value("arousal")).toBeGreaterThan(0.9);
     expect(value("frazzled")).toBe(1);
     expect(options(out)).toBe(2);
+  });
+});
+
+describe("drives through the real brain", () => {
+  type Out = Awaited<ReturnType<ReturnType<typeof bot>["tick"]>>;
+  /** A day with hunger, a fight, a poisoning and a tired night in it: what won, what the reflexes did, and the dials. */
+  async function day(options: Parameters<typeof bot>[0]) {
+    const { tick, value } = bot(options);
+    const seen: unknown[] = [];
+    // (Search's inputs, not its level: its one-off bump for something new goes by the wall clock, which two ticks of a test can share.)
+    const note = (out: Out) => seen.push({ rewards: out.traces.dopamine?.rewards, cues: out.traces.dopamine?.cues, searchInputs: out.traces.noradrenaline?.searchInputs, outlook: out.traces.serotonin?.outlook, won: out.won, urgency: out.winner?.urgency, reflexes: out.reflexes.map((r) => [r.rule, r.gain]), alarm: value("alarm"), patience: value("patience"), arousal: value("arousal") });
+    for (let i = 0; i < 6; i++) note(await tick({ self: { food: 12 - i } }));
+    for (let i = 0; i < 6; i++) note(await tick({ self: { food: 6, health: 20 - 2 * i }, mobs: [mob("zombie", 6 - i)] }));
+    for (let i = 0; i < 6; i++) note(await tick({ self: { food: 3, health: 8, effects: ["poison"] } }, "idle"));
+    for (let i = 0; i < 6; i++) note(await tick({ night: true, self: { food: 3, sinceSleepMinutes: 3000 } }, "idle"));
+    return seen;
+  }
+
+  it("with every strength at 0 the brain does what it does with the hypothalamus left out", async () => {
+    const all = ["reflex", "medulla", "hypothalamus", "brainstem", "reticular", "colliculus", "acetylcholine", "dopamine", "noradrenaline", "hippocampus", "instinct", "serotonin", "prefrontal"];
+    expect(await day({ drives: DRIVES_OFF })).toEqual(await day({ drives: DRIVES_OFF, only: all.filter((name) => name !== "hypothalamus") }));
+  });
+
+  it("stress outlasts the danger and keeps patience lower for minutes, but never touches a reflex's gain", async () => {
+    const live = async (drives: DriveSettings) => {
+      const { tick, value } = bot({ drives });
+      const gains: number[][] = [];
+      // A minute and a half with a zombie on the bot, then calm.
+      for (let i = 0; i < 180; i++) gains.push((await tick({ mobs: [mob("zombie", 2)] })).reflexes.map((r) => r.gain));
+      const stressed = value("stress");
+      for (let i = 0; i < 120; i++) gains.push((await tick()).reflexes.map((r) => r.gain));
+      return { gains, stressed, stressLater: value("stress"), patienceLater: value("patience")! };
+    };
+    const [on, off] = [await live({ ...DRIVES_OFF, stress: 1 }), await live(DRIVES_OFF)];
+    expect(on.stressed).toBeGreaterThan(0.6);
+    expect(on.stressLater).toBeGreaterThan(0.5); // a minute after the zombie has gone
+    expect(off.stressed).toBeUndefined();
+    expect(on.patienceLater).toBeLessThan(off.patienceLater - 0.05);
+    expect(on.gains).toEqual(off.gains);
+  });
+
+  it("a hard reflex wins as before whatever the drives say: starving and desperate, the bot still gets out of lava", async () => {
+    for (const drives of [DEFAULT_DRIVES, DRIVES_OFF]) {
+      const { tick, value } = bot({ drives });
+      for (let i = 0; i < 4; i++) await tick({ self: { food: 0 } });
+      const out = await tick({ self: { food: 0, inLava: true } });
+      expect(out.winner).toMatchObject({ region: "reflex", urgency: 1 });
+      if (drives === DEFAULT_DRIVES) expect(value("desperate")).toBe(1);
+    }
   });
 });

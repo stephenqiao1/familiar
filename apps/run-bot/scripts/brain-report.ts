@@ -1,5 +1,5 @@
 // Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
-// surprises, reflexes and the brainstem, arousal (bands, bedtimes, wakings, calls saved), the defence circuit, the medulla, balance and posture, the colliculus, memories, interrupts, warnings and region errors.
+// surprises, the drives (top drive, needs, looking ahead, stress, targets learned), reflexes and the brainstem, arousal (bands, bedtimes, wakings, calls saved), the defence circuit, the medulla, balance and posture, the colliculus, memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -335,6 +335,51 @@ const blindsided = ticks.flatMap((t, i) => {
 console.log(`BLINDSIDED (hurt by something not attended in the 5 s before): ${blindsided.length}${blindsided.length ? `: ${blindsided.slice(0, 8).join(", ")}` : ""}`);
 const worstMap = Math.max(0, ...colliculus.map((c) => (c.worstMs as number | undefined) ?? 0));
 console.log(`SLOWEST MAP: ${worstMap.toFixed(3)} ms${worstMap > 2 ? " (!! over the 2 ms limit)" : ""}; field of view: ${ticks.some((t) => JSON.stringify(trace(t, "instinct")).includes("lastSeen")) ? "on" : "not seen in use"}`);
+
+// The hypothalamus: what the body wanted, what pressed early, stress, and what it learned is enough.
+type Shown = { level: number; pressing: number; projected?: number; target?: number; why?: string };
+type Drives = { needs?: Record<string, Shown>; top?: { name: string; unmet?: boolean } | null; stress?: number; loadBy?: string; learned?: string[]; desperate?: { need: string }; slow?: string; worstMs?: number };
+const drives = ticks.map((t) => trace(t, "hypothalamus") as Drives);
+if (drives.some((d) => d.needs)) {
+  const timeBy = (key: (d: Drives) => string | null) => {
+    const totals = new Map<string, number>();
+    ticks.forEach((t, i) => {
+      const k = key(drives[i]!);
+      if (k !== null) totals.set(k, (totals.get(k) ?? 0) + span(t, i));
+    });
+    return [...totals].sort((a, b) => b[1] - a[1]).map(([name, ms]) => `${name} ${secs(ms)} s`).join(", ") || "none";
+  };
+  console.log(`\nTOP DRIVE (time on top): ${timeBy((d) => (d.needs ? (d.top?.name ?? "nothing") : null))}`);
+  const needNames = [...new Set(drives.flatMap((d) => Object.keys(d.needs ?? {})))];
+  const above = needNames.map((name) => [name, ticks.reduce((sum, t, i) => sum + ((drives[i]!.needs?.[name]?.level ?? 0) > 0.5 ? span(t, i) : 0), 0)] as const).filter(([, ms]) => ms > 0);
+  console.log(`NEEDS ABOVE 0.5 (time): ${above.sort((a, b) => b[1] - a[1]).map(([name, ms]) => `${name} ${secs(ms)} s`).join(", ") || "none"}`);
+  // Looking ahead acted early each time a need came to press above 0.5 while its level was still under it.
+  const early = needNames.map((name) => {
+    let [times, was] = [0, false];
+    for (const d of drives) {
+      const r = d.needs?.[name];
+      const now = r !== undefined && r.level < 0.5 && r.pressing >= 0.5;
+      if (now && !was) times++;
+      was = now;
+    }
+    return [name, times] as const;
+  }).filter(([, times]) => times > 0);
+  const aheadTicks = drives.filter((d) => Object.values(d.needs ?? {}).some((r) => r.why?.includes("looking ahead"))).length;
+  console.log(`LOOKING AHEAD: pressed past 0.5 before the level got there: ${early.map(([name, times]) => `${name} ×${times}`).join(", ") || "never"}; raised some need's press on ${aheadTicks} ticks`);
+  const held = drives.flatMap((d) => Object.entries(d.needs ?? {}).flatMap(([name, r]) => (r.why ? r.why.split("; ").map((why) => `${name}: ${why.replace(/^eased: .*/, "eased by the running skill")}`) : [])));
+  console.log(`SILENCED OR EASED (ticks): ${list(count(held, (h) => h), 10)}`);
+  const stressed = ticks.flatMap((t) => (t.signals.stress ? [t.signals.stress.value] : []));
+  const perMinute: string[] = [];
+  for (let from = ticks[0]!.timestamp; from <= ticks.at(-1)!.timestamp; from += 60_000) {
+    const values = ticks.filter((t) => t.timestamp >= from && t.timestamp < from + 60_000 && t.signals.stress).map((t) => t.signals.stress!.value);
+    if (values.length) perMinute.push(Math.max(...values).toFixed(2));
+  }
+  console.log(`STRESS: ${stressed.length ? `${Math.min(...stressed).toFixed(2)} to ${Math.max(...stressed).toFixed(2)}; by minute (peak): ${perMinute.join(", ")}; loaded by ${list(count(drives.filter((d) => d.loadBy && d.loadBy !== "nothing"), (d) => d.loadBy!), 4)}` : "not shared"}`);
+  console.log(`DESPERATE: ${secs(timeWhere((t) => (t.signals.desperate?.value ?? 0) > 0))} s (${list(count(drives.filter((d) => d.desperate), (d) => d.desperate!.need), 4)}); UNMET: ${secs(timeWhere((t) => (t.signals.unmet?.value ?? 0) > 0))} s`);
+  console.log(`TARGETS LEARNED: ${drives.flatMap((d) => d.learned ?? []).join("; ") || "none"}`);
+  const worstDrives = Math.max(0, ...drives.map((d) => d.worstMs ?? 0));
+  console.log(`SLOWEST HYPOTHALAMUS TICK: ${worstDrives.toFixed(2)} ms${worstDrives > 2 ? ` (!! over the 2 ms limit on ${drives.filter((d) => d.slow).length} ticks)` : ""}`);
+}
 
 // Memory.
 type Recorded = { trigger: string; summary: string; strength: number; merged: boolean };

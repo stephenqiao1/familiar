@@ -16,6 +16,7 @@
     "@familiar/region-brainstem": "workspace:*",
     "@familiar/region-instinct": "workspace:*",
     "@familiar/region-prefrontal": "workspace:*",
+    "@familiar/region-hypothalamus": "workspace:*",
     "@familiar/region-reflex": "workspace:*"
   }
 }

@@ -48,10 +48,15 @@ export function wakeDrive(inputs: WakeInputs): { value: number; by: string } {
   return { value: clamp(pressing.value + extra), by };
 }
 
-/** Sleep pressure: tiredness, raised at night and lowered by day; none while danger is coming. */
-export function sleepyOf(tired: number, night: boolean, threatened: boolean, strength = 1): number {
+/**
+ * Sleep pressure: tiredness, raised at night and lowered by day; none while danger is coming.
+ * `night` may be how far night has come (0 day to 1 night, from the body clock), so that
+ * sleepiness comes on over dusk and lifts over dawn rather than at a stroke.
+ */
+export function sleepyOf(tired: number, night: boolean | number, threatened: boolean, strength = 1): number {
   if (threatened) return 0;
-  return clamp(strength * (tired + (night ? SLEEPY.night : -SLEEPY.day)));
+  const nightness = clamp(Number(night));
+  return clamp(strength * (tired + nightness * SLEEPY.night - (1 - nightness) * SLEEPY.day));
 }
 
 /** How restful the moment is, 0 to 1: each of night, safe, nothing to do and recovering counts a quarter. */

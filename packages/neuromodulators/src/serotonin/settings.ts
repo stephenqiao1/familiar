@@ -10,17 +10,19 @@ export interface PatienceSettings {
   horizon: number;
   /** Effect c: how much patience holds back risky skills. */
   brake: number;
+  /** How much slow stress darkens the outlook (0: not at all; 1: like a need of the body). */
+  stress: number;
 }
 
 export const PATIENCE_MIN = 0.05;
 export const PATIENCE_MAX = 0.95;
-export const DEFAULT_PATIENCE: PatienceSettings = { resting: 0.5, timeConstantSeconds: 60, persistence: 1, horizon: 1, brake: 1 };
+export const DEFAULT_PATIENCE: PatienceSettings = { resting: 0.5, timeConstantSeconds: 60, persistence: 1, horizon: 1, brake: 1, stress: 1 };
 
 /** What is wrong with the settings, or null if they are fine. */
 export function patienceProblem(s: PatienceSettings): string | null {
   if (!(s.resting >= PATIENCE_MIN && s.resting <= PATIENCE_MAX)) return `patience.resting must be ${PATIENCE_MIN} to ${PATIENCE_MAX}, got ${s.resting}`;
   if (!(s.timeConstantSeconds > 0)) return `patience.timeConstantSeconds must be above 0, got ${s.timeConstantSeconds}`;
-  for (const effect of ["persistence", "horizon", "brake"] as const) {
+  for (const effect of ["persistence", "horizon", "brake", "stress"] as const) {
     if (!(s[effect] >= 0)) return `patience.${effect} must be 0 or more, got ${s[effect]}`;
   }
   return null;

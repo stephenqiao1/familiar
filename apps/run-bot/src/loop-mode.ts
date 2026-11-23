@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import type { Action, Candidate, SkillEvent, State, TickLog } from "@familiar/contracts";
+import type { Action, Candidate, NeedReading, SkillEvent, State, TickLog } from "@familiar/contracts";
 import { createBrainLoop, createChainSkill, createLogger, createSkillExecutor, createWorkspace, defaultLogPath } from "@familiar/core";
 import { feelingNear, type Place } from "@familiar/memory";
 import {
@@ -33,6 +33,7 @@ import {
   posId,
   situationOf,
   madeProgress,
+  needsNow,
   threatPresent,
   trackBodyEvents,
   withTrust,
@@ -52,6 +53,7 @@ import {
   trustOf,
 } from "@familiar/neuromodulators";
 import { createDefenceWatch, isHeldBack, UPPER_PAUSED_SIGNAL } from "@familiar/region-brainstem";
+import { COMPETE, DESPERATE_SIGNAL } from "@familiar/region-hypothalamus";
 import { REFLEX_SIGNAL, type FiredReflex } from "@familiar/region-reflex";
 import type { BrainArgs, ServerArgs } from "./args.js";
 import { loadBotConfig } from "./bot-config.js";
@@ -62,6 +64,9 @@ import {
   chestsFile,
   badFoodsFile,
   bodyFile,
+  targetsFile,
+  loadTargets,
+  saveTargets,
   hurtsFile,
   learnedSkillsFile,
   loadChests,
@@ -107,12 +112,13 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
   const scorebook = await loadScorebook(scorebookFile(server.name));
   const novelty = await loadNovelty(noveltyFile(server.name));
+  const targets = await loadTargets(targetsFile(server.name));
   const chests = await loadChests(chestsFile(server.name));
   const memory = await loadMemories(memoriesFile(server.name), { halfLifeMs: memorySettings.halfLifeDays * GAME_DAY_MS });
   /** Keeps the fixed known places up to date: base chest, bed, and every chest the bot has opened. */
@@ -188,6 +194,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   const threats = createThreatSense(bot, {
     settings: defence,
     bravery: brainstem.bravery,
+    // A desperate need lets a threat a little closer before the body runs (the hard reflexes are not touched).
+    flightScale: () => 1 - COMPETE.flightOff * (view.signals[DESPERATE_SIGNAL]?.value ?? 0),
     record: threatRecord,
     ...(defence.reachCheck > 0 ? { routes: createRouteChecks(createRouteQueries(bot)) } : {}),
     locomotion,
@@ -229,6 +237,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       colliculus,
       defence,
       arousal,
+      drives,
+      targets,
       whyNoSleep: () => sleepProblem(ctx),
       postureNotes: () => posture.notes(),
       justLearnedBadFoods: () => gut.justLearned(),
@@ -297,6 +307,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   const alarm = () => view.signals[ALARM_SIGNAL]?.value ?? 0;
   let lastReward = 0;
   let lastState: State | null = null;
+  let lastNeeds: NeedReading[] = [];
   let lastInterrupt = 0;
   /** The skill that was running when this tick's state was read. */
   let runningAtTick: string | undefined;
@@ -313,8 +324,10 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     if (reward && reward.at !== lastReward && reward.value > 0) persistence.progress(now);
     lastReward = reward?.at ?? lastReward;
     // So does a need easing or ground covered: the skill is getting somewhere.
-    if (lastState && madeProgress(lastState, view.state)) persistence.progress(now);
+    const needs = needsNow(view, drives);
+    if (lastState && madeProgress(lastState, view.state, lastNeeds, needs)) persistence.progress(now);
     lastState = view.state;
+    lastNeeds = needs;
     // Asleep and undisturbed is the skill working, however long the night: its clock restarts.
     if ((view.signals[UPPER_PAUSED_SIGNAL]?.value ?? 0) > 0) persistence.progress(now);
     const gaveUp = persistence.giveUpReason(now);
@@ -427,6 +440,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     return Promise.all([
       saveScorebook(scorebook, scorebookFile(server.name)),
       saveNovelty(novelty, noveltyFile(server.name)),
+      saveTargets(targets, targetsFile(server.name)),
       saveChests(chests, chestsFile(server.name)),
       saveHurts(pain.entries(), hurtsFile(server.name)),
       saveHurts(gut.entries(), badFoodsFile(server.name)),

@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_FOCUS, DEFAULT_NORADRENALINE, DEFAULT_PATIENCE, DEFAULT_PERSONALITY } from "@familiar/neuromodulators";
 import { DEFAULT_DEFENCE, DEFAULT_LOCOMOTION, DEFAULT_MEDULLA, DEFAULT_POSTURE, DEFAULT_REFLEXES } from "@familiar/minecraft";
+import { DEFAULT_DRIVES } from "@familiar/region-hypothalamus";
 import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS } from "@familiar/region-brainstem";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, memory: DEFAULT_MEMORY };
 
 let dir: string;
 let file: string;
@@ -140,5 +141,11 @@ describe("loadBotConfig", () => {
     await writeFile(file, JSON.stringify({ Brave: { brainstem: { bravery: 0.8, startle: 0 } }, Bad: { brainstem: { bravery: 1.2 } } }));
     expect((await loadBotConfig("Brave", file)).brainstem).toEqual({ ...DEFAULT_BRAINSTEM, bravery: 0.8, startle: 0 });
     await expect(loadBotConfig("Bad", file)).rejects.toThrow(/brainstem.bravery must be 0 to 1/);
+  });
+
+  it("reads a bot's drives, keeping the default weights it does not give, and refuses a bad one", async () => {
+    await writeFile(file, JSON.stringify({ Calm: { drives: { stress: 0, weights: { danger: 3 }, weight: { food_bar: 1.5 } } }, Bad: { drives: { lookAhead: 2 } } }));
+    expect((await loadBotConfig("Calm", file)).drives).toEqual({ ...DEFAULT_DRIVES, stress: 0, weights: { danger: 3, body: 1, provision: 0.25 }, weight: { food_bar: 1.5 } });
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow("drives.lookAhead must be 0 to 1");
   });
 });

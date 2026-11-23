@@ -29,8 +29,10 @@ export function playerReticular<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, whyNoSleep:
       if (!data) return null;
       const running = find(ws.current?.skill);
       return {
-        night: data.time.isNight,
-        nightProgress: data.time.nightProgress ?? MID_NIGHT,
+        // The body clock says what time it is; with no hypothalamus (or its clock off), the state does.
+        night: ws.needs?.clock?.night ?? data.time.isNight,
+        ...(ws.needs?.clock ? { nightness: ws.needs.clock.night ? 1 - ws.needs.clock.dawn : ws.needs.clock.dusk } : {}),
+        nightProgress: ws.needs?.clock?.night ? ws.needs.clock.nightProgress : (data.time.nightProgress ?? MID_NIGHT),
         safe: defenceOf(data).choice.threat < SEEN,
         idle: ws.current === null || RESTING.has(ws.current.skill),
         still: !data.self.locomotion.moving,

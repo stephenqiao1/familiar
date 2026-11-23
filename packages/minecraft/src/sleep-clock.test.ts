@@ -2,11 +2,11 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import { createSleepClock } from "./sleep-clock.js";
 
-/** A stand-in bot: just the world's clock and the "wake" event. */
+/** A stand-in bot: just the world's clock and the "sleep" and "wake" events. */
 function sleeper(age: number) {
   const events = new EventEmitter();
   const bot = { time: { age }, on: (name: string, fn: () => void) => events.on(name, fn) } as never as Parameters<typeof createSleepClock>[0] & { time: { age: number } };
-  return { bot, wake: () => events.emit("wake") };
+  return { bot, sleep: () => events.emit("sleep"), wake: () => events.emit("wake") };
 }
 
 describe("createSleepClock", () => {
@@ -18,10 +18,24 @@ describe("createSleepClock", () => {
     expect(clock.sinceSleepMinutes()).toBe(1440);
   });
 
-  it("resets when the bot wakes from sleep", () => {
-    const { bot, wake } = sleeper(100_000);
+  it("does not reset for lying down a moment, or being thrown out of bed: only a real sleep counts", () => {
+    const { bot, sleep, wake } = sleeper(100_000);
     const clock = createSleepClock(bot);
     bot.time.age += 30_000;
+    sleep();
+    bot.time.age += 40; // two seconds in bed
+    wake();
+    expect(clock.sinceSleepMinutes()).toBe(1802);
+    wake(); // a waking with no lying down before it
+    expect(clock.sinceSleepMinutes()).toBe(1802);
+  });
+
+  it("resets when the bot wakes from a real sleep", () => {
+    const { bot, sleep, wake } = sleeper(100_000);
+    const clock = createSleepClock(bot);
+    bot.time.age += 30_000;
+    sleep();
+    bot.time.age += 100;
     wake();
     expect(clock.sinceSleepMinutes()).toBe(0);
     bot.time.age += 1000;

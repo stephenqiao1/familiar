@@ -1,5 +1,4 @@
-import type { Region, Workspace } from "@familiar/contracts";
-import type { Need } from "../dopamine/rewards.js";
+import type { NeedReading, Region, Workspace } from "@familiar/contracts";
 import { createAlarm } from "./alarm.js";
 import { createSearch, noveltyBump, type SearchInput } from "./search.js";
 import type { NoradrenalineSettings } from "./settings.js";
@@ -18,7 +17,7 @@ import {
 
 export interface NoradrenalineOptions {
   /** The bot's needs right now (the same ones dopamine is paid for and patience follows): alarm is read from them. */
-  needs(ws: Workspace): Need[];
+  needs(ws: Workspace): Pick<NeedReading, "name" | "level" | "rank" | "weight">[];
   /** The body's startle this tick, 0 to 1 (a bang, a blow out of nowhere). Default: none. */
   startle?(ws: Workspace): number;
   settings: NoradrenalineSettings;

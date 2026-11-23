@@ -1,6 +1,6 @@
 export type { Action } from "./action.js";
 export type { Answer, ChoiceAnswer, NoulAnswer, ScoreAnswer } from "./answer.js";
-export type { Arbiter, Attended, Candidate, Goal, IfThen, ItemWant, Proposal, Region, RegionOutput, Signal, Workspace } from "./brain.js";
+export type { Arbiter, Attended, Candidate, Goal, IfThen, ItemWant, NeedReading, Needs, TopDrive, BodyClock, Proposal, Region, RegionOutput, Signal, Workspace } from "./brain.js";
 export type { DecisionEngine } from "./engine.js";
 export type { FirstSeen } from "./first-seen.js";
 export type { Plan, Planner, PlanRequest } from "./planner.js";

@@ -72,8 +72,9 @@ export function overall(badness: number[]): number {
  *     The strongest urge is shared as `urge`.
  * It never calls a model and never waits on another region. Everything is in the trace.
  *
- * HOOK(drives): the vital signs are only shared here. A later drives region will read them from
- * the workspace (`ws.signals.vitals`, `ws.signals.hunger`, ...) to decide what the body wants.
+ * The vital signs are only shared here. The hypothalamus reads them from the workspace to say
+ * what the body needs: `cold`, `tired` and `sick` as needs, `reserve` for hunger to come, and
+ * `vitals` as a load on stress.
  */
 export function createMedullaRegion(options: MedullaOptions): Region {
   const { urges = [], name = "medulla", layer = 0 } = options;

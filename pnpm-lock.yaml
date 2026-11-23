@@ -208,6 +208,9 @@ importers:
       '@familiar/region-brainstem':
         specifier: workspace:*
         version: link:../../packages/region-brainstem
+      '@familiar/region-hypothalamus':
+        specifier: workspace:*
+        version: link:../../packages/region-hypothalamus
       '@familiar/region-instinct':
         specifier: workspace:*
         version: link:../../packages/region-instinct
@@ -287,6 +290,9 @@ importers:
       '@familiar/region-brainstem':
         specifier: workspace:*
         version: link:../region-brainstem
+      '@familiar/region-hypothalamus':
+        specifier: workspace:*
+        version: link:../region-hypothalamus
       '@familiar/region-instinct':
         specifier: workspace:*
         version: link:../region-instinct
@@ -325,6 +331,16 @@ importers:
       '@familiar/region-reflex':
         specifier: workspace:*
         version: link:../region-reflex
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/region-hypothalamus:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       '@familiar/core':
         specifier: workspace:*

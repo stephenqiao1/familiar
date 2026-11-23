@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { parseLearnedSkills, type LearnedSkill } from "@familiar/core";
 import { createMemory, type Fact, type KnownPlace, type Memory, type MemoryOptions, type MemoryStore } from "@familiar/memory";
 import { createChestMemory, type ChestMemory, type ChestRecord, type SurfaceCounts, type ThreatEntries } from "@familiar/minecraft";
+import { createTargetMemory, type TargetMemory } from "@familiar/region-hypothalamus";
 import { createNoveltyMemory, createScorebook, type NoveltyMemory, type SavedScore, type Scorebook } from "@familiar/neuromodulators";
 
 // What each bot has learned and remembers, kept between runs, one folder per bot. A missing or
@@ -15,9 +16,21 @@ export const memoriesFile = (bot: string) => `data/${bot}/memories.json`;
 export const hurtsFile = (bot: string) => `data/${bot}/hurts.json`;
 export const badFoodsFile = (bot: string) => `data/${bot}/bad-foods.json`;
 export const bodyFile = (bot: string) => `data/${bot}/body.json`;
+export const targetsFile = (bot: string) => `data/${bot}/targets.json`;
 export const surfacesFile = (bot: string) => `data/${bot}/surfaces.json`;
 export const threatsFile = (bot: string) => `data/${bot}/threats.json`;
 export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
+
+/** What the bot has learned about how much is enough: need → how many times the usual, and when. A missing file means nothing yet; a broken entry is left out. */
+export async function loadTargets(file: string): Promise<TargetMemory> {
+  const raw = await readJson(file);
+  const entries = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? Object.entries(raw as Record<string, { times?: unknown; at?: unknown }>) : [];
+  return createTargetMemory(Object.fromEntries(entries.filter(([, e]) => typeof e?.times === "number" && e.times >= 1 && typeof e.at === "number")) as Record<string, { times: number; at: number }>);
+}
+
+export async function saveTargets(targets: TargetMemory, file: string): Promise<void> {
+  await writeJson(file, targets.entries());
+}
 
 /** What the bot's body carries between runs: the world's age (in ticks) when it last woke from sleep. */
 export async function loadBody(file: string): Promise<{ sleptAtAge?: number }> {

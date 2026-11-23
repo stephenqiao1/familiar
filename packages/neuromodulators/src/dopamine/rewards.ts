@@ -35,17 +35,6 @@ export interface RewardRule {
    * things relieve the need and wants them as much as the need presses (see wantNow).
    */
   level?(state: State): number | null;
-  /**
-   * How vital the need is next to the others (higher = more vital; default 0). While a more
-   * vital need presses at all, a lesser one is silent: staying alive comes before stocking up.
-   */
-  rank?: number;
-  /**
-   * How much the need darkens the outlook when it is unmet (default 1). A need about the body
-   * right now counts in full; one about being provided for (tools, a stock of food) counts for
-   * less, since lacking it does not make the next minutes bad; a threat to life counts for more.
-   */
-  weight?: number;
 }
 
 /** A reward as logged: with its rule and need. */
@@ -66,39 +55,20 @@ export function checkRules(rules: RewardRule[], moment: RewardMoment) {
   return { rewards, errors };
 }
 
-/** One need as it stands in a state: how pressing it is (0 to 1), and how vital it is next to the others. */
-export interface Need {
-  name: string;
-  level: number;
-  rank: number;
-  weight: number;
-}
-
-/** Every need in a state: each rule that reads a level. A rule that throws, or does not apply, is left out. */
-export function needsOf(rules: RewardRule[], state: State): Need[] {
-  return rules.flatMap((rule) => {
+/**
+ * The levels of the rules that read one of their own, by rule name (0 = satisfied, 1 = desperate).
+ * A rule that throws, or does not apply, is left out. The body's needs are not rules: the
+ * hypothalamus reads those (see the region's `needs` option).
+ */
+export function needLevels(rules: RewardRule[], state: State): Record<string, number> {
+  const levels: Record<string, number> = {};
+  for (const rule of rules) {
     try {
       const level = rule.level?.(state);
-      return typeof level === "number" && Number.isFinite(level) ? [{ name: rule.name, level: Math.min(1, Math.max(0, level)), rank: rule.rank ?? 0, weight: rule.weight ?? 1 }] : [];
+      if (typeof level === "number" && Number.isFinite(level)) levels[rule.name] = Math.min(1, Math.max(0, level));
     } catch {
-      return []; // the same failure is named in the trace when the rule is checked
+      // The same failure is named in the trace when the rule is checked.
     }
-  });
-}
-
-/** How pressing each need is in a state, by rule name. */
-export function needLevels(rules: RewardRule[], state: State): Record<string, number> {
-  return Object.fromEntries(needsOf(rules, state).map((n) => [n.name, n.level]));
-}
-
-/**
- * How strongly each need presses for action right now: its level, unless a more vital need (a
- * higher `rank`) presses at all, which silences it. Staying alive always comes first: with a
- * threat about, nothing lesser is worth setting off for, however far the threat is inside the
- * range that counts. The levels themselves (for learning what relieves a need) are not changed:
- * use `needLevels` for those.
- */
-export function pressingNow(rules: RewardRule[], state: State): Record<string, number> {
-  const needs = needsOf(rules, state);
-  return Object.fromEntries(needs.map((n) => [n.name, needs.some((other) => other.rank > n.rank && other.level > 0) ? 0 : n.level]));
+  }
+  return levels;
 }

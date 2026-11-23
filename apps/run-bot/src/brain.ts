@@ -1,5 +1,7 @@
 import { createValueWeightedArbiter } from "@familiar/arbiter";
-import type { Arbiter, Candidate, DecisionEngine, Planner, Region, Skill, State, Workspace } from "@familiar/contracts";
+import { COMPETE, createHypothalamusRegion, DEFAULT_DRIVES, describeDrives, DESPERATE_SIGNAL, pressing, STRESS_SIGNAL, UNMET_SIGNAL, type DriveSettings, type Need, type TargetMemory } from "@familiar/region-hypothalamus";
+import { createDriveWatch, createReliefIndex, stressOnOutlook } from "./drives.js";
+import type { Arbiter, Candidate, DecisionEngine, NeedReading, Planner, Region, Skill, State, Workspace } from "@familiar/contracts";
 import { createMemoryRegion, memoryNotes, type MemoryStore } from "@familiar/memory";
 import {
   approachableThings,
@@ -33,7 +35,16 @@ import {
   playerVitals,
   type MedullaSettings,
   type ReflexSettings,
+  bodyNeeds,
+  livesOf,
+  needsNow,
+  newLife,
+  playerDayTime,
+  playerNeeds,
+  TARGET_ADJUSTMENTS,
   playerRewards,
+  sleptThroughNight,
+  sayNeed,
   playerReticular,
   REFLEX_NOTE,
   situationOf,
@@ -48,8 +59,6 @@ import {
   aimAt,
   brakeFactor,
   holdNow,
-  needsOf,
-  pressingNow,
   reliefOf,
   WANT_SIGNAL,
   createDopamineRegion,
@@ -75,6 +84,7 @@ import {
   switchMarginFactor,
   SWITCHING_SIGNAL,
   type DopaminePersonality,
+  type RewardRule,
   type FocusSettings,
   type NoradrenalineSettings,
   type NoveltyMemory,
@@ -101,6 +111,9 @@ import {
   type ArousalSettings,
   DEFAULT_COLLICULUS,
   FULL,
+  PAIN_SIGNAL,
+  TIRED_SIGNAL,
+  VITALS_SIGNAL,
   LOADED_SIGNAL,
   STARTLE_SIGNAL,
   UPPER_PAUSED_SIGNAL,
@@ -153,6 +166,10 @@ export interface BrainParts<Ctx> {
   arousal?: ArousalSettings;
   /** Why the bed skill cannot be started right now, in words (no bed in reach, it is day). Default: no reason given. */
   whyNoSleep?: () => string | null;
+  /** This bot's drives: how its needs are read, look ahead, compete and wear it down (from bots.json). Default: all on. */
+  drives?: DriveSettings;
+  /** What the bot has learned about how much is enough. Default: it learns nothing. */
+  targets?: TargetMemory;
   /** This bot's defence: what it is born knowing about threats, and the strength of each part of the defence circuit (from bots.json). Default: all on. */
   defence?: DefenceSettings;
   /** What the posture system did since last asked (refusals, stance holds, falls, things learned), for the trace. Default: nothing. */
@@ -202,6 +219,16 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const colliculus = parts.colliculus ?? DEFAULT_COLLICULUS;
   const defence = parts.defence ?? DEFAULT_DEFENCE;
   const arousal = parts.arousal ?? DEFAULT_AROUSAL;
+  const drives = parts.drives ?? DEFAULT_DRIVES;
+  // The needs as the hypothalamus read them; with it left out, the plain reading from the state.
+  const needs = (ws: Workspace) => needsNow(ws, drives);
+  // Boredom lives in dopamine's novelty memory; the hypothalamus tunes it like any need that can wait.
+  const boredom = curiosity(novelty, personality.noveltyBonus);
+  const bored: Need = { name: boredom.name, kind: boredom.need, level: (state) => boredom.level?.(state) ?? null, by: "day", spare: true };
+  const driveWatch = createDriveWatch();
+  const relieves = createReliefIndex(scorebook);
+  // With rest read as a need, a night's sleep pays by how tired the bot was: the flat reward for one is not needed.
+  const restIsNeed = drives.body > 0 && (!only || (only.includes("hypothalamus") && only.includes("medulla"))) && medulla.vitals > 0;
   // With the field of view on, the deciding layers are told only what the bot sees, hears or just saw.
   const view = colliculus.fieldOfView > 0 ? createFieldOfView() : null;
   const told = (ws: Workspace) => (view ? toldView(ws, view.tell(ws.state)) : ws);
@@ -224,6 +251,23 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     }), //                                                                                  layer 0, every tick
     // The medulla: vital signs, and the graded urges of upkeep. Left out (--regions), the hard reflexes above still fire.
     createMedullaRegion({ vitals: playerVitals, share: medulla.vitals, urges: medullaUrges(medulla), asleep, analgesiaOf: (ws) => level(ws, ANALGESIA_SIGNAL), ...(upkeepGain ? { gainOf: upkeepGain } : {}) }), // layer 0, every tick
+    // The hypothalamus: reads every need once and shares the reading. Straight after the medulla, so everything
+    // after it uses this tick's needs. Left out (--regions), each reader works the same reading out from the state.
+    createHypothalamusRegion({
+      needs: [...playerNeeds, ...bodyNeeds(drives.body)],
+      inner: [bored],
+      settings: drives,
+      // What wears the body down besides its needs. Alarm is last tick's (noradrenaline runs later).
+      load: (ws) => ({ alarm: alarmOf(ws), pain: level(ws, PAIN_SIGNAL), poorVitals: 1 - level(ws, VITALS_SIGNAL, 1) }),
+      dayTime: playerDayTime,
+      adjustments: TARGET_ADJUSTMENTS,
+      ...(parts.targets ? { targets: parts.targets } : {}),
+      // A skill that has been learned to relieve a need eases it while it runs.
+      relieving: (ws, need) => ws.current !== null && scorebook.get(situationOf(ws.state), reliefOf(ws.current.skill, need)).expected > 0,
+      // Unmet: nothing it has learned relieves the need.
+      relief: (_ws, need) => relieves.has(need),
+      life: livesOf,
+    }), //                                                                                  layer 0, every tick
     createBrainstemRegion({
       ...playerBrainstem(skills, ctx, parts.sore, { unsteady: posture.unsteady, ...(parts.postureNotes ? { notes: parts.postureNotes } : {}) }),
       settings: brainstem,
@@ -240,6 +284,9 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       settings: arousal,
       alarmOf,
       hardReflex: (ws) => level(ws, REFLEX_SIGNAL) >= 1,
+      // Stress keeps the body up only by what is not tiredness itself (being tired is one of the things that wears it down).
+      stressOf: (ws) => Math.max(0, level(ws, STRESS_SIGNAL) - level(ws, TIRED_SIGNAL)),
+      // (How far that reaches is the bot's arousal.stress.)
     }), //                                                                                  layer 0, every tick
     // The colliculus: the fast map of where things are and how sudden. It turns the head; left out (--regions), nothing does.
     createColliculusRegion({
@@ -263,6 +310,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       scorebook,
       novelty,
       personality,
+      boredom,
+      rules: restIsNeed ? playerRewards.filter((rule) => rule !== sleptThroughNight) : playerRewards,
       skillsToward: skillsToward(skills, ctx),
       asleep,
       // A skill that lists no body parts (idle) is rest; one that does not say uses the whole body.
@@ -272,12 +321,13 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     }), //                                                                                  layer 0, every tick
     createNoradrenalineRegion({
       // Alarm is read from the same needs; search from whether a pressing one is being answered.
-      needs: (ws) => needsOf(playerRewards, ws.state),
+      needs,
       startle: startleOf,
-      searchInputs: [gettingNowhere(unanswered, (_ws, now) => persistence.status(now)?.progress ?? 0)],
+      // Search rises while a pressing need is not being answered, and while the top need has not eased for minutes whatever the skill reports.
+      searchInputs: [gettingNowhere((ws) => unanswered(needs(ws)), (_ws, now) => persistence.status(now)?.progress ?? 0), { name: "unmet", read: (ws) => level(ws, UNMET_SIGNAL) }],
       settings: noradrenaline,
-      // Moved somewhere else all at once: whatever the plan was, the planner should look again.
-      ...(posture.displaced > 0 ? { replanWhen: (ws: Workspace) => wasDisplaced(ws.state) } : {}),
+      // Moved somewhere else all at once, or the body now wants something of another kind: the planner should look again.
+      replanWhen: (ws: Workspace) => (posture.displaced > 0 && wasDisplaced(ws.state)) || (drives.tellPlanner > 0 && driveWatch.changed(ws)),
     }), //                                                                                  layer 0, every tick
     createMemoryRegion({
       memory,
@@ -299,8 +349,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL)),
     }), //                                                                                  layer 1, every tick
     createPatienceRegion({
-      // The outlook is worked out from the same needs dopamine is paid for.
-      needs: (ws) => needsOf(playerRewards, ws.state),
+      // The outlook is worked out from the same needs dopamine is paid for, and from the stress they do not already account for.
+      needs: (ws) => [...needs(ws), ...stressOnOutlook(needs(ws), ws.signals[STRESS_SIGNAL]?.value, patience.stress)],
       settings: patience,
       effects: () => ({ persistence: persistence.status(Date.now()) }),
     }), //                                                                                  layer 0, every tick
@@ -310,6 +360,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
         describeSituation(told(ws), menu, storage, [
           ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, parts.memoriesForPlanner?.() ?? NEUTRAL_BUDGET.remembered),
           ...(hasBrainstem && brainstem.holdBack > 0 ? [REFLEX_NOTE] : []),
+          ...(drives.tellPlanner > 0 ? [describeDrives(ws.needs)].filter((line) => line !== null) : []),
         ]),
       guidance: (ws) => {
         const horizon = planningHorizon(patienceOf(ws, patience), patience.horizon);
@@ -330,9 +381,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
  * How hard the worst unanswered need presses (0 to 1), for search: the ordinary needs as they
  * press right now (silent while danger does: that is alarm's business), each by its weight.
  */
-function unanswered(ws: Workspace): number {
-  const pressing = pressingNow(playerRewards, ws.state);
-  return Math.min(1, Math.max(0, ...needsOf(playerRewards, ws.state).filter((n) => n.rank === 0).map((n) => n.weight * (pressing[n.name] ?? 0))));
+function unanswered(needs: readonly NeedReading[]): number {
+  return Math.min(1, Math.max(0, ...needs.filter((n) => n.rank === 0).map((n) => n.weight * n.pressing)));
 }
 
 /** The player's dopamine region: every reward rule, the situation labels and cues, tuned by personality. */
@@ -340,6 +390,10 @@ export function createPlayerDopamine(parts: {
   scorebook: Scorebook;
   novelty: NoveltyMemory;
   personality: DopaminePersonality;
+  /** The reward rules for things that happen. Default: every one the player has. */
+  rules?: RewardRule[];
+  /** Boredom, if something else reads it too (the rule keeps its own level, so there must be only one). Default: made here. */
+  boredom?: RewardRule;
   /** The skills that would head toward a thing right now. */
   skillsToward(thing: Thing): string[];
   /** How far the size of a surprise sets how fast it is learned from (0 to 1). Default: 0 (always in full). */
@@ -352,8 +406,18 @@ export function createPlayerDopamine(parts: {
   const { scorebook, novelty, personality } = parts;
   // Memory of places: what it has learned about and cannot sense now, costed by the walk there.
   const remembered = rememberedThings(() => scorebook.things(), personality.wastedEffort);
+  // Boredom is a need too, but it lives in dopamine's own novelty memory, so it is read here beside the body's.
+  const boredom = parts.boredom ?? curiosity(novelty, personality.noveltyBonus);
+  const bored = (state: State) => {
+    const level = boredom.level?.(state);
+    return typeof level === "number" && Number.isFinite(level) ? [{ name: boredom.name, kind: boredom.need, level: Math.min(1, Math.max(0, level)), rank: 0, weight: 1 }] : [];
+  };
   return createDopamineRegion({
-    rules: [...playerRewards, curiosity(novelty, personality.noveltyBonus)],
+    rules: [...(parts.rules ?? playerRewards), boredom],
+    // The needs as the hypothalamus read them (or, with it left out, the same reading from the state).
+    // Boredom's level is read here, at dopamine's turn (its rule moves it); how far the time of day
+    // and stress quieten it comes from the hypothalamus, when it is there.
+    needs: { now: (ws) => pressing([...needsNow(ws), ...bored(ws.state).map((b) => ({ ...b, pressing: b.level * quietened(ws.needs?.inner?.find((n) => n.name === b.name)) }))]), fresh: newLife, say: (name, moment) => sayNeed(name, moment.before, moment.after) },
     situationOf,
     scorebook,
     // Effort that comes to nothing costs something; the personality says how much (0: never).
@@ -368,6 +432,11 @@ export function createPlayerDopamine(parts: {
     ...(parts.asleep ? { asleep: parts.asleep } : {}),
     ...(parts.surpriseLearning === undefined ? {} : { surpriseLearning: parts.surpriseLearning }),
   });
+}
+
+/** How much of its level a need read by the hypothalamus presses at, before the more vital ones have their say (1 with nothing known). */
+function quietened(reading: NeedReading | undefined): number {
+  return reading && reading.level > 0 && reading.tuned !== undefined ? reading.tuned / reading.level : 1;
 }
 
 /** The current patience, or the bot's resting level when the serotonin region is off. */
@@ -413,9 +482,11 @@ export function createArbiter<Ctx>(parts: {
     const target = "target" in action ? action.target : undefined;
     const [situation, aim] = [situationOf(ws.state), target === undefined ? undefined : aimOf(ws.state, target)];
     const wanted = (ws.signals[WANT_SIGNAL]?.value ?? 0) > 0;
-    const hold = wanted ? holdNow(pressingNow(playerRewards, ws.state), (need) => scorebook.get(situation, reliefOf(skill, need), aim).expected, personality.wanting) : 1;
+    const hold = wanted ? holdNow(Object.fromEntries(needsNow(ws).map((n) => [n.name, n.pressing])), (need) => scorebook.get(situation, reliefOf(skill, need), aim).expected, personality.wanting) : 1;
     const costly = Math.min(1, Math.max(0, (risky.has(skill) ? 1 : 0) + scorebook.get(situation, skill, aim).cost - 1));
-    return hold * brakeFactor(patienceOf(ws, patience), patience.brake * costly);
+    // A desperate need loosens the brake: a starving body takes chances it otherwise would not.
+    const desperate = ws.signals[DESPERATE_SIGNAL]?.value ?? 0;
+    return hold * brakeFactor(patienceOf(ws, patience), patience.brake * costly * (1 - COMPETE.brakeOff * desperate));
   };
   const arbiter = createValueWeightedArbiter({
     valueOf: (skill, ws) =>

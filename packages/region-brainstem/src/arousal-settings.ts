@@ -16,11 +16,13 @@ export interface ArousalSettings {
   quietRest: number;
   /** Over-arousal narrows what the deciding layers are offered. On above 0. */
   frazzled: number;
+  /** How far slow stress keeps the bot from getting sleepy (0: not at all). */
+  stress: number;
 }
 
-export const DEFAULT_AROUSAL: ArousalSettings = { resting: 0.5, sleepPressure: 1, bedtime: 1, wakeThreshold: 0.5, inertia: 1, gate: 1, quietRest: 1, frazzled: 1 };
+export const DEFAULT_AROUSAL: ArousalSettings = { resting: 0.5, sleepPressure: 1, bedtime: 1, wakeThreshold: 0.5, inertia: 1, gate: 1, quietRest: 1, frazzled: 1, stress: 1 };
 
-const KEYS = ["resting", "sleepPressure", "bedtime", "wakeThreshold", "inertia", "gate", "quietRest", "frazzled"] as const;
+const KEYS = ["resting", "sleepPressure", "bedtime", "wakeThreshold", "inertia", "gate", "quietRest", "frazzled", "stress"] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function arousalProblem(s: ArousalSettings): string | null {

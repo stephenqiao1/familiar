@@ -1,17 +1,22 @@
 // What the live checks of the neuromodulators share: running the real bot through a scripted
 // scene on the test server (reflexes only, or the whole brain), and reading its tick log back.
 import { spawn } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 
 /** Everything but instinct: the reflexes, upkeep and every neuromodulator, with the echo planner. */
-const NO_INSTINCT = "reflex,medulla,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+// LESION=hypothalamus (or any names, comma-separated) leaves those out too, to see what the brain does without them.
+const LESION = (process.env.LESION ?? "").split(",").filter(Boolean);
+const NO_INSTINCT = "reflex,medulla,hypothalamus,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal"
+  .split(",")
+  .filter((name) => !LESION.includes(name))
+  .join(",");
 export const BOT = "Tester";
 export const HOME = "60.5 151 40.5 -90 0";
 
 export interface Tick {
   timestamp: number;
-  state: { data: { self: { health: number; food: number; foodItems?: number; deaths: number; position: { x: number; y: number; z: number }; inventory: Record<string, number> }; nearby?: { mobs?: { hostile: boolean; reachable: boolean; dist: number }[]; blocks?: { id: string; type: string }[] }; current: { skill: string } | null } };
+  state: { data: { time?: { isNight: boolean; lightLevel: number }; self: { health: number; food: number; foodItems?: number; deaths: number; position: { x: number; y: number; z: number }; inventory: Record<string, number> }; nearby?: { mobs?: { hostile: boolean; reachable: boolean; dist: number }[]; blocks?: { id: string; type: string }[] }; current: { skill: string } | null } };
   winner: { region: string; layer: number; urgency: number; action: { skill?: string; target?: string }; reason: string } | null;
   regions: { region: string; trace?: Record<string, unknown> }[];
   signals: Record<string, { value: number }>;
@@ -27,11 +32,19 @@ export interface Row {
 /**
  * Runs the real bot; `act` scripts the scene while it runs. Returns its ticks. With `plan` the
  * echo planner sets that goal; `whole` adds Jev (default: reflexes only, with typed commands).
+ * `settings` are the bot's settings for this run, as its entry in bots.json would be (default:
+ * whatever FAMILIAR_BOTS_FILE or bots.json says); `keep` leaves what it learned last run in place.
  */
-export async function play(act: (bot: { say(command: string): void }) => Promise<void>, options: { plan?: object; whole?: boolean } = {}): Promise<Tick[]> {
-  rmSync(`data/${BOT}`, { recursive: true, force: true });
+export async function play(act: (bot: { say(command: string): void }) => Promise<void>, options: { plan?: object; whole?: boolean; settings?: object; keep?: boolean } = {}): Promise<Tick[]> {
+  if (!options.keep) rmSync(`data/${BOT}`, { recursive: true, force: true });
+  const env = { ...process.env };
+  if (options.settings) {
+    mkdirSync("logs", { recursive: true });
+    env.FAMILIAR_BOTS_FILE = "logs/live-bots.json";
+    writeFileSync(env.FAMILIAR_BOTS_FILE, JSON.stringify({ [BOT]: options.settings }));
+  }
   const brain = options.whole ? ["--engine", "jev"] : ["--engine", "echo", "--regions", NO_INSTINCT];
-  const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", ...brain, "--planner", "echo", ...(options.plan ? ["--plan", JSON.stringify(options.plan)] : []), "--manual", "--name", BOT], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", ...brain, "--planner", "echo", ...(options.plan ? ["--plan", JSON.stringify(options.plan)] : []), "--manual", "--name", BOT], { stdio: ["pipe", "pipe", "pipe"], env });
   let output = "";
   let exited = false;
   child.stdout.on("data", (d: Buffer) => (output += d));

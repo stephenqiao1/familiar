@@ -4,7 +4,7 @@
 
 import type { Candidate, Planner, Skill, State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
-import { playerRewards, SCHEMA_VERSION, situationOf, type MinecraftStateData } from "@familiar/minecraft";
+import { needsNow, SCHEMA_VERSION, situationOf, type MinecraftStateData } from "@familiar/minecraft";
 import {
   createPatienceRegion,
   createPersistence,
@@ -12,7 +12,6 @@ import {
   createScorebook,
   DEFAULT_PATIENCE,
   DEFAULT_PERSONALITY,
-  needsOf,
   PATIENCE_SIGNAL,
   planningHorizon,
   type PatienceSettings,
@@ -85,7 +84,7 @@ const BAD: Patch = { health: 2, food: 2, foodItems: 0, isNight: true, unarmed: t
 /** The bot's serotonin region on a fresh workspace, driven one second at a time. */
 function bot() {
   const store = createWorkspace();
-  const region = createPatienceRegion({ needs: (ws) => needsOf(playerRewards, ws.state), settings: DEFAULT_PATIENCE });
+  const region = createPatienceRegion({ needs: needsNow, settings: DEFAULT_PATIENCE });
   let seconds = 0;
   const live = async (patch: Patch, forSeconds = 1) => {
     for (let i = 0; i < forSeconds; i++) {

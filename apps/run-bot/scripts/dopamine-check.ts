@@ -11,7 +11,12 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 
 /** Everything but instinct: reflexes, upkeep, dopamine and the echo planner (for a fixed plan). */
-const NO_INSTINCT = "reflex,medulla,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+// LESION=hypothalamus (or any names, comma-separated) leaves those out too.
+const LESION = (process.env.LESION ?? "").split(",").filter(Boolean);
+const NO_INSTINCT = "reflex,medulla,hypothalamus,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal"
+  .split(",")
+  .filter((name) => !LESION.includes(name))
+  .join(",");
 const BOT = "Tester";
 const HOME = "60.5 151 40.5 -90 0";
 const BASE_SPOT = "-8 69 14";
@@ -632,7 +637,9 @@ scenes.no_path = async () => {
   const [inside, out] = [between(ticks, shut, freed), after(ticks, freed)];
   const ends = (part: Tick[]) => part.flatMap((t) => t.skillEvents ?? []).filter((e) => e.skill === "take_items" && e.type !== "started");
   const failed = ends(inside).filter((e) => e.type === "failed");
-  const wants = inside.flatMap((t) => (dopamineOf(t).cues ?? []).map((c) => c.want));
+  // A want is weaker while the trip that answers it is under way (the hypothalamus eases the need); that is not unlearning, so those ticks are left out.
+  const eased = (t: Tick) => JSON.stringify(t.regions.find((r) => r.region === "hypothalamus")?.trace ?? "").includes("eased: ");
+  const wants = inside.filter((t) => !eased(t)).flatMap((t) => (dopamineOf(t).cues ?? []).map((c) => c.want));
   const firstOut = out.find((t) => (dopamineOf(t).cues ?? []).length > 0);
   return {
     scene: "no path",

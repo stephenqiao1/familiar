@@ -1,4 +1,4 @@
-import type { Attended, Goal, RunningSkill, Signal, SkillEvent, State, Workspace } from "@familiar/contracts";
+import type { Attended, Goal, Needs, RunningSkill, Signal, SkillEvent, State, Workspace } from "@familiar/contracts";
 
 const MAX_EVENTS = 20;
 
@@ -13,6 +13,7 @@ export interface WorkspaceStore {
   goal(): Goal | null;
   signals(): Record<string, Signal>;
   attended(): Attended | null;
+  needs(): Needs | null;
 }
 
 const EMPTY_STATE: State = { schemaVersion: 0, tick: -1, timestamp: 0, data: {} };
@@ -24,6 +25,7 @@ export function createWorkspace(): WorkspaceStore {
   const signals: Record<string, Signal> = {};
   const events: SkillEvent[] = [];
   let attended: Attended | null = null;
+  let needs: Needs | null = null;
 
   return {
     update(nextState, nextCurrent) {
@@ -51,6 +53,9 @@ export function createWorkspace(): WorkspaceStore {
         get attended() {
           return attended;
         },
+        get needs() {
+          return needs;
+        },
         get recentEvents() {
           return [...events];
         },
@@ -67,11 +72,15 @@ export function createWorkspace(): WorkspaceStore {
         setAttended(next) {
           attended = next && { ...next };
         },
+        setNeeds(next) {
+          needs = next && { ...next, readings: next.readings.map((r) => ({ ...r })) };
+        },
       };
     },
     goal: () => goal,
     signals: () => ({ ...signals }),
     attended: () => attended,
+    needs: () => needs,
   };
 }
 

@@ -77,6 +77,70 @@ export interface Attended {
   since: number;
 }
 
+/** One need as the hypothalamus read it this tick. */
+export interface NeedReading {
+  name: string;
+  /** What the need is about ("hunger", "safety", "having_enough"). */
+  kind: string;
+  /** How pressing it is by the body's own reading: 0 = met, 1 = desperate. */
+  level: number;
+  /** How vital it is next to the others (higher = more vital). */
+  rank: number;
+  /** How much it darkens the outlook when unmet (1 = in full). */
+  weight: number;
+  /**
+   * How hard it presses for action right now: its level, raised by where it is heading and
+   * tuned by the time of day and by stress, or 0 while a more vital need presses at all.
+   */
+  pressing: number;
+  /** How hard it would press with nothing more vital pressing (the same as `pressing` unless it is silenced). Left out by a plain reading. */
+  tuned?: number;
+  /** Where the level is heading: what it would be in a minute at the rate of the last one. Left out when nothing looks ahead. */
+  projected?: number;
+  /** How much is enough right now, for a need about having some of a thing. */
+  target?: number;
+}
+
+/** The need the body wants most right now. It is sticky: a rival must clearly beat it to take its place. */
+export interface TopDrive {
+  name: string;
+  kind: string;
+  /** How hard it presses, by its weight (0 to 1). */
+  score: number;
+  /** When it took the top place (ms). */
+  since: number;
+}
+
+/** The body's clock: where in the day it is. */
+export interface BodyClock {
+  /** How far through the whole day, 0 (sunrise) to 1. */
+  phase: number;
+  night: boolean;
+  /** How far through the night, 0 to 1 (0 by day). */
+  nightProgress: number;
+  /** Rises from 0 to 1 over the last three minutes of the day. */
+  dusk: number;
+  /** Rises from 0 to 1 over the last three minutes of the night. */
+  dawn: number;
+}
+
+/** The body's needs this tick, read once by the hypothalamus for every other region to use. */
+export interface Needs {
+  readings: NeedReading[];
+  /** Needs that live inside one region (boredom, in dopamine's own memory): tuned like the rest, but not part of how things stand. */
+  inner?: NeedReading[];
+  /** The need the body wants most, or null with nothing pressing. */
+  top?: TopDrive | null;
+  /** The time of day, when the body clock is on. */
+  clock?: BodyClock;
+  /** Slow stress, 0 to 1. */
+  stress?: number;
+  /** The need that is desperate (a need of the body above 0.8), or null. */
+  desperate?: string | null;
+  /** Whether nothing the bot has learned relieves the need it wants most. */
+  unmet?: boolean;
+}
+
 /** The brain's shared memory: the only way regions communicate. */
 export interface Workspace {
   /** The latest world state. */
@@ -87,6 +151,8 @@ export interface Workspace {
   readonly signals: Readonly<Record<string, Signal>>;
   /** The one thing being attended to, or null. */
   readonly attended: Attended | null;
+  /** The body's needs as the hypothalamus read them this tick, or null with no hypothalamus. */
+  readonly needs: Needs | null;
   /** Skill lifecycle events, oldest first, at most the last 20. */
   readonly recentEvents: readonly SkillEvent[];
   /** Replaces the goal. `setBy` and `setAt` are filled in for you; the rest default to none. */
@@ -96,6 +162,8 @@ export interface Workspace {
   setSignal(name: string, value: number): void;
   /** Says what is being attended to (one thing at a time), or null for nothing. */
   setAttended(attended: Attended | null): void;
+  /** Shares this tick's reading of the body's needs. */
+  setNeeds(needs: Needs | null): void;
 }
 
 /** What a region returns each time it runs. */

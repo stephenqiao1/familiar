@@ -1,8 +1,9 @@
-import type { Region, SkillEvent, State, Workspace } from "@familiar/contracts";
+import type { NeedReading, Region, SkillEvent, State, Workspace } from "@familiar/contracts";
 import { aimAt, cueProposals, type Thing } from "./cues.js";
 import { aimOf, createEpisodeTracker, type EndedEpisode } from "./episodes.js";
 import { createMood } from "../mood.js";
-import { checkRules, needLevels, pressingNow, type LoggedReward, type RewardMoment, type RewardRule } from "./rewards.js";
+import { needChangeReward } from "./need-change.js";
+import { checkRules, needLevels, type LoggedReward, type RewardMoment, type RewardRule } from "./rewards.js";
 import { type Aim, createScorebook, type Scorebook } from "./scorebook.js";
 import { effortOf, reliefIsTelling, reliefOf, retryAfter, trustAfter, withTheRest, type NeedLevels } from "./wanting.js";
 import { WASTED_EFFORT_RULE, wastedEffort } from "./wasted.js";
@@ -23,6 +24,20 @@ export interface DopamineOptions {
    * in. Default: 0 (always learn in full).
    */
   surpriseLearning?: number;
+  /**
+   * The body's needs, as read this tick (by the hypothalamus; or worked out from the state with
+   * it left out). With this, a need is not a rule: each is paid the signed change in its level
+   * since the last tick (see needChangeReward), and its level and how hard it presses are used
+   * for learning what relieves it and for wanting. Default: none (only rules that read a level
+   * of their own count as needs).
+   */
+  needs?: {
+    now(ws: Workspace): Pick<NeedReading, "name" | "kind" | "level" | "pressing">[];
+    /** No need is compared across this moment (a new life: nothing the bot achieved). Default: never. */
+    fresh?(moment: RewardMoment): boolean;
+    /** What a change in one need is called in the log ("food 5 → 10"). Default: the need's name. */
+    say?(name: string, moment: RewardMoment): string;
+  };
   /**
    * The work the body did between two ticks, in reward units: what that stretch costs if the
    * running skill comes to nothing (see wastedEffort). Default: none, so nothing is ever wasted.
@@ -213,7 +228,8 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       for (const e of events) seen.add(e);
       const moment = before && { before, after, events };
       before = after;
-      const [was, now] = [levels, needLevels(rules, after)];
+      const readings = options.needs?.now(ws);
+      const [was, now] = [levels, readings ? Object.fromEntries(readings.map((r) => [r.name, r.level])) : needLevels(rules, after)];
       levels = now;
       if (!moment) {
         ws.setSignal(DOPAMINE_SIGNAL, tonic.update(0, after.timestamp));
@@ -221,6 +237,11 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       }
 
       const { rewards, errors } = checkRules(rules, moment);
+      // A need pays the signed change in its level (one that a rule pays for itself is left to the rule).
+      if (readings && !(options.needs?.fresh?.(moment) ?? false)) {
+        const changed = readings.filter((r) => was[r.name] !== undefined && was[r.name] !== r.level && !rules.some((rule) => rule.name === r.name));
+        rewards.unshift(...changed.map((r) => ({ rule: r.name, need: r.kind, amount: needChangeReward(was[r.name]!, r.level), reason: options.needs?.say?.(r.name, moment) ?? r.name })));
+      }
       // Rewards about one skill go to that skill; the rest are whoever's was running.
       const about = rewards.filter((r): r is LoggedReward & { skill: string } => r.skill !== undefined);
       const anyones = rewards.filter((r) => r.skill === undefined);
@@ -278,7 +299,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       ws.setSignal(BAD_SURPRISE_SIGNAL, Math.max(0, ...learned.map((e) => -e.surprise)));
       if (learned.length) lastEnded = { episode: learned.at(-1)!, at: after.timestamp };
       const situation = there;
-      const { cues, proposals } = cueProposals({ things: (options.cueThingsOf ?? thingsOf)(after), situation, da, needs: pressingNow(rules, after), scorebook, skillsToward: (thing) => skillsToward(thing).filter((skill) => !((heldUntil.get(wantKey(skill, thing.id)) ?? -Infinity) > after.timestamp)), strength: options.wanting ?? 1 });
+      const { cues, proposals } = cueProposals({ things: (options.cueThingsOf ?? thingsOf)(after), situation, da, needs: readings ? Object.fromEntries(readings.map((r) => [r.name, r.pressing])) : now, scorebook, skillsToward: (thing) => skillsToward(thing).filter((skill) => !((heldUntil.get(wantKey(skill, thing.id)) ?? -Infinity) > after.timestamp)), strength: options.wanting ?? 1 });
       const asleep = options.asleep?.(ws) ?? false;
       ws.setSignal(WANT_SIGNAL, asleep || !proposals.length ? 0 : Math.min(1, Math.max(...cues.map((c) => c.want))));
       return {

@@ -13,7 +13,8 @@
       "timeConstantSeconds": 60,
       "persistence": 1,
       "horizon": 1,
-      "brake": 1
+      "brake": 1,
+      "stress": 1
     },
     "noradrenaline": {
       "alarmGain": 1,
@@ -176,7 +177,24 @@
       "inertia": 1,
       "gate": 1,
       "quietRest": 1,
-      "frazzled": 1
+      "frazzled": 1,
+      "stress": 1
+    },
+    "drives": {
+      "body": 1,
+      "lookAhead": 1,
+      "targets": 1,
+      "learnTargets": 1,
+      "clock": 1,
+      "stress": 1,
+      "desperate": 1,
+      "unmet": 1,
+      "tellPlanner": 1,
+      "weights": {
+        "danger": 2,
+        "body": 1,
+        "provision": 0.25
+      }
     }
   },
   "Brave": {
@@ -221,6 +239,19 @@
   "Sleeper": {
     "arousal": {
       "wakeThreshold": 0.9
+    }
+  },
+  "Plain": {
+    "drives": {
+      "body": 0,
+      "lookAhead": 0,
+      "targets": 0,
+      "learnTargets": 0,
+      "clock": 0,
+      "stress": 0,
+      "desperate": 0,
+      "unmet": 0,
+      "tellPlanner": 0
     }
   }
 }

@@ -76,7 +76,7 @@ describe("encodeState", () => {
 
     expect(state).toMatchObject({ schemaVersion: 18, tick: 7 });
     expect(state.data).toEqual({
-      time: { isNight: false, lightLevel: 15 },
+      time: { isNight: false, lightLevel: 15, blockLight: 0 },
       self: {
         position: { x: 0, y: 63, z: 0 },
         dimension: "overworld",
@@ -216,9 +216,9 @@ describe("encodeState", () => {
 
   it("dims the sky's light at night", () => {
     const bot = fakeBot();
-    expect(dataOf(bot).time).toEqual({ isNight: false, lightLevel: 15 });
+    expect(dataOf(bot).time).toEqual({ isNight: false, lightLevel: 15, blockLight: 0 });
     bot.time.isDay = false;
-    expect(dataOf(bot).time).toEqual({ isNight: true, lightLevel: 4 });
+    expect(dataOf(bot).time).toEqual({ isNight: true, lightLevel: 4, blockLight: 0 });
   });
 
   it("passes on how the place feels from memory", () => {

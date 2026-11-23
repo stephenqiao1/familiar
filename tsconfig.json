@@ -23,6 +23,9 @@
       "path": "packages/region-reflex"
     },
     {
+      "path": "packages/region-hypothalamus"
+    },
+    {
       "path": "packages/region-instinct"
     },
     {

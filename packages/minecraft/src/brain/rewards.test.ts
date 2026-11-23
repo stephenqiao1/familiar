@@ -3,8 +3,26 @@ import type { Reward, RewardRule } from "@familiar/neuromodulators";
 import { describe, expect, it } from "vitest";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { fakeState, type StatePatch } from "../encode/state.test-helper.js";
-import { curiosity, danger, died, playerRewards, foodBar, foodStock, health, newLife, nightLight, skillFailed, sleptThroughNight, tools, torches } from "./rewards.js";
-import { createNoveltyMemory, needLevels, pressingNow } from "@familiar/neuromodulators";
+import { danger, foodBar, foodStock, health, nightLight, playerNeeds, tools, torches } from "./needs.js";
+import { curiosity, died, playerRewards, newLife, skillFailed, sleptThroughNight } from "./rewards.js";
+import { createNoveltyMemory, needChangeReward } from "@familiar/neuromodulators";
+import { readNeeds, type Need } from "@familiar/region-hypothalamus";
+import type { State } from "@familiar/contracts";
+
+/** A need as the reward it pays: the signed change in its level, the way the dopamine region pays it. */
+const paid = (need: Need): RewardRule => ({
+  name: need.name,
+  need: need.kind,
+  check(moment) {
+    const plain = { signal: () => undefined, target: need.target ?? 0, clock: null };
+    const [a, b] = [need.level(moment.before, plain), need.level(moment.after, plain)];
+    return a === null || b === null || a === b || newLife(moment) ? null : { amount: needChangeReward(a, b), reason: need.say!(moment.before, moment.after) };
+  },
+});
+const asRule = (rule: RewardRule | Need): RewardRule => ("check" in rule ? rule : paid(rule));
+/** Each need's level, and how hard each presses, as the hypothalamus reads them. */
+const needLevels = (_rules: unknown, s: State) => Object.fromEntries(readNeeds(playerNeeds, s).map((r) => [r.name, r.level]));
+const pressingNow = (_rules: unknown, s: State) => Object.fromEntries(readNeeds(playerNeeds, s).map((r) => [r.name, r.pressing]));
 
 type Patch = Pick<StatePatch, "self" | "time" | "current"> & { mobs?: MinecraftStateData["nearby"]["mobs"] };
 
@@ -12,9 +30,9 @@ type Patch = Pick<StatePatch, "self" | "time" | "current"> & { mobs?: MinecraftS
 const state = ({ mobs = [], self, ...rest }: Patch = {}) => fakeState({ ...rest, self: { foodItems: 8, ...self }, nearby: { mobs } });
 
 /** Everything a rule pays for the change from one state to another. */
-const checkAll = (rule: RewardRule, before: Patch, after: Patch, events: SkillEvent[] = []) => rule.check({ before: state(before), after: state(after), events });
+const checkAll = (rule: RewardRule | Need, before: Patch, after: Patch, events: SkillEvent[] = []) => asRule(rule).check({ before: state(before), after: state(after), events });
 /** The one reward a rule pays (for rules that pay at most one). */
-const check = (rule: RewardRule, before: Patch, after: Patch, events: SkillEvent[] = []): Reward | null => {
+const check = (rule: RewardRule | Need, before: Patch, after: Patch, events: SkillEvent[] = []): Reward | null => {
   const found = checkAll(rule, before, after, events);
   return Array.isArray(found) ? (found[0] ?? null) : found;
 };
@@ -23,7 +41,7 @@ const event = (skill: string, type: SkillEvent["type"]): SkillEvent => ({ skill,
 const zombie = (dist: number) => ({ id: "entity:7", type: "zombie", dist, hostile: true, reachable: true, closing: 0 });
 
 /** What a need pays for going there and back again: always nothing. */
-const roundTrip = (rule: RewardRule, here: Patch, there: Patch) => (check(rule, here, there)?.amount ?? 0) + (check(rule, there, here)?.amount ?? 0);
+const roundTrip = (rule: RewardRule | Need, here: Patch, there: Patch) => (check(rule, here, there)?.amount ?? 0) + (check(rule, there, here)?.amount ?? 0);
 
 describe("player rewards", () => {
   it("every need says how pressing it is, by rule name, and the things that only happen do not", () => {
@@ -157,6 +175,6 @@ describe("player rewards", () => {
   });
 
   it("ignores states that are not Minecraft states", () => {
-    expect(foodBar.check({ before: { ...state(), schemaVersion: 1 }, after: state(), events: [] })).toBeNull();
+    expect(asRule(foodBar).check({ before: { ...state(), schemaVersion: 1 }, after: state(), events: [] })).toBeNull();
   });
 });

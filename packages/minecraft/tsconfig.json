@@ -28,6 +28,9 @@
     },
     {
       "path": "../region-reflex"
+    },
+    {
+      "path": "../region-hypothalamus"
     }
   ]
 }

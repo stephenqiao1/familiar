@@ -4,7 +4,7 @@ The bot's decisions come from **regions** (brain parts). Regions never call each
 share one **workspace** (shared memory), and one **arbiter** picks which proposal to act on.
 
 ```
-Workspace (state · goal · signals · attended · recent events)
+Workspace (state · goal · signals · attended · needs · recent events)
    ▲ read/write            ▲ read/write          ▲ read/write
 Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
 (layer 0, every tick)      Jev, every tick       LLM, every 15 s in the background
@@ -12,6 +12,8 @@ Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
    rules                   │                     │ a goal can load responses (ifThen)
  Medulla: vital signs and  │                     │ and hold reflexes back (holdBack)
    the urges of upkeep     │                     │
+ Hypothalamus: the needs,  │                     │
+   read once and shared    │                     │
  Brainstem: reflex gains,  │                     │
    startle, loaded         │   ◄── called less often when drowsy, ──►
    responses               │       not at all while asleep
@@ -31,7 +33,8 @@ Skill executor → skills → primitives (every movement) and locomotion (all tr
 ```
 
 Alongside these run layer-0 regions that propose little or nothing but shape the rest:
-`dopamine`, `serotonin`, `noradrenaline`, `acetylcholine` (the neuromodulators) and `hippocampus` (memory).
+`hypothalamus` (the body's needs), `dopamine`, `serotonin`, `noradrenaline`, `acetylcholine` (the
+neuromodulators) and `hippocampus` (memory).
 
 Regions that run every tick start in the order they are listed in `apps/run-bot/src/brain.ts`.
 All but instinct finish at once, so each sees the signals set by the ones listed before it in the
@@ -45,6 +48,7 @@ same tick; a signal from a region listed later is read one tick late.
 | Proposal | A region's suggestion: an action, an `urgency` from 0 to 1, and a `reason`. |
 | Workspace | Shared memory. Holds the world state, the current goal, signals, the one thing being attended to, and recent skill events. |
 | Attended | The one thing the bot is attending to right now: `{ id, kind, bearing, salience, since }`, or null. Set by the colliculus (`ws.setAttended`); logged each tick. |
+| Needs | The body's needs as the hypothalamus read them this tick (`ws.needs`): each need's level, how hard it presses, where it is heading and its target; the need wanted most; the body clock; stress. Null with no hypothalamus. |
 | Signal | A named level from 0 to 1 that one region shares with the others (e.g. `in_danger`, `dopamine`, `patience`, `alarm`). |
 | Goal | What the prefrontal cortex wants the bot working toward: text, steps (and how many are done), what to carry (`wants`), things to watch for (`watchFor`), responses loaded in advance (`ifThen`) and reflexes to hold back (`holdBack`). Instinct reads it each tick. |
 | Hard reflex | A life-saving rule. Always urgency 1; nothing learned, felt or planned can stop it. |
@@ -64,6 +68,7 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `arbiter` | The pickers: `value-weighted` (used) and `highest-urgency`. |
 | `region-reflex` | Runs a list of rules, hard and soft, and logs each fired rule's kind, base urgency, gain and final urgency. |
 | `region-brainstem` | Supplies the reflex gains, the defence circuit's choice of defence, a `brainstem` region (startle, loaded responses, the defence signals), a `reticular` region (arousal, bedtime, waking and the graded gate), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
+| `region-hypothalamus` | Owns the body's needs: reads each once a tick and shares the reading (`ws.needs`), with moving targets, looking ahead, the body clock, slow stress and the top drive. Game-free. |
 | `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
 | `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
 | `neuromodulators` | Chemical dials, each a region that shares signals (see below). |
@@ -405,11 +410,12 @@ sleeps. It is listed right after `reflex`, so every later region sees its signal
 | `pain` | none | a third of health lost at once | recent damage, fading over about 10 seconds; a new body starts at 0 |
 | `sick` | well | poison or wither | the worst harmful effect (`SICKNESS` table: hunger 0.5, nausea and blindness 0.4, ...) |
 | `cold` | warm | frozen through | the freezing meter (powder snow) |
-| `tired` | just slept | 3 game days awake | time since the bot last woke from a bed (kept across restarts) |
+| `tired` | just slept | 3 game days awake | time since the bot last woke from a real sleep, 100 game ticks or more in bed (kept across restarts) |
 | `vitals` | (1 is all well) | | one overall number: 1 − (0.8 × the worst sign + 0.2 × their average), over air, hunger, hurt, sick, cold and tired |
 
-A later drives region will read these (`HOOK(drives)` in the region file). `tired` feeds the
-reticular formation's `sleepy`. Nothing acts on `cold`, `reserve` or `vitals` yet.
+The hypothalamus reads these: `cold`, `tired` and `sick` are needs (warmth, rest, illness),
+`reserve` tells it hunger is coming, and `vitals` loads stress. `tired` also feeds the reticular
+formation's `sleepy`.
 
 **Upkeep, by urgency.** The hard limit stays a hard reflex in the `reflex` region; before it,
 the medulla's urges are soft and graded, so the layers above can outvote them:
@@ -449,6 +455,76 @@ urgency and reason), `urgeWhileAsleep`, `errors`. `pnpm brain-report` has a MEDU
 lowest air, food and health, time spent hurt but too hungry to heal, each upkeep reflex and how
 often it won, was outvoted or was held back, foods learned as bad, and the vital signs in the 10
 seconds before each death.
+
+## The hypothalamus: what the body needs
+
+The hypothalamus (`hypothalamus` region, `packages/region-hypothalamus/`; the player's needs in
+`packages/minecraft/src/brain/needs.ts`; per bot in `bots.json` under `drives`) is the one place
+that owns the body's needs. Every tick it reads each need once and shares the reading as the
+workspace's `needs`. It is listed straight after the medulla, so every later region uses this
+tick's reading. It proposes no action and never calls a model: it says how things stand and what
+that is worth, and dopamine's wants, the medulla's urges and the planner do the proposing.
+
+**A need** is a level from 0 (met) to 1 (desperate) read from the state or from one of the
+medulla's signals, with a `rank` (a need of a higher rank silences the lower ones while it
+presses at all: danger comes first) and a weight class (`danger` 2, `body` 1, `provision` 0.25:
+how much it darkens the outlook when unmet; the numbers are `drives.weights` in `bots.json`).
+
+| Need | Kind | Level | Notes |
+|---|---|---|---|
+| `food_bar` | hunger | how empty the food bar is | Known to be coming once the hidden reserve is gone |
+| `health` | safety | health lost | |
+| `danger` | safety | how close the nearest threat that could harm the bot is | Rank 1, weight class `danger` |
+| `night_light` | safety | at night, how dark it is here | With the clock on it comes on over dusk |
+| `tools` | having_enough | the share of tool kinds it has none of | Provision |
+| `food_stock` | having_enough | how far short of enough food it is (base 8) | Provision; kept for `food_bar` |
+| `torches` | having_enough | how far short of enough torches (base 16) | Provision; kept for `night_light` |
+| `warmth` | warmth | the medulla's `cold` | `drives.body` |
+| `rest` | rest | the medulla's `tired` | `drives.body`; a need of the night |
+| `illness` | illness | the medulla's `sick` | `drives.body` |
+| `novelty` (boredom) | curiosity | kept in dopamine's novelty memory | Only dopamine is paid for it; the hypothalamus tunes how hard it presses |
+
+**What it works out each tick**, each part with its own strength in `drives` (at 0 the part is
+off and the bot behaves as if it did not exist):
+
+| Part | What it does | Strength | File |
+|---|---|---|---|
+| Body readings | `cold`, `tired` and `sick` count as needs, read from the medulla's signals in steps of 0.05. `tired` only restarts after a real sleep (100 game ticks in bed). With rest a need, a night's sleep pays by how tired the bot was, and the flat `slept_through_night` reward is dropped. | `body` | `needs.ts` (`bodyNeeds`) |
+| Moving targets | Enough is base × adjustments (`TARGET_ADJUSTMENTS`: food × 1.5 when hurt, food and torches up to × 1.5 as night comes, torches × 1.5 underground). | `targets` | `targets.ts` |
+| Learned targets | Running out of a thing while the need it is kept for presses above 0.5 (no food carried with the food bar under half, no torch in the dark) raises enough by a quarter, up to 3 × the base. It drifts back with a time constant of three game days. Saved in `data/<bot>/targets.json`; each change is in the trace (`learned`). | `learnTargets` | `targets.ts` |
+| Looking ahead | Each need's level a minute on, at the rate of the last minute, or what is known to be coming if that is more (hunger once the reserve is gone). A need presses at the larger of its level and 0.7 × that projection. While the running skill is one dopamine expects to relieve it, it presses a third less. Rewards are always paid on the real level. | `lookAhead` | `ahead.ts` |
+| Body clock | One phase for the day (0 at sunrise), `dusk` rising over the last three minutes of the day and `dawn` over the last three of the night. A need of the night (rest) presses half as hard by day; one of the day (stocking up, curiosity) half as hard by night. | `clock` | `clock.ts` |
+| Stress | Rises over about a minute toward the largest of alarm, how close a threat is, `pain` and poor `vitals`, and fades over about five. Under stress the needs that can wait (stocking up, curiosity) press down to half. | `stress` | `stress.ts` |
+| Competition | Danger silences the rest, as before. The top drive is the need pressing hardest by its weight, and is sticky (a rival must beat it by 0.1, or it must fall under 0.2). A need of the body (not safety, not a provision) above 0.8 is desperate. The top drive pressing with nothing learned that relieves it is unmet. | `desperate`, `unmet` | `compete.ts` |
+
+**What it shares, and who reads it.**
+
+| Shared | Meaning | Read by |
+|---|---|---|
+| `ws.needs.readings` | Every need: `level`, `pressing`, `rank`, `weight`, and `projected` and `target` where they apply | Dopamine (rewards on `level`, wants on `pressing`), serotonin (the outlook), noradrenaline (alarm, search), the arbiter (the hold), the progress check |
+| `ws.needs.top` | The top drive: name, kind, score, since when | The planner's line; a change of kind asks for a new plan (at most once in 30 s, never while danger presses) (`drives.tellPlanner`) |
+| `ws.needs.clock` | Phase, night, how far through the night, `dusk`, `dawn` | The reticular formation (`sleepy` comes on over dusk and lifts over dawn), targets, `night_light`, the planner's line |
+| `stress` (signal) | Slow stress, 0 to 1 | Serotonin: counts in the outlook like a need, by what the danger of the moment does not already account for (`patience.stress`). The reticular formation: less sleepy, by what is not tiredness itself (`arousal.stress`). The planner's line. |
+| `desperate` (signal) | How far past 0.8 the worst need of the body is | The arbiter: the brake on costly skills is up to half weaker. The defence circuit: the flight distance is up to a quarter shorter. Hard reflexes, the medulla's hard rules and `last_stand` do not read it. |
+| `unmet` (signal) | The top drive's score while nothing learned relieves it | Noradrenaline's search (an input beside `getting_nowhere`) |
+
+With `hypothalamus` left out (`--regions`), each reader works the plain reading out from the
+state (`needsNow` in `needs.ts`): the seven needs the bot is born with at their base targets,
+with none of the parts above. With every strength at 0 the result is the same.
+
+**Stress and alarm.** Alarm is fast and follows the vital needs; stress is slow and fed by
+alarm among other things. They are kept apart: stress takes the largest of its sources, not
+their sum; it does not raise reflex gains, lower a defence threshold or wake a sleeper; and
+where both reach the same thing (the outlook, sleep) only the part of stress the fast signal
+does not already carry is counted.
+
+**Trace.** Each tick: for every need its level, pressing, projection, target and why it was
+silenced or eased; the top drive; stress with its load and what set it; the clock; anything
+learned; and the slowest tick so far (it must stay under 2 ms: `slow` is logged on any tick that
+does not). `pnpm brain-report` adds the time each drive was on top, the time each need spent
+above 0.5, how often looking ahead acted first, stress by minute, and targets learned.
+`pnpm drives-check` runs the live scenes; `pnpm replay-needs` replays recorded runs through the
+regions that read the needs and checks they say what they said.
 
 ## The colliculus: where is it, and how sudden
 
@@ -774,42 +850,43 @@ strengths are in `bots.json` under `locomotion` (`speedFromAlarm`, `speedFromDop
 Each bot's settings for these live in `bots.json`. What each bot learns and remembers is saved
 in `data/<name>/`.
 
-**Dopamine** (`dopamine` region): teaches which skills pay off, and sets effort.
-- Scores a reward each time a need gets smaller (or something bad happens). Repeated rewards from
-  the same rule shrink. Meeting a new kind of thing is a reward that halves each time.
-- Adds rewards up per skill run. When the run ends, the scorebook learns from the surprise (OpAL:
-  expected value, learned benefit and cost, and a success count, per skill and situation). A death
-  teaches the skill that led to it an outcome of −5.
-- Shares DA, a slow 0–1 level of recent reward (never below 0.15). The arbiter values each skill
-  as benefit weight × benefit − cost weight × cost, with DA setting the weights.
-- Proposes heading toward things in view that paid off before (urgency at most 0.3).
-- Logs mood, a running average of surprises (only logged for now).
+**Dopamine** (`dopamine` region): teaches which skills pay off, and what to want.
+- Pays the signed change in each need's level, as the hypothalamus read it: `before² − after²`,
+  so a need that falls pays and one that rises costs the same. Things that happen (a death, a
+  failed skill) are reward rules of their own (`rewards.ts`). Boredom is a need kept in its own
+  novelty memory: a new kind of thing relieves it, by half as much each time it is met.
+- Adds rewards up per skill run. When the run ends the scorebook learns from the surprise
+  (expected value, benefit and cost, per skill, situation label and thing aimed at), and what
+  relieved which need (`skill ⇒ need`). Effort that came to nothing is charged.
+- Shares DA, a slow level of recent reward. The arbiter values each skill by benefit and cost,
+  with DA setting the weights.
+- Wants: proposes heading to a thing (in view or remembered) by how hard a need presses × how
+  well going there has relieved it. While something is wanted, the arbiter holds back options
+  that would leave a pressing need unmet.
 
 **Serotonin** (`serotonin` region): patience.
-- Averages outlook inputs (safety, fed, light and shelter, equipped, progress) into an outlook;
-  patience follows it slowly. A broken-looking input is named in the log.
-- Patience changes three things: persistence (every tick the running skill gets a stay bonus that
-  fades as its give-up time runs out, and is abandoned when the time is up; a reward restarts its
-  clock), the planner's horizon, and a brake on risky skills.
+- The outlook is `1 / (1 + Σ (weight × level)²)` over the needs, plus stress (see the
+  hypothalamus). Patience falls to a worse outlook within seconds and climbs back slowly.
+- Patience changes three things: persistence (a stay bonus for the running skill that lasts
+  while it makes progress, and a give-up time), the planner's horizon, and a brake on options
+  learned to be costly (weaker while a need is desperate).
 
 **Noradrenaline** (`noradrenaline` region): alarm and search.
-- **Alarm** (fast) rises on damage, a hostile appearing or a big surprise, and fades once the
-  threat is gone. It takes the planner out of charge (offline above 0.8 until back under 0.5),
-  interrupts and re-plans on a sudden jump, speeds up ticks, narrows attention to threats, stamps
-  the strength of memories, and cuts patience.
-- **Search** (slow) rises when the goal stops paying off and falls with steady success. It makes
-  switching skills easier, widens the options offered, and tells the planner to rethink.
+- **Alarm** (fast) is never below what the vital needs press at; a need suddenly worse, or a
+  startle, adds a jump; it fades within seconds once the cause has gone. It takes the planner
+  out of charge (offline above 0.8 until back under 0.5), and a jump interrupts the running skill
+  (the goal is kept).
+- **Search** (slow) rises while a need presses and the bot is getting nowhere, or knows nothing
+  that relieves it (`unmet`), and falls while things move. It makes switching easier, widens the
+  options offered, and tells the planner to rethink.
 
 **Acetylcholine** (`acetylcholine` region): focus, "trust your senses and learn this now".
-- Rises in the dark, at night, in closed-in or unfamiliar places, when medium surprises keep
-  coming, and during a demanding skill. Falls with routine, idling and rest; forced to its lowest
-  while asleep.
-- Focus changes seven things: a remembered chest is believed only while trust in it (fading with
-  age) is above focus; how much nearby detail and how many memories are taken in; how strongly new
-  memories start; whether memories are consolidated (only at rest: prune, merge, and generalise
-  into facts the planner is given); a cue pulse when something the goal said to watch for comes
-  into view; a learning window (skill values update fully only just after a notable event); and how
-  big a surprise must be to trip alarm.
+- Rises while the bot's predictions are failing and in an unfamiliar place; falls with routine;
+  lowest while asleep.
+- Focus sets how far remembered facts are trusted against the senses, how much detail and how
+  many memories are taken in, how strongly new memories start, whether memories are consolidated
+  (only at rest), and a cue pulse for things the goal said to watch for. How fast a run is
+  learned from follows the size of its own surprise.
 
 ## Common changes
 
@@ -869,11 +946,16 @@ in `data/<name>/`.
 | Change how low arousal slows the deciding layers | `rateOf` in `arousal.ts`; the usual intervals are `USUAL_MS` in `apps/run-bot/src/brain.ts`; a bot's strength is `arousal.gate` |
 | Change a bot's bravery | `bots.json`: `brainstem.bravery` (0 timid, 1 brave) |
 | Turn part of the brainstem off | `bots.json`: set its strength in `brainstem` to 0 |
-| Add a reward | `packages/minecraft/src/brain/rewards.ts` (write a rule, add it to `playerRewards`) |
+| Add a need | `packages/minecraft/src/brain/needs.ts`: write its level with `need(...)` (or `fromBody(...)` for one of the medulla's signals) and add it to `playerNeeds` (or `bodyNeeds`). Dopamine, serotonin, noradrenaline and the arbiter follow it with no further code. |
+| Change a target, or what moves it | `FOOD_STOCK_TARGET`, `TORCH_TARGET` and the `TARGET_ADJUSTMENTS` table in the same file; how running out raises it is `LEARNING` in `packages/region-hypothalamus/src/targets.ts`; a bot's strengths are `drives.targets` and `drives.learnTargets` |
+| Make a bot prepare earlier | `AHEAD` in `packages/region-hypothalamus/src/ahead.ts` (how far ahead, and how much a projection presses); what is known to be coming is `COMING` in `needs.ts`; dusk's length is `CLOCK` in `clock.ts`; a bot's strengths are `drives.lookAhead` and `drives.clock` |
+| Make a bot more anxious | `STRESS` in `packages/region-hypothalamus/src/stress.ts` (how fast it builds and fades); a bot's strengths are `drives.stress`, `patience.stress` and `arousal.stress` |
+| Change how much a need weighs | `bots.json`: `drives.weights` (by class) or `drives.weight` (one need by name) |
+| Change when a need is desperate, or how sticky the top drive is | `COMPETE` in `packages/region-hypothalamus/src/compete.ts` |
+| Add a reward for something that happens | `packages/minecraft/src/brain/rewards.ts` (write a rule, add it to `playerRewards`) |
 | Change the scorebook's situation labels | `packages/minecraft/src/brain/situation-labels.ts` |
-| Add or remove an outlook input (patience) | `packages/minecraft/src/brain/outlook.ts` (edit `playerOutlook`) |
-| Add or remove an alarm trigger | `packages/minecraft/src/brain/alarm.ts` (edit `playerAlarms`) |
-| Change what moves search | `packages/neuromodulators/src/noradrenaline/search.ts` (edit `createSearchInputs`) |
+| Change what the outlook or alarm follow | Nothing to list: both follow the needs. Add or change a need (above). |
+| Change what moves search | The `searchInputs` list of the noradrenaline region in `apps/run-bot/src/brain.ts` (an input is `{ name, read }`, see `search.ts`) |
 | Add or remove a focus input | `packages/minecraft/src/brain/focus.ts` (edit `playerFocus`) |
 | Change what the bot remembers | `packages/minecraft/src/brain/memories.ts` (edit `playerMemories`) |
 | Change what Jev is asked | `packages/minecraft/src/player-questions.ts` or `src/brain/instinct.ts` |

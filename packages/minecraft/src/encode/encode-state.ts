@@ -60,7 +60,7 @@ export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext)
   const players = scanPlayers(bot, limit).map((p) => sighted(bot, p, senses));
   const things = [...mobs, ...players, ...blocks];
   const data: MinecraftStateData = {
-    time: { isNight: !bot.time.isDay, lightLevel: lightLevel(bot), ...nightProgress(bot) },
+    time: { isNight: !bot.time.isDay, lightLevel: lightLevel(bot), ...nightProgress(bot), ...(bot.time.timeOfDay === undefined ? {} : { dayTick: bot.time.timeOfDay }), blockLight: bot.blockAt(bot.entity.position.floored())?.light ?? 0 },
     self: {
       ...encodeSelf(bot, ctx.base.chest, ctx.deaths, ctx.lastHurt ?? null, now),
       locomotion: ctx.locomotion ?? STANDING,
