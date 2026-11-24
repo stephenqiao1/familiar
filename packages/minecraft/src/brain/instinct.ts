@@ -12,6 +12,8 @@ export interface PlayerInstinct {
   toProposals(answers: Answer[], ws: Workspace): Proposal[];
 }
 
+/** The name the instinct region reads its view under. */
+const INSTINCT = "instinct";
 /** Below this weight the planner's goal is passed on as less important than staying safe. */
 const GOAL_COUNTS_FULLY = 0.75;
 /** With options widened, this many of the engine's options are proposed, down to this probability. */
@@ -31,10 +33,12 @@ export function playerInstinct<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, widen: (ws: 
   const acceptsTarget = (skill: string, target: string) => skills.find((s) => s.name === skill)?.canRun(ctx, target) ?? false;
   return {
     questions(ws) {
-      if (!minecraftDataOf(ws.state)) return [];
+      // Jev is asked about what it is told (the thalamus's view), and offered only targets in it.
+      const told = ws.view(INSTINCT);
+      if (!minecraftDataOf(told)) return [];
       return playerQuestions({
         nextAction: buildActionQuestion(menu, ctx, withCloserLook(withGoal(PLAYER_CONTEXT, ws), ws), ws.current?.skill),
-        target: buildTargetQuestion(thingsInView(ws.state).map((t) => t.id)),
+        target: buildTargetQuestion(thingsInView(told).map((t) => t.id)),
       });
     },
     toProposals: (answers, ws) => actionProposal(answers, { acceptsTarget, ...(narrow(ws) ? NARROW : widen(ws) ? WIDE : {}) }),

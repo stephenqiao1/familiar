@@ -52,6 +52,8 @@ export interface ColliculusOptions {
   defenceOf?(ws: Workspace): DefenceNow | null;
   /** How far up (positive) or down the head points now, in degrees. Default: 0. */
   pitchOf?(ws: Workspace): number;
+  /** Told each tick what has been got used to and how much of its salience each keeps (keys: "thing <id>", "<kind> at <place>"), for whoever else needs it. Default: nobody. */
+  onDamped?(damped: Record<string, number>): void;
   /** Alarm, 0 to 1. Default: 0. */
   alarmOf?(ws: Workspace): number;
   /** Arousal, 0 to 1. Default: 0.5. */
@@ -300,6 +302,7 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
       if (happened > 0) trace.orienting = happened;
       if (fixated !== null) trace.fixated = fixated;
       const damped = habituation.damped(now);
+      options.onDamped?.(damped);
       if (Object.keys(damped).length) trace.damped = damped;
       if (held) trace.attended = held.percept.id;
       const ms = performance.now() - started;

@@ -126,6 +126,12 @@ export interface MinecraftStateData {
   /** How this place feels from memory (the strongest good or bad memory close by), or null. */
   memory: { nearby: "good" | "bad"; kind: string } | null;
   current: { skill: string; target: string | null; secondsRunning: number } | null;
+  /**
+   * Only in a view the thalamus made for a deciding layer, never in the full state: what the
+   * view left out. `heldBack` counts, by channel, the things that were not passed on; `new` names
+   * things passed this once because they just appeared in a channel that was turned down.
+   */
+  told?: { heldBack?: Record<string, number>; new?: string[] };
 }
 
 /** What the threat sense adds to the state. */

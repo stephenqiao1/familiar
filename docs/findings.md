@@ -64,13 +64,13 @@ entries named in brackets hold the evidence.*
    **Would fix:** let a raw event wake the loop, and give the fast layers their own short tick
    that does not run instinct.
 
-6. **One state serves both Jev and the brain's own bookkeeping.** The field of view changes
-   what Jev picks by leaving things out of what it is told, and there is no single budget to
-   spend: Jev is sent the whole state, which keeps growing. (Alarm no longer hides things from
-   the state.) *("The attention budget is a count, not a size limit"; colliculus limits: "the
-   field of view filters only..." and "the state is bigger".)*
-   **Would fix:** keep the full state for the brain and build a separate, budgeted view for Jev
-   and the planner.
+6. **One state serves both Jev and the brain's own bookkeeping.** *Closed 2026-11-24 by the
+   thalamus.* The brain keeps the full state (now the nearest 32 of each kind, not 10) and the
+   thalamus builds a separate view for Jev and for the planner, each with a size limit in
+   characters. What is left open: the always-passed part of the state is itself about 1,400
+   characters, which nearly fills Jev's limit of 1,500 (see "The thalamus").
+   *("The attention budget is a count, not a size limit"; colliculus limits: "the field of view
+   filters only..." and "the state is bigger".)*
 
 7. **Learning blames by timing and nearness, and some of it cannot be unlearned.** A bad meal, a
    kill, a hurtful block, a self-caused bang and a dangerous player are all decided by "it
@@ -146,6 +146,113 @@ entries named in brackets hold the evidence.*
     **Would fix:** add the other dangers as vital needs, and put a time on every memory.
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
+
+## The thalamus: a view for each decider, with a gate
+
+*Built and run live 2026-11-24.*
+
+**The problem.** One state served the whole brain. The attention budget cut it to the nearest
+10 of each kind for everyone, reflexes included, and Jev was sent all of it. The field of view
+was applied in three places in `brain.ts`. Nothing chose what a decider was told by what
+mattered.
+
+**The rule now.** The brain reads the full state (the nearest 32 of each kind). The thalamus
+(`packages/region-thalamus`) builds a view for instinct and one for the planner.
+
+1. **Step One, the doorway** (`gate: 0`): a view is the nearest few of each kind by the
+   attention budget, then the field of view. This is what the deciders were told before.
+2. **Step Two, the gate**: the state is split into channels of items; each item has a priority
+   (its channel's base, moved by modulators); each channel is open or turned down; forms are
+   handed out by priority up to the reader's limit (full, brief, counted); news in a turned-down
+   channel bursts through once; the planner can ask for detail.
+
+**Step One, proven.** `pnpm replay-views` on 40 recorded whole-brain runs (about 6,400 ticks,
+one with the field of view on): the view is the same as the old filter gave on every tick,
+Jev's targets are the recorded ones on every tick that asked, and the planner's lines about the
+state are the recorded ones in every plan. In a crowd of 40, the thalamus's cut of a 32-capped
+state equals the state the encoder gave when it cut to 10 itself, thing for thing (unit test).
+
+**What changed for the reflexes** once the encoder stopped cutting to 10: nothing that could be
+pinned on it. `reflex-check` 7 of 7 and `startle-check` 9 of 9. Colliculus `glance` and `two`
+and defence `shooter` failed in a batch, but each fails as often on the committed code or with
+the cap forced back to 10 (they depend on how fast scripted moves and arrows land). In a crowd
+of 40 the full state grew from 3.8 KB to 10.4 KB and encoding from 9.8 ms to 10.7 ms.
+
+**Seen live** (`pnpm thalamus-check --runs 3`, new).
+
+| Scene | View sizes (instinct of 1,500; planner of 4,000) | What opened, and why | Bursts | Outcome |
+|---|---|---|---|---|
+| `crowd`: 30 animals, a husk in a box | 1,860; 2,780; the full state 8,680 | threats (the skill's target, a threat in view) | 0 | The husk in full on every tick (3 of 3). Jev was told of 1 thing; 30 creatures and 32 hazards counted. Over its limit by 362: the body and the husk alone pass it |
+| `spotlight`: one pig of nine starts to walk | 1,410 to 1,680 | creatures (the attended thing) | 0 to 1 | Full on every tick while attended; unattended, counted (3 of 3) |
+| `hungry`: a learned chest, short of bread or stocked | 1,554 | things (the attended thing; it is also wanted) | 0 | Full on every tick out of bread; counted on every tick stocked (3 of 3) |
+| `burst`: a pig appears, the colliculus picking nothing | 1,420 to 1,560 | nothing | 1 | Marked new once, 0.3 s after it was made, in brief; two seconds on, counted (3 of 3) |
+| `drowsy`: the same herd, arousal 0.53 and 0.28 | alert: 1,375 of 1,500, planner 2,430 of 4,000. Drowsy: 1,329 of 500, planner 1,329 of 1,333 | nothing | 0 | Alert, Jev was told of 1 thing; drowsy, of none: the limit fell to a third, and what is always passed is all that is left (3 of 3) |
+| `asks`: a goal with `detail: ["sheep"]` | planner up to 4,020 | creatures (the goal asks for it) | 0 | Sheep in full in the planner's view: 0 before the ask, 4 to 6 of 6 after (3 of 3) |
+| `cost`: 24 animals, whole brain, five runs each | Jev's request 1,481 in; 3,650 to 7,490 left out | | | Answer time 142 to 153 ms in, 162 to 171 ms left out. Picked: idle 100% in; idle 81%, return_to_base 19% left out |
+| Existing whole-brain scenes | | | | dopamine-check `threat_with_jev`, `threat_with_jev_live`, `with_jev`: pass. neuro-check: 13 of 16 scenes pass; `night`, `dark` and `far` fail, and fail the same way on the committed code (`bang` failed once, passed on a re-run). colliculus-check `ground`: failed once, passed on a re-run. colliculus-check `field_of_view`: failed 5 of 5 until a threat in view was given its brief form at the least, then passed 3 of 3 |
+| An hour of ordinary play (11,951 ticks) | instinct 1,367 to 2,872, middle 1,862; planner 1,441 to 3,999, middle 2,250; the full state 9,320 | threats (the skill's target ×7,483, a threat in view ×68) | 9,126, all sounds (before the fix below) | 0 blind spots: never hurt by, nor a skill failed on, something Jev was told of only in brief or as a count. A narrow hour: an unreachable spider 7 blocks off held the bot frozen or idle for most of it. Jev's view was over its limit on 8,667 ticks |
+| 20 minutes more, after the burst fix | instinct 1,455 of 567 (drowsy) | nothing | 0 | A quiet stretch (full state 1,602): nothing to burst. The fix is shown by unit tests and the `burst` scene, not yet by a busy hour |
+
+**Limits.**
+- **Jev's limit is nearly all body.** What is always passed whole (the body, the time, the
+  running skill, the defence's choice) is about 1,400 characters. With 1,500 for instinct,
+  about one hazard fits beside it: Jev is told the body, whatever may never be held back, and
+  counts. In the crowd it was told of one thing. The planner, with 4,000, has room for about a
+  dozen things in full. Raise `thalamus.limits.instinct` to give Jev more.
+- **With less to see, Jev picked differently.** In the cost scene it chose `return_to_base` 19%
+  of the time with the whole state and never with the view. Whether that is better was not
+  judged.
+- **The planner's view is up to one tick old**, and on the very first tick it reads the full
+  state: it starts before the tick's other regions.
+- **"Last among layer 0" was not possible.** The loop runs regions in list order whatever their
+  layer, so the thalamus is listed just before instinct; patience runs after both.
+- **A threat in view opens its channel**, not only a pressing one, so that a hostile among many
+  animals is told in full. That is wider than the spec's opener. "In view" means every hostile
+  in the threats channel, also one the defence circuit rates only "possible" (behind the bot,
+  not looking). Found live: without that, colliculus-check `field_of_view` failed, because Jev
+  was told of a husk walking up behind at 8 blocks (when it became "coming") and not at 16.
+- **A threat in view is never only counted.** Opening the channel was not enough: with 79
+  characters of room beside the body, the husk did not fit even in brief, so Jev was not
+  offered it as a target for 4 seconds. A threat in view now gets its brief form at the least,
+  whatever the budget (`floor` in `fill.ts`), and the trace's `over` counts it. This adds to
+  the spec's never-held-back list. A crowd of hostiles takes Jev's view well past its limit.
+- **Carrying, memory and "anything else" are not channels.** They are passed whole: an item
+  missing from what is carried would read as "not carried", which is a changed value.
+- **A brief mob keeps `hostile` and `reachable`** beside id, kind, distance and bearing: the
+  state's shape and the planner's text need them.
+- **A thing that appears is usually picked by the colliculus at once**, which opens its channel,
+  so it is told in full and there is no burst. Bursts happen for what the colliculus does not
+  pick (its gaze held elsewhere, the thing used to, or too slight). The scene raises the
+  colliculus's threshold to show one.
+- **Sizes are remembered for eight states.** Measuring a form means writing it as JSON; a
+  thing's size barely moves, so it is measured again only every eighth state. A view's `size` in
+  the trace is the forms' sizes added up, within a few characters of its length as JSON.
+- **Speed.** Alone on a recorded crowd (53 items) a tick takes 0.51 ms. Over an hour of play
+  (11,951 ticks, the game server on the same machine) the middle tick was 0.19 ms, the 90th
+  percentile 0.37 ms, the 99th 1.3 ms; 59 ticks passed 2 ms and the worst was 73 ms (pauses of
+  the whole process, as for the hypothalamus). The 2 ms guardrail holds for 99.5% of ticks, not
+  at the worst.
+- **A sound is news by where it comes from, not by its id.** Each sound heard has its own id.
+  In the first hour of play that made 9,126 bursts, all sounds (a mob underground heard again
+  and again), and 1,179 of them called the deciding layers at full rate. News now goes by its
+  source (for a sound: its kind at its rough place, the colliculus's own key), and a source
+  bursts again only after a minute of quiet. What the colliculus has got used to by place also
+  lowers a sound's priority now. A source that keeps on never bursts twice, however long.
+- **The attention guard's warning is out of date with the gate on.** Acetylcholine still warns
+  "swamped ... detail is cut for a minute" when the state is at its cap, and halves the nearby
+  count. With the gate on nobody reads that count, so nothing is cut; the thalamus's own
+  budget does the job. The warning fired 28 times in the hour.
+- **Focus only shapes what is left.** With one item's worth of room for Jev, high and low focus
+  give the same view.
+- **`remembered` (how many memories the planner gets) is not the thalamus's.** Memories are not
+  in the state; the count stays with the planner's notes.
+- **The other live checks run without the thalamus** (their region lists leave it out), which
+  changes nothing there: they run no decider.
+- **The hazard list alone can be 32 drops** on a platform: all counted for Jev unless within 3
+  blocks.
+
+**Status.** Built. Open: the limits above; the size of the always-passed part against Jev's
+limit is the one that matters.
 
 ## The colliculus: a map with up and down, wants, a brake, sky and ground
 
@@ -1547,7 +1654,9 @@ whole region call was slow (most likely the runtime pausing, not the map). The l
 - **The field of view filters only mobs, players and listed blocks.** Hazards, the base, the
   inventory and memory are told as before. "Heard" means a sound within a block of where the
   thing stands. With it on, Jev's target list shrinks, which changes what it picks; the planner
-  is told less too. Nothing else was tuned for it, which is why it is off by default.
+  is told less too. Nothing else was tuned for it, which is why it is off by default. *Since
+  2026-11-24 it is a filter the thalamus applies (`thalamus.fieldOfView`; the old
+  `colliculus.fieldOfView` still works with a warning). What it filters is unchanged.*
 - **A look beside a skill still shows only as `attended`**: its skill events are not in the
   workspace (the earlier finding).
 - **The state is bigger.** Each nearby thing now carries its bearing, sight and speed; the busy

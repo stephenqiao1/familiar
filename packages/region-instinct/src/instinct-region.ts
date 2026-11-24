@@ -36,7 +36,8 @@ export function createInstinctRegion(options: InstinctOptions): Region {
       if (options.paused?.(ws)) return { proposals: [], trace: { paused: true } };
       const asked = questions(ws);
       const started = performance.now();
-      const answers = await engine.decide(ws.state, asked);
+      // The engine is shown what this reader is told (the thalamus's view), not the full state.
+      const answers = await engine.decide(ws.view(name), asked);
       const engineMs = engine.lastTiming?.()?.totalMs ?? performance.now() - started;
       shareSignals(ws, asked, answers);
       return { proposals: toProposals(answers, ws), trace: { engine: engine.name, engineMs, questions: asked, answers } };

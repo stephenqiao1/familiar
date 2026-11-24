@@ -24,8 +24,6 @@ export interface ColliculusSettings {
   habituation: number;
   /** Glancing around when nothing stands out. */
   scanning: number;
-  /** The deciding layers are told only what is seen or heard (off by default). */
-  fieldOfView: number;
   /** Up and down on the map: the upper and lower fields, and glances at the sky, ceiling and floor. At 0 everything is "level". */
   elevation: number;
   /** What the bot wants right now draws its eye (the same boost a watched kind gets). At 0 only a goal's watched kinds do. */
@@ -56,7 +54,6 @@ export const DEFAULT_COLLICULUS: ColliculusSettings = {
   topDown: 1,
   habituation: 1,
   scanning: 1,
-  fieldOfView: 0,
   elevation: 1,
   wants: 1,
   fixation: 1,
@@ -71,7 +68,7 @@ export const NEW_STRENGTHS = ["elevation", "wants", "fixation", "fields", "event
 /** Every new strength at 0. */
 export const AS_BEFORE = Object.fromEntries(NEW_STRENGTHS.map((key) => [key, 0])) as Record<(typeof NEW_STRENGTHS)[number], number>;
 
-const STRENGTHS = ["sight", "hearing", "looming", "topDown", "habituation", "scanning", "fieldOfView", ...NEW_STRENGTHS] as const;
+const STRENGTHS = ["sight", "hearing", "looming", "topDown", "habituation", "scanning", ...NEW_STRENGTHS] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function colliculusProblem(s: ColliculusSettings): string | null {

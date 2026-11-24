@@ -33,7 +33,9 @@
     "reaction-report": "node apps/run-bot/scripts/reaction-report.ts",
     "reaction-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/reaction-check.ts",
     "brain-report": "node apps/run-bot/scripts/brain-report.ts",
-    "neuro-check": "tsc -b && node apps/run-bot/scripts/neuro-check.ts"
+    "neuro-check": "tsc -b && node apps/run-bot/scripts/neuro-check.ts",
+    "replay-views": "tsc -b && node apps/run-bot/scripts/replay-views.ts",
+    "thalamus-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/thalamus-check.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

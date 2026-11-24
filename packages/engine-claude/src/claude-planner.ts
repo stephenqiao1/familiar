@@ -42,6 +42,13 @@ const PlanSchema = z.object({
       "Up to 3 responses to load in advance. The agent's fastest layer fires one the moment its thing " +
         "appears, without waiting for you. Use it for things that will need a reaction faster than you can plan. Empty if none.",
     ),
+  detail: z
+    .array(z.string())
+    .describe(
+      "What you want to be told about in full from now on: up to 5 kinds of things by game name (e.g. chest, villager, zombie) or ids from the situation. " +
+        "The situation you are shown is a selection: only what matters most is given in detail, and the rest is counted (\"Not shown\"). " +
+        "Name here anything counted or brief that your plan needs. Empty if what you are shown is enough.",
+    ),
   holdBack: z
     .array(z.string())
     .describe(
@@ -69,7 +76,9 @@ const DEFAULT_ROLE =
   "situation gives a reason to change it. You also decide what the agent carries: list it in " +
   "wants, using what the situation says is in storage. You can also tune the reflexes: load a " +
   "response in ifThen for something that will need a faster reaction than you can give, and name " +
-  "in holdBack a reflex that would get in the way of the goal.";
+  "in holdBack a reflex that would get in the way of the goal. The situation you are shown is a " +
+  "selection: what matters most is given in detail and the rest is only counted (\"Not shown\"). " +
+  "If your plan needs something that is counted or missing, name its kind in detail and you will be told of it in full.";
 
 /** Plans with Claude: describes the situation, gets back a goal, steps and reason as JSON. */
 export class ClaudePlanner implements Planner {

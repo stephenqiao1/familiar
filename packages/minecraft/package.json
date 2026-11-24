@@ -16,9 +16,10 @@
     "@familiar/memory": "workspace:*",
     "@familiar/neuromodulators": "workspace:*",
     "@familiar/region-brainstem": "workspace:*",
-    "@familiar/region-instinct": "workspace:*",
     "@familiar/region-hypothalamus": "workspace:*",
+    "@familiar/region-instinct": "workspace:*",
     "@familiar/region-reflex": "workspace:*",
+    "@familiar/region-thalamus": "workspace:*",
     "mineflayer": "^4.39.0",
     "mineflayer-pathfinder": "^2.4.5",
     "vec3": "^0.1.10"

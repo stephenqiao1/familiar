@@ -355,6 +355,63 @@ console.log(`WORTH THE LOOK: ${lookEnded.filter((r) => r.worth).length} of ${loo
 const orientings = ticks.map((t) => t.signals.orienting?.value ?? 0).filter((v) => v > 0);
 console.log(`ORIENTING SIGNAL: sent on ${orientings.length} ticks${orientings.length ? `, strongest ${Math.max(...orientings).toFixed(2)}, typical ${(middle(orientings.map((v) => Math.round(v * 100))) ?? 0) / 100}` : ""}`);
 
+// The thalamus: what the deciding layers were told, how big it was, what opened a channel, and blind spots.
+type ToldView = { paused?: boolean; limit?: number; size?: number; over?: number; channels?: Record<string, { open: string | false }>; items?: { id: string; form: string }[]; bursts?: string[] };
+const thalamus = ticks.map((t) => trace(t, "thalamus") as { views?: Record<string, ToldView>; fullSize?: number; worstMs?: number });
+if (thalamus.some((th) => th.views)) {
+  const readers = [...new Set(thalamus.flatMap((th) => Object.keys(th.views ?? {})))];
+  const gateOn = thalamus.some((th) => Object.values(th.views ?? {}).some((v) => v.limit !== undefined));
+  console.log(`\nTHALAMUS: ${gateOn ? "gate on" : "gate off (views by count)"}; the full state was ${middle(thalamus.flatMap((th) => (th.fullSize ? [th.fullSize] : []))) ?? "?"} characters (middle)`);
+  for (const reader of readers) {
+    const views = thalamus.flatMap((th) => (th.views?.[reader]?.size !== undefined ? [th.views[reader]!] : []));
+    if (!views.length) continue;
+    const third = Math.max(1, Math.floor(views.length / 3));
+    const mid = (part: ToldView[]) => middle(part.map((v) => v.size!)) ?? 0;
+    const over = views.filter((v) => (v.over ?? 0) > 0).length;
+    console.log(`VIEW FOR ${reader}: ${views.length} built, ${thalamus.filter((th) => th.views?.[reader]?.paused).length} ticks paused; size ${Math.min(...views.map((v) => v.size!))} to ${Math.max(...views.map((v) => v.size!))}, middle ${mid(views)}${views[0]!.limit ? ` of a limit of ${middle(views.map((v) => v.limit!))}` : ""}; first third ${mid(views.slice(0, third))}, last third ${mid(views.slice(-third))}${over ? `; what may never be held back alone passed the limit on ${over} ticks` : ""}`);
+  }
+  const asked = ticks.flatMap((t, i) => {
+    const ms = (trace(t, "instinct") as { engineMs?: number }).engineMs;
+    return ms === undefined ? [] : [{ ms, size: thalamus[i]!.views?.instinct?.size ?? null }];
+  });
+  if (asked.length) console.log(`JEV: ${asked.length} requests; request state ${middle(asked.flatMap((a) => (a.size === null ? [] : [a.size]))) ?? "?"} characters (middle), answer time middle ${Math.round(middle(asked.map((a) => a.ms)) ?? 0)} ms, slowest ${Math.round(Math.max(...asked.map((a) => a.ms)))} ms (compare with a run made with the thalamus left out)`);
+  const openers = thalamus.flatMap((th) => Object.entries(th.views?.instinct?.channels ?? {}).flatMap(([name, c]) => (c.open ? [`${name}: ${c.open}`] : [])));
+  console.log(`CHANNELS OPENED (ticks, for instinct): ${list(count(openers, (o) => o), 10)}`);
+  const bursts = thalamus.flatMap((th) => th.views?.instinct?.bursts ?? []);
+  console.log(`BURSTS (news passed once from a turned-down channel): ${bursts.length}${ticks.some((t) => (t.signals.burst?.value ?? 0) > 0) ? `, ${ticks.filter((t) => (t.signals.burst?.value ?? 0) > 0).length} of them strong enough to call the deciding layers at once` : ""}`);
+  // Blind spots: the bot was hurt by, or a skill failed on, something instinct was not told of in full in the 5 seconds before.
+  type Near = { id: string; type: string }[];
+  const nearOf = (t: Tick) => {
+    const nearby = (t as Tick & { state?: { data?: { nearby?: Record<string, Near> } } }).state?.data?.nearby ?? {};
+    return [...(nearby.mobs ?? []), ...(nearby.blocks ?? []), ...(nearby.players ?? []), ...(nearby.hazards ?? [])];
+  };
+  const notFull = (id: string, at: number) => {
+    const forms = ticks.flatMap((t, i) => {
+      const view = thalamus[i]!.views?.instinct;
+      if (t.timestamp > at || at - t.timestamp > 5000 || !view?.items || !nearOf(t).some((n) => n.id === id)) return [];
+      return [view.items.find((item) => item.id === id)?.form ?? "counted"];
+    });
+    return forms.some((f) => f !== "full") ? { form: forms.includes("counted") ? "counted" : "brief", kind: ticks.flatMap(nearOf).find((n) => n.id === id)?.type ?? "?" } : null;
+  };
+  const blind: string[] = [];
+  ticks.forEach((t, i) => {
+    const hurt = (bodyOf(t) as { lastHurt?: { msAgo: number; by: string | null } | null } | null)?.lastHurt;
+    const before = i > 0 ? (bodyOf(ticks[i - 1]!) as { lastHurt?: { msAgo: number; by: string | null } | null } | null)?.lastHurt : null;
+    if (hurt?.by && (!before || hurt.msAgo < before.msAgo)) {
+      const spot = notFull(hurt.by, t.timestamp);
+      if (spot) blind.push(`tick ${t.tick}: hurt by a ${spot.kind} that was ${spot.form}`);
+    }
+    for (const e of t.skillEvents ?? []) {
+      if (e.type !== "failed" || !e.target) continue;
+      const spot = notFull(e.target, t.timestamp);
+      if (spot) blind.push(`tick ${t.tick}: ${e.skill} failed on a ${spot.kind} that was ${spot.form}`);
+    }
+  });
+  console.log(`BLIND SPOTS (hurt by, or a skill failed on, something instinct was told of only in brief or as a count in the 5 s before): ${blind.length}${blind.length ? `: ${blind.slice(0, 12).join("; ")}${blind.length > 12 ? ` (and ${blind.length - 12} more)` : ""}` : ""}`);
+  const worstView = Math.max(0, ...thalamus.map((th) => th.worstMs ?? 0));
+  console.log(`SLOWEST THALAMUS TICK: ${worstView.toFixed(3)} ms${worstView > 2 ? " (!! over the 2 ms limit)" : ""}`);
+}
+
 // The hypothalamus: what the body wanted, what pressed early, stress, and what it learned is enough.
 type Shown = { level: number; pressing: number; projected?: number; target?: number; why?: string };
 type Drives = { needs?: Record<string, Shown>; top?: { name: string; unmet?: boolean } | null; stress?: number; loadBy?: string; learned?: string[]; desperate?: { need: string }; slow?: string; worstMs?: number };

@@ -2,7 +2,8 @@ import type { Bot } from "mineflayer";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { Vec3 } from "vec3";
 import type { EncodableBot, EncodableEntity, EncodableItem } from "./encodable-bot.js";
-import { encodeState } from "./encode-state.js";
+import { encodeState, NEARBY_CAP } from "./encode-state.js";
+import { nearest } from "../brain/thalamus.js";
 import type { MinecraftStateData } from "./state-data.js";
 
 const NAMES = ["air", "stone", "lava", "fire", "water", "chest", "wheat", "bell", "cactus", "sand", "magma_block"];
@@ -241,14 +242,24 @@ describe("encodeState", () => {
     const items = Array.from({ length: 36 }, (_, i) => item(i === 0 ? "diamond_sword" : "cobblestone", 64, i, 10, 1561));
     const bot = fakeBot({ blocks, entities, items });
 
-    it("stays under 4 KB of JSON (and caps each list at 10)", () => {
+    it("caps each list at the safety cap (32), and what a deciding layer is told (the nearest 10) stays under 4 KB of JSON", () => {
       const state = encodeState(bot, 123456, { base, current: { skill: "go_to", target: "pos:1,2,3", startedAt: Date.now() }, deaths: 0 });
-      const json = JSON.stringify(state);
       const data = state.data as unknown as MinecraftStateData;
-      expect(data.nearby.hazards).toHaveLength(10);
-      expect(data.nearby.mobs).toHaveLength(10);
-      // Each nearby thing now carries its bearing, whether it is seen and how fast it is closing.
-      expect(json.length).toBeLessThan(4 * 1024);
+      // The whole brain reads up to the cap; the crowd of 40 is cut to the nearest 32.
+      expect(data.nearby.mobs).toHaveLength(NEARBY_CAP);
+      expect(data.nearby.hazards.length).toBeGreaterThan(10);
+      expect(data.nearby.hazards.length).toBeLessThanOrEqual(NEARBY_CAP);
+      expect(JSON.stringify(state).length).toBeLessThan(12 * 1024);
+      // The thalamus's cut by count gives what the encoder used to: the nearest 10 of each.
+      const told = nearest(state, 10);
+      const toldData = told.data as unknown as MinecraftStateData;
+      expect(toldData.nearby.hazards).toHaveLength(10);
+      expect(toldData.nearby.mobs).toEqual(data.nearby.mobs.slice(0, 10));
+      expect((encodeState(bot, 123456, { base, current: null, deaths: 0, limit: 10 }).data as unknown as MinecraftStateData).nearby.mobs.map((m) => m.id)).toEqual(toldData.nearby.mobs.map((m) => m.id));
+      // And it is the state the encoder gave when it cut to 10 itself, thing for thing.
+      const before = encodeState(bot, 123456, { base, current: { skill: "go_to", target: "pos:1,2,3", startedAt: Date.now() }, deaths: 0, limit: 10 }).data as unknown as MinecraftStateData;
+      expect(toldData.nearby).toEqual(before.nearby);
+      expect(JSON.stringify(told).length).toBeLessThan(4 * 1024);
     });
 
     it("encodes in under 20 ms", () => {

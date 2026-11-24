@@ -19,8 +19,9 @@ export interface Storage {
  * its surroundings, what is in the chests it remembers, any extra notes (e.g. memories), recent
  * events and abilities.
  */
-export function describeSituation<Ctx>(ws: Workspace, skills: Skill<Ctx>[], storage?: Storage, notes: string[] = []): string {
-  const data = minecraftDataOf(ws.state);
+export function describeSituation<Ctx>(ws: Workspace, skills: Skill<Ctx>[], storage?: Storage, notes: string[] = [], reader = "prefrontal"): string {
+  // The planner is told what the thalamus passes on to it, not the full state.
+  const data = minecraftDataOf(ws.view(reader));
   const lines = [ROLE];
   if (data) {
     const { self, time, nearby, current } = data;
@@ -34,6 +35,10 @@ export function describeSituation<Ctx>(ws: Workspace, skills: Skill<Ctx>[], stor
       `Mobs nearby: ${list(nearby.mobs.map((m) => ({ ...m, type: m.hostile ? `hostile ${m.type}${m.reachable ? "" : " (cannot reach you)"}` : m.type })))}.`,
       `Doing now: ${current ? `${current.skill}${current.target ? ` (${current.target})` : ""} for ${current.secondsRunning}s` : "nothing"}.`,
     );
+    // What it is shown is a selection: what was left out is counted, and what is new is named.
+    const held = Object.entries(data.told?.heldBack ?? {});
+    if (held.length) lines.push(`Not shown (name a kind in "detail" to be told of it in full): ${held.map(([channel, n]) => `${n} more ${channel}`).join(", ")}.`);
+    if (data.told?.new?.length) lines.push(`Just appeared: ${data.told.new.join(", ")}.`);
   }
   if (storage) lines.push(...describeStorage(storage));
   lines.push(...notes);

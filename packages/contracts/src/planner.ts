@@ -19,6 +19,8 @@ export interface Plan {
   ifThen?: IfThen[];
   /** Soft reflexes to hold back while pursuing this goal. Default: none. */
   holdBack?: string[];
+  /** Kinds or ids of things to be told about in full from now on (what it is shown is a selection). At most 5. Default: none. */
+  detail?: string[];
   /** How many steps of the goal it was shown (`currentGoal`) are finished now. Default: 0. */
   stepsDone?: number;
 }

@@ -44,6 +44,8 @@ export interface Goal {
   ifThen: IfThen[];
   /** Soft reflexes to hold back while this goal is active, by reflex name or by the skill they propose. */
   holdBack: string[];
+  /** Kinds or ids of things the planner wants to be told about in full (at most 5 count): the thalamus opens their channel. */
+  detail: string[];
   /** How many of `steps` the planner has judged finished. */
   stepsDone: number;
   /** When a step (of this goal or an earlier one) was last judged finished, or null if never. */
@@ -162,8 +164,16 @@ export interface Workspace {
   readonly needs: Needs | null;
   /** Skill lifecycle events, oldest first, at most the last 20. */
   readonly recentEvents: readonly SkillEvent[];
+  /**
+   * The state as one reader should see it: the latest view the thalamus built for it (at most a
+   * tick old), or the full state if none was built. Only the deciding layers ask for a view;
+   * every other region reads `state`.
+   */
+  view(reader: string): State;
+  /** Stores the view of the state built for one reader (null: none, so it reads the full state). */
+  setView(reader: string, view: State | null): void;
   /** Replaces the goal. `setBy` and `setAt` are filled in for you; the rest default to none. */
-  setGoal(goal: Pick<Goal, "text" | "steps" | "reason"> & Partial<Pick<Goal, "wants" | "watchFor" | "ifThen" | "holdBack" | "stepsDone" | "stepDoneAt">>): void;
+  setGoal(goal: Pick<Goal, "text" | "steps" | "reason"> & Partial<Pick<Goal, "wants" | "watchFor" | "ifThen" | "holdBack" | "detail" | "stepsDone" | "stepDoneAt">>): void;
   /** Drops the goal (e.g. when an alarm cancels the plan). */
   clearGoal(): void;
   setSignal(name: string, value: number): void;

@@ -62,7 +62,7 @@ export function featuresOf(p: Physical): Features {
 }
 
 /** Roughly where something lies, from the bot's place, its heading and the thing's bearing. */
-function placeOfThing(data: MinecraftStateData, angle: number, dist: number): string {
+export function placeOfThing(data: MinecraftStateData, angle: number, dist: number): string {
   const heading = ((data.self.gaze.yaw + angle) * Math.PI) / 180;
   const { x, z } = data.self.position;
   return `${Math.round((x - Math.sin(heading) * dist) / PLACE_BLOCKS)},${Math.round((z - Math.cos(heading) * dist) / PLACE_BLOCKS)}`;

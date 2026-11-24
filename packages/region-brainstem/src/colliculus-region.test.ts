@@ -336,7 +336,7 @@ describe("colliculusProblem", () => {
   it("accepts the defaults and names what is wrong otherwise", () => {
     expect(colliculusProblem(DEFAULT_COLLICULUS)).toBeNull();
     expect(colliculusProblem({ ...DEFAULT_COLLICULUS, threshold: 0 })).toMatch(/threshold must be above 0/);
-    expect(colliculusProblem({ ...DEFAULT_COLLICULUS, fieldOfView: 2 })).toMatch(/fieldOfView must be 0 to 1/);
+    expect(colliculusProblem({ ...DEFAULT_COLLICULUS, scanning: 2 })).toMatch(/scanning must be 0 to 1/);
     expect(colliculusProblem({ ...DEFAULT_COLLICULUS, weights: { ...DEFAULT_COLLICULUS.weights, looming: -1 } })).toMatch(/weights.looming must be 0 or more/);
     expect(colliculusProblem({ ...DEFAULT_COLLICULUS, weights: { ...DEFAULT_COLLICULUS.weights, hostile: 1 } as never })).toMatch(/weights.hostile is not a feature/);
   });

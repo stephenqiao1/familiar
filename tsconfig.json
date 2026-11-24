@@ -45,6 +45,9 @@
     },
     {
       "path": "packages/region-brainstem"
+    },
+    {
+      "path": "packages/region-thalamus"
     }
   ]
 }

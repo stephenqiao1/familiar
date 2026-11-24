@@ -5,7 +5,7 @@ describe("planPrompt", () => {
   it("puts the current goal before the situation", () => {
     const prompt = planPrompt({
       situation: "health 20/20",
-      currentGoal: { text: "build a shelter", steps: ["gather wood"], reason: "", wants: [{ item: "torch", count: 8 }], watchFor: [], ifThen: [], holdBack: [], stepsDone: 0, stepDoneAt: null, setBy: "prefrontal", setAt: 0 },
+      currentGoal: { text: "build a shelter", steps: ["gather wood"], reason: "", wants: [{ item: "torch", count: 8 }], watchFor: [], ifThen: [], holdBack: [], detail: [], stepsDone: 0, stepDoneAt: null, setBy: "prefrontal", setAt: 0 },
     });
     expect(prompt).toBe("Current goal: build a shelter\nSteps (0 of 1 done): gather wood\nCarry: 8 torch\n\nSituation:\nhealth 20/20\n\nSet the goal.");
   });

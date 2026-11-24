@@ -18,6 +18,7 @@ import {
 import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type ArousalSettings, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
 import { DEFAULT_DRIVES, DRIVES_OFF, type DriveSettings } from "@familiar/region-hypothalamus";
 import type { FiredReflex } from "@familiar/region-reflex";
+import { THALAMUS_OFF, type ThalamusSettings } from "@familiar/region-thalamus";
 import { describe, expect, it } from "vitest";
 import { createArbiter, createBrain } from "./brain.js";
 
@@ -99,7 +100,7 @@ const skills = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
   const store = createWorkspace();
   const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
   const engine: DecisionEngine = {
@@ -137,6 +138,8 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       focus: DEFAULT_FOCUS,
       brainstem: { ...DEFAULT_BRAINSTEM, ...options.brainstem },
       colliculus: { ...DEFAULT_COLLICULUS, ...options.colliculus },
+      // Unless a test says otherwise, the deciding layers are told by count alone (the gate has its own tests).
+      thalamus: { ...THALAMUS_OFF, ...options.thalamus },
       defence: { ...DEFAULT_DEFENCE, ...options.defence },
       arousal: { ...DEFAULT_AROUSAL, ...options.arousal },
       ...(options.drives ? { drives: options.drives } : {}),
@@ -657,7 +660,7 @@ describe("the colliculus through the real brain", () => {
     const toldOf = (state: State | undefined) => (state?.data as unknown as MinecraftStateData).nearby.mobs;
 
     it("a thing behind and silent is not reported to the deciding layers; the reflexes still feel the real world", async () => {
-      const { tick, calls } = bot({ colliculus: { fieldOfView: 1 } });
+      const { tick, calls } = bot({ thalamus: { fieldOfView: 1 } });
       await tick();
       const cow = { ...seen(mob("cow", 12, 2), false), hostile: false };
       const out = await tick({ mobs: [cow, seen(mob("zombie", 10, 3), true)] });
@@ -671,7 +674,7 @@ describe("the colliculus through the real brain", () => {
     });
 
     it("it is reported once heard or looked at, and stays known for about 10 seconds after it leaves view", async () => {
-      const { tick, calls } = bot({ colliculus: { fieldOfView: 1 } });
+      const { tick, calls } = bot({ thalamus: { fieldOfView: 1 } });
       const zombie = mob("zombie", 12);
       await tick({ mobs: [seen(zombie, false)] });
       expect(toldOf(calls.shown.at(-1))).toEqual([]);
@@ -689,7 +692,7 @@ describe("the colliculus through the real brain", () => {
     });
 
     it("anything within 2 blocks is felt, seen or not", async () => {
-      const { tick, calls } = bot({ colliculus: { fieldOfView: 1 } });
+      const { tick, calls } = bot({ thalamus: { fieldOfView: 1 } });
       await tick({ mobs: [seen(mob("zombie", 2), false)] });
       expect(toldOf(calls.shown.at(-1)).map((m) => m.id)).toEqual(["entity:1"]);
     });

@@ -17,6 +17,8 @@ export { curiosity, newLife, playerRewards, sleptThroughNight } from "./rewards.
 export { describeSituation, type Storage } from "./situation.js";
 export { situationOf } from "./situation-labels.js";
 export { createScan, featuresOf, headFree, perceptsOf, playerColliculus, usesNothing, type Physical } from "./colliculus.js";
-export { createFieldOfView, toldView, type FieldOfView } from "./field-of-view.js";
+export { createFieldOfView, type FieldOfView } from "./field-of-view.js";
+export { nearest, playerThalamus } from "./thalamus.js";
+export { CHANNEL_BASE, createSizes, splitState, type Sizes } from "./thalamus-channels.js";
 export { createPlayerStartles, roughPositionOf, selfCaused, startleSurroundings } from "./startle.js";
 export { playerReticular } from "./reticular.js";

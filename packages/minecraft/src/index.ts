@@ -15,7 +15,7 @@ export { postureCheck } from "./posture/check.js";
 export { installPosture, postureOf, type Fall, type PostureNotes, type Refusal } from "./posture/runtime.js";
 export { createSurfaces, INNATE_LOOSE, SIGHTINGS_TO_LEARN, setKnownSurfaces, type SurfaceCounts, type SurfaceKind } from "./posture/surfaces.js";
 export { connect } from "./connect.js";
-export { encodeState, SCHEMA_VERSION } from "./encode/encode-state.js";
+export { encodeState, NEARBY_CAP, SCHEMA_VERSION } from "./encode/encode-state.js";
 export { DEFAULT_LIMIT } from "./encode/scan-mobs.js";
 export { createFirstSeenTracker } from "./encode/first-seen.js";
 export { isSignificantChange } from "./encode/is-significant-change.js";

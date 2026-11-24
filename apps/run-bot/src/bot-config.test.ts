@@ -1,3 +1,4 @@
+import { DEFAULT_THALAMUS } from "@familiar/region-thalamus";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS } from "@familia
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, thalamus: DEFAULT_THALAMUS, memory: DEFAULT_MEMORY };
 
 let dir: string;
 let file: string;
@@ -84,10 +85,16 @@ describe("loadBotConfig", () => {
   it("reads the colliculus block: the weights, the threshold and each part's strength", async () => {
     await writeFile(file, JSON.stringify({ Jumpy: { colliculus: { threshold: 0.2, weights: { looming: 2 }, fieldOfView: 1 } }, Bad: { colliculus: { hearing: 2 } }, Odd: { colliculus: { weights: { hostile: 1 } } } }));
     // A bot may give only some weights: the rest keep their defaults.
-    expect((await loadBotConfig("Jumpy", file)).colliculus).toEqual({ ...DEFAULT_COLLICULUS, threshold: 0.2, fieldOfView: 1, weights: { ...DEFAULT_COLLICULUS.weights, looming: 2 } });
-    expect((await loadBotConfig("Nobody", file)).colliculus.fieldOfView).toBe(0);
+    expect((await loadBotConfig("Jumpy", file)).colliculus).toEqual({ ...DEFAULT_COLLICULUS, threshold: 0.2, weights: { ...DEFAULT_COLLICULUS.weights, looming: 2 } });
+    // The field of view moved to the thalamus block; the old place still works (with a warning).
+    expect((await loadBotConfig("Jumpy", file)).thalamus.fieldOfView).toBe(1);
+    expect((await loadBotConfig("Nobody", file)).thalamus.fieldOfView).toBe(0);
     await expect(loadBotConfig("Bad", file)).rejects.toThrow(/colliculus.hearing must be 0 to 1/);
     await expect(loadBotConfig("Odd", file)).rejects.toThrow(/colliculus.weights.hostile is not a feature/);
+    await writeFile(file, JSON.stringify({ Both: { colliculus: { fieldOfView: 1 }, thalamus: { fieldOfView: 0 } }, Own: { thalamus: { fieldOfView: 1 } }, Bad: { thalamus: { fieldOfView: 3 } } }));
+    expect((await loadBotConfig("Both", file)).thalamus.fieldOfView).toBe(0);
+    expect((await loadBotConfig("Own", file)).thalamus.fieldOfView).toBe(1);
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow(/thalamus.fieldOfView must be 0 to 1/);
     // The parts added with the two-dimensional map are each 0 to 1, and on unless said otherwise.
     await writeFile(file, JSON.stringify({ Flat: { colliculus: { elevation: 0, wants: 0, fixation: 0, fields: 0, event: 0, darkness: 0, followUp: 0 } }, Bad: { colliculus: { fixation: 1.5 } } }));
     expect((await loadBotConfig("Flat", file)).colliculus).toMatchObject({ elevation: 0, wants: 0, fixation: 0, fields: 0, event: 0, darkness: 0, followUp: 0 });

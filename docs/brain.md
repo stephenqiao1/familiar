@@ -4,7 +4,7 @@ The bot's decisions come from **regions** (brain parts). Regions never call each
 share one **workspace** (shared memory), and one **arbiter** picks which proposal to act on.
 
 ```
-Workspace (state · goal · signals · attended · needs · recent events)
+Workspace (state · views for the deciders · goal · signals · attended · needs · recent events)
    ▲ read/write            ▲ read/write          ▲ read/write
 Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
 (layer 0, every tick)      Jev, every tick       LLM, every 15 s in the background
@@ -46,7 +46,8 @@ same tick; a signal from a region listed later is read one tick late.
 |---|---|
 | Region | One brain part. Has a `name`, a `layer` (speed rank) and `everyMs` (0 = every tick). |
 | Proposal | A region's suggestion: an action, an `urgency` from 0 to 1, and a `reason`. |
-| Workspace | Shared memory. Holds the world state, the current goal, signals, the one thing being attended to, and recent skill events. |
+| Workspace | Shared memory. Holds the world state, the views of it built for the deciding layers, the current goal, signals, the one thing being attended to, and recent skill events. |
+| View | The state as one deciding layer is told it (`ws.view(reader)`): a selection of the full state, built each tick by the thalamus for instinct and for the planner. With no thalamus it is the full state. Every other region reads `ws.state`. |
 | Attended | The one thing the bot is attending to right now: `{ id, kind, bearing, salience, since, angle, elevation, field, lean }`, or null. Set by the colliculus (`ws.setAttended`); logged each tick. |
 | Needs | The body's needs as the hypothalamus read them this tick (`ws.needs`): each need's level, how hard it presses, where it is heading and its target; the need wanted most; the body clock; stress. Null with no hypothalamus. |
 | Signal | A named level from 0 to 1 that one region shares with the others (e.g. `in_danger`, `dopamine`, `patience`, `alarm`). |
@@ -68,6 +69,7 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `arbiter` | The pickers: `value-weighted` (used) and `highest-urgency`. |
 | `region-reflex` | Runs a list of rules, hard and soft, and logs each fired rule's kind, base urgency, gain and final urgency. |
 | `region-brainstem` | Supplies the reflex gains, the defence circuit's choice of defence, a `brainstem` region (startle, loaded responses, the defence signals), a `reticular` region (arousal, bedtime, waking and the graded gate), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
+| `region-thalamus` | The gateway to the deciding layers: builds a view of the state for instinct and for the planner (`ws.view(reader)`), by channel, priority and a size limit. Game-free; the Minecraft side says what the channels are. |
 | `region-hypothalamus` | Owns the body's needs: reads each once a tick and shares the reading (`ws.needs`), with moving targets, looking ahead, the body clock, slow stress and the top drive. Game-free. |
 | `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
 | `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
@@ -526,6 +528,120 @@ above 0.5, how often looking ahead acted first, stress by minute, and targets le
 `pnpm drives-check` runs the live scenes; `pnpm replay-needs` replays recorded runs through the
 regions that read the needs and checks they say what they said.
 
+## The thalamus: what the deciding layers are told
+
+The brain keeps the **full state** for its own work: the reflexes, the medulla, the colliculus,
+the defence circuit, the hypothalamus, the dials and memory all read `ws.state`. The thalamus
+(`thalamus` region, `packages/region-thalamus`; Minecraft side in
+`packages/minecraft/src/brain/thalamus.ts` and `thalamus-channels.ts`; per bot in `bots.json`
+under `thalamus`) builds a separate **view** of it for each deciding layer, instinct and the
+planner, and stores it in the workspace. They read `ws.view("instinct")` and
+`ws.view("prefrontal")`. A view only selects and shortens: it never changes a value or makes
+one up. The thalamus runs every tick, never calls a model, and is listed just before instinct
+so that instinct reads this tick's view (the planner, which starts before the tick's other
+regions, reads a view at most one tick old). Left out with `--regions`, both read the full state.
+
+The encoder no longer cuts the state by the attention budget. It keeps the nearest 32 of each
+kind of nearby thing (`NEARBY_CAP`), a safety cap against a crowd, and the whole brain reads
+those.
+
+**With the gate off** (`gate: 0`) a view is the nearest few of each kind of thing (the attention
+budget: 5 to 15 by focus, 10 at rest), then the field of view. This is what the deciders were
+told before there was a thalamus.
+
+**The field of view** (`fieldOfView`, off by default; `brain/field-of-view.ts`). With it on, the
+deciding layers are told only about things that are seen, heard (a sound from where they
+stand, which is how the footsteps stand-in reports an unseen hostile) or within 2 blocks. A
+thing seen lately stays known for 10 seconds after it leaves view, marked
+`lastSeen: { msAgo, at }`. The bot `Wary` in `bots.json` has it on.
+
+**Channels and forms** (`thalamus-channels.ts`). The Minecraft side splits the state into
+channels, each a list of items:
+
+| Channel | Its items | Base |
+|---|---|---|
+| `threats` | Mobs that are hostile or that the defence circuit has sized up | 0.45 |
+| `players` | Other players | 0.35 |
+| `changes` | Things that just changed and are on no list: a projectile, a block placed or broken | 0.35 |
+| `things` | Chests, ripe crops, bells | 0.3 |
+| `hazards` | Lava, fire, drops, blocks known to hurt | 0.3 |
+| `sounds` | What was heard | 0.3 |
+| `creatures` | Every other mob | 0.25 |
+
+Each item has three forms: **full** (as the state has it, with how the defence sized it up and
+that it is news), **brief** (id, kind, distance and bearing; a mob keeps `hostile` and
+`reachable`, which its shape needs), and **counted** (left out, and added to a count). The
+body, what it carries, the time, the feeling of the place, the running skill and the defence's
+choice are not channels: they are always passed whole. The Minecraft side also gives each
+form's cost (its size as JSON) and puts the kept forms back together as a state of the same
+shape, so Jev's questions and the planner's text are built as before. What was held back is in
+the view as `told: { heldBack: { creatures: 3, ... }, new: [...] }`, and the planner's text says
+"Not shown: 3 more creatures".
+
+**Priority** (`priority.ts`). Each item starts from its channel's base (the driver: the message
+itself) and is raised or lowered by modulators, each with a weight in one table (`WEIGHTS`):
+
+| Modulator | Weight | Strength in `bots.json` |
+|---|---|---|
+| It is the attended thing (from the colliculus) | +0.5 | `spotlight` |
+| It is the running skill's target | +0.5 | `spotlight` |
+| A threat the defence calls "seen" / "coming" or "on it" | +0.35 / +0.6 | `threats` |
+| The planner asked for it (`detail`) | +0.3 | `detail` |
+| It is wanted (dopamine's want for its kind, 0 to 1) | up to +0.3 | `wants` |
+| Its kind is in the goal's `watchFor` | +0.25 | |
+| It is new or just changed | +0.2 | |
+| It is near (1 at the bot, 0 at 16 blocks) | up to +0.15 | |
+| It has been got used to (the colliculus's habituation) | down to −0.25 | |
+
+**The gate** (`gate.ts`). Each channel is open or turned down. It is open when it holds the
+attended thing, the running skill's target, a threat in view, a wanted thing, or something the
+goal asks for (`watchFor` or `detail`). Items of a turned-down channel can be brief or counted,
+never full.
+
+**The budget and the fill** (`budget.ts`, `fill.ts`). Each reader has a size limit in characters
+of JSON (`limits`: 1,500 for instinct, 4,000 for the planner). In order of priority each item
+gets its full form while there is room, then brief, then it is counted.
+- *Focus sets the shape* (`shape`): the share of the room that may go to full forms is the focus
+  level. High focus: few things in full, the rest counted. Low focus: many things, in brief.
+- *Arousal sets the size* (`size`): below 0.3 the limit is a third; it is whole from 0.5. Above
+  0.9 the limit stays but only the top three items get any form. While the deciding layers are
+  paused (asleep), no view is built.
+- *Never held back*, whatever the budget: the body, the attended thing, the running skill's
+  target, any threat "coming" or "on it", anything coming at the body, and any hazard within 3
+  blocks. If these alone pass the limit they are passed anyway and the trace says by how much.
+  A threat in view (any hostile in the threats channel) is never only counted: it gets its
+  brief form at the least, so Jev is always offered it as a target.
+
+**The burst** (`burst.ts`, `burst`). When something new appears or changes in a turned-down
+channel it is passed once, marked as new (`told.new`), in brief form even if the budget is full
+(the lowest full item gives way to brief). After that it stays only if it earns its place by
+priority. News is told once for each source: the item itself, or, for an item with a rough
+`place` (a sound: each one heard has its own id), its kind at that place. A source bursts again
+only after it has been quiet for a minute (`QUIET_MS`), so a mob that groans every few seconds
+is one piece of news. A burst while the colliculus's `orienting` is 0.6 or more sets the `burst` signal for
+the tick, which lets the deciding layers run at once (the same urgent path an alarm interrupt
+uses).
+
+**The planner talks back** (`asks.ts`, `detail`). A goal may carry `detail`: up to five kinds or
+ids the planner wants to be told about in full. They open their channel and are raised. One
+that matches nothing for a minute is dropped. The planner's prompt says that what it is shown
+is a selection and that it can ask.
+
+| Signal | Meaning | Read by |
+|---|---|---|
+| `burst` | 1 on a tick when strong news burst through a turned-down channel | The rate gate: instinct and the planner are not held back that tick |
+
+**In the trace** (`thalamus`): `fullSize`, `fixed` (what is always passed whole), `focus`,
+`arousal`, `asks`, and for each reader `limit`, `spent`, `size`, `over`, each channel (`open` and
+why, and how many items in full, brief and counted), the items given a form (with priority and
+which modulators moved them), `bursts`, `gaveWay` and `heldBack`; and the region's own time,
+`ms` and `worstMs` (the tick log's time for a region includes those queued before it). `pnpm brain-report` has a
+THALAMUS section: view sizes over time, Jev's request size and answer time, what opened
+channels, bursts, and blind spots (hurt by, or a skill failed on, something instinct was told of
+only in brief or as a count in the 5 seconds before). `pnpm thalamus-check [--runs 3]` runs the
+live scenes; `pnpm replay-views <logs>` checks, on recorded runs, that with the gate off the
+deciders are told what they were told when the run was made.
+
 ## The colliculus: where is it, and how sudden
 
 The colliculus (`colliculus` region, `packages/region-brainstem/src/colliculus-region.ts`;
@@ -682,12 +798,7 @@ ago, so things behind get seen. With `elevation` on, every fourth glance goes up
 sky when outdoors; under a roof, the ceiling and the floor ahead in turn (`glance.ts`). The
 `idle` skill no longer looks around itself.
 
-**Seeing only what is in view** (`fieldOfView`, off by default; `brain/field-of-view.ts`). With
-it on, the deciding layers (instinct, planner) are told only about things that are seen, heard
-(a sound from where they stand, which is how the footsteps stand-in reports an unseen hostile)
-or within 2 blocks. A thing seen lately stays known for 10 seconds after it leaves view, marked
-`lastSeen: { msAgo, at }`. The reflexes, the medulla and the colliculus itself still read the
-full state. The bot `Wary` in `bots.json` has it on.
+**Seeing only what is in view** is now the thalamus's (`thalamus.fieldOfView`, below).
 
 **In the trace** (`colliculus`): `threshold`, `top` (the three most striking things, each with
 its parts, angle, elevation, field, light, and its boost and where that came from), `winner`
@@ -984,7 +1095,12 @@ in `data/<name>/`.
 | Make a bot jumpier or calmer | `bots.json`: `colliculus.threshold` (low: jumpy; high: unbothered) |
 | Add a sound the bot can hear | `packages/minecraft/src/senses.ts`: listen for the event, call `hear("<type>", position)`, and give it a loudness in `LOUD` |
 | Replace the stand-in for footsteps | `unseenHostileHeard` in `packages/minecraft/src/encode/perceive.ts` |
-| Make the bot know only what it sees | `bots.json`: `colliculus.fieldOfView: 1` |
+| Make the bot know only what it sees | `bots.json`: `thalamus.fieldOfView: 1` (the old `colliculus.fieldOfView` still works, with a warning) |
+| Add a channel | `CHANNEL_BASE` in `packages/minecraft/src/brain/thalamus-channels.ts`, and say which items are its own in `splitState` (and how they go back in `assemble`) |
+| Change what a decider is told | The modulators' weights: `WEIGHTS` in `region-thalamus/src/priority.ts`; what opens a channel: `gate.ts`; one bot: the strengths in `bots.json` under `thalamus` |
+| Give a decider a bigger view | `bots.json`: `thalamus.limits.instinct` or `.prefrontal` (characters of JSON) |
+| Add a reader | Add its region name to `DECIDERS` in `apps/run-bot/src/brain.ts`, give it a limit in `thalamus.limits`, and have it read `ws.view("<name>")` instead of `ws.state` |
+| Turn the gate off | `bots.json`: `thalamus.gate: 0` (views are then the nearest few of each kind, by the attention budget) |
 | Make a bot more distractible while it works | `bots.json`: lower `colliculus.fixation` (0: nothing holds its gaze); the size of the brake is `BRAKE` in `region-brainstem/src/fixation.ts` |
 | Change what counts as overhead | `FIELD_BEYOND` in `region-brainstem/src/field.ts` (degrees up and down); what a dive, a fly-over or a small thing is: the `LEAN` table in `lean.ts` |
 | Stop wants drawing the eye | `bots.json`: `colliculus.wants: 0` (a goal's watched kinds still do; `topDown: 0` stops both) |

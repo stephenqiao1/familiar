@@ -1,4 +1,5 @@
 import { createValueWeightedArbiter } from "@familiar/arbiter";
+import { BURST_SIGNAL, createThalamusRegion, DEFAULT_THALAMUS, type ThalamusSettings } from "@familiar/region-thalamus";
 import { createWantsInView } from "./wants.js";
 import { COMPETE, createHypothalamusRegion, DEFAULT_DRIVES, describeDrives, DESPERATE_SIGNAL, pressing, STRESS_SIGNAL, UNMET_SIGNAL, type DriveSettings, type Need, type TargetMemory } from "@familiar/region-hypothalamus";
 import { createDriveWatch, createReliefIndex, stressOnOutlook } from "./drives.js";
@@ -23,12 +24,11 @@ import {
   createPlayerReflexes,
   DEFAULT_MEDULLA,
   medullaUrges,
-  createFieldOfView,
   DEFAULT_DEFENCE,
   threatLevel,
   type DefenceSettings,
   playerColliculus,
-  toldView,
+  playerThalamus,
   DEFAULT_POSTURE,
   wasDisplaced,
   type PostureNotes,
@@ -74,6 +74,7 @@ import {
   FOCUS_SIGNAL,
   LOW_FOCUS,
   NEUTRAL_BUDGET,
+  type AttentionBudget,
   NEUTRAL_SEARCH,
   INTERRUPT_SIGNAL,
   PATIENCE_SIGNAL,
@@ -172,6 +173,8 @@ export interface BrainParts<Ctx> {
   whyNoSleep?: () => string | null;
   /** This bot's drives: how its needs are read, look ahead, compete and wear it down (from bots.json). Default: all on. */
   drives?: DriveSettings;
+  /** This bot's thalamus: what the deciding layers are told of the state (from bots.json). Default: everything in the budget, field of view off. */
+  thalamus?: ThalamusSettings;
   /** What the bot has learned about how much is enough. Default: it learns nothing. */
   targets?: TargetMemory;
   /** This bot's defence: what it is born knowing about threats, and the strength of each part of the defence circuit (from bots.json). Default: all on. */
@@ -192,8 +195,8 @@ export interface BrainParts<Ctx> {
   sameTime?: boolean;
   /** Extra notes for the focus log: remembered values used or rejected, attention warnings. Default: none. */
   focusNotes?: () => Record<string, unknown>;
-  /** How many memories to give the planner right now (the attention budget). Default: 5. */
-  memoriesForPlanner?: () => number;
+  /** The attention budget for this tick: how many of each kind of nearby thing the deciding layers are told of, and how many memories the planner gets. Default: the neutral budget. */
+  attentionBudget?: () => AttentionBudget;
   /** What the bot remembers of events and places. */
   memory: MemoryStore;
   /** The "should I quit?" step for the running skill; its status is logged with patience. */
@@ -224,6 +227,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const defence = parts.defence ?? DEFAULT_DEFENCE;
   const arousal = parts.arousal ?? DEFAULT_AROUSAL;
   const drives = parts.drives ?? DEFAULT_DRIVES;
+  const thalamus = parts.thalamus ?? DEFAULT_THALAMUS;
   // The needs as the hypothalamus read them; with it left out, the plain reading from the state.
   const needs = (ws: Workspace) => needsNow(ws, drives);
   // Boredom lives in dopamine's novelty memory; the hypothalamus tunes it like any need that can wait.
@@ -233,9 +237,6 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const relieves = createReliefIndex(scorebook);
   // With rest read as a need, a night's sleep pays by how tired the bot was: the flat reward for one is not needed.
   const restIsNeed = drives.body > 0 && (!only || (only.includes("hypothalamus") && only.includes("medulla"))) && medulla.vitals > 0;
-  // With the field of view on, the deciding layers are told only what the bot sees, hears or just saw.
-  const view = colliculus.fieldOfView > 0 ? createFieldOfView() : null;
-  const told = (ws: Workspace) => (view ? toldView(ws, view.tell(ws.state)) : ws);
   // The brainstem sets how strongly each soft reflex and each upkeep urge fires (alarm, bravery, the goal's hold-backs).
   // The upkeep urges take a goal's hold-backs, but not alarm or bravery: needing air is no weaker for being calm.
   const upkeepGain = hasBrainstem && brainstem.holdBack > 0 ? createReflexGain({ settings: brainstem, alarmOf: () => NEUTRAL_ALARM, leaningOf: () => null }) : undefined;
@@ -244,6 +245,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
   // Over-aroused, instinct is offered fewer options (the far side of the inverted U).
   const wants = createWantsInView();
+  /** What the colliculus has got used to, and how much of its salience each thing keeps. */
+  let damped: Record<string, number> = {};
   const instinct = playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE, parts.showPrimitives, (ws) => up(ws, FRAZZLED_SIGNAL));
   // The graded gate: with arousal low the deciding layers are called less often (never while asleep).
   // A call a signal has asked for at once (an alarm interrupt, a plan that just failed) is never held.
@@ -300,6 +303,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       settings: colliculus,
       // What dopamine wants in view right now draws the eye too (worked out there, last tick).
       wantOf: (kind) => wants.of(kind),
+      // What it has got used to, for the thalamus (which tells the deciding layers less of it).
+      onDamped: (now) => (damped = now),
       alarmOf,
       arousalOf: (ws) => level(ws, AROUSAL_SIGNAL, 0.5),
       waryOf: (ws) => level(ws, WARY_SIGNAL),
@@ -350,14 +355,32 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       // Consolidate only while resting safely: focus and alarm both very low (in practice, asleep), or a long quiet spell awake.
       ...(focus.consolidation > 0 ? { resting: (ws: Workspace) => level(ws, ALARM_SIGNAL) < CALM_ALARM && (level(ws, FOCUS_SIGNAL, focus.resting) < LOW_FOCUS || up(ws, QUIET_SIGNAL)) } : {}),
     }), //                                                                                  layer 0, every tick
+    // The thalamus: the gateway to the deciding layers. It builds what instinct and the planner are told from
+    // the full state: the nearest few of each kind (the attention budget), and only what is in view if that is on.
+    // Listed just before instinct, so that instinct reads this tick's view. Left out (--regions), they read the full state.
+    createThalamusRegion({
+      ...playerThalamus(),
+      readers: DECIDERS,
+      settings: thalamus,
+      nearby: () => (parts.attentionBudget?.() ?? NEUTRAL_BUDGET).nearby,
+      // The modulators: what dopamine wants, what the colliculus has got used to, focus, arousal, and how strongly something just stood out.
+      wantOf: (kind) => wants.of(kind),
+      usedTo: (item) => 1 - Math.min(damped[`thing ${item.id}`] ?? 1, item.place ? (damped[`${item.kind} at ${item.place}`] ?? 1) : 1),
+      focusOf: (ws) => level(ws, FOCUS_SIGNAL, focus.resting),
+      arousalOf: (ws) => level(ws, AROUSAL_SIGNAL, 0.5),
+      orientingOf: (ws) => level(ws, ORIENTING_SIGNAL),
+      // Asleep (or the planner offline), nobody reads a view: none is built.
+      paused: (reader, ws) => up(ws, UPPER_PAUSED_SIGNAL) || (reader === PLANNER && up(ws, PLANNER_OFFLINE_SIGNAL)),
+      lookSkill: LOOK_SKILL,
+    }), //                                                                                  layer 0, every tick
     createInstinctRegion({
-      // Jev is asked about, and shown, only what the bot is told (everything, unless the field of view is on).
-      engine: view ? { ...engine, decide: (state, questions) => engine.decide(view.tell(state), questions) } : engine,
-      questions: (ws) => instinct.questions(told(ws)),
+      // Jev is asked about, and shown, only what the thalamus passes on (`ws.view("instinct")`).
+      engine,
+      questions: (ws) => instinct.questions(ws),
       toProposals: instinct.toProposals,
       // Asleep and undisturbed: the brainstem pauses the deciding layers, so no engine calls are made.
       // Asleep: no engine calls. Drowsy: fewer. Anything urgent, or an alarm interrupt, goes straight through.
-      paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL)),
+      paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL) || up(ws, BURST_SIGNAL)),
     }), //                                                                                  layer 1, every tick
     createPatienceRegion({
       // The outlook is worked out from the same needs dopamine is paid for, and from the stress they do not already account for.
@@ -368,8 +391,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createPrefrontalRegion({
       planner,
       describe: (ws) =>
-        describeSituation(told(ws), menu, storage, [
-          ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, parts.memoriesForPlanner?.() ?? NEUTRAL_BUDGET.remembered),
+        describeSituation(ws, menu, storage, [
+          ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, (parts.attentionBudget?.() ?? NEUTRAL_BUDGET).remembered),
           ...(hasBrainstem && brainstem.holdBack > 0 ? [REFLEX_NOTE] : []),
           ...(drives.tellPlanner > 0 ? [describeDrives(ws.needs)].filter((line) => line !== null) : []),
         ]),
@@ -378,7 +401,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
         const notes = [...(up(ws, RETHINK_SIGNAL) ? [RETHINK_INSTRUCTION] : []), ...(up(ws, FRAZZLED_SIGNAL) ? [FRAZZLED_NOTE] : []), ...(horizon.instruction ? [horizon.instruction] : [])];
         return notes.length ? { ...horizon, instruction: notes.join(" ") } : horizon;
       },
-      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL) || held("planner", ws, up(ws, REPLAN_SIGNAL)),
+      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL) || held("planner", ws, up(ws, REPLAN_SIGNAL) || up(ws, BURST_SIGNAL)),
       wake: (ws) => up(ws, REPLAN_SIGNAL),
     }), //                                                                                  layer 2, every 15 s
   ];
@@ -397,6 +420,12 @@ function unanswered(needs: readonly NeedReading[]): number {
 }
 
 /** The player's dopamine region: every reward rule, the situation labels and cues, tuned by personality. */
+/** The deciding layers: the only regions that read a view of the state. */
+const PLANNER = "prefrontal";
+export const DECIDERS = ["instinct", PLANNER];
+/** The skill that turns the head: its target is not a task. */
+const LOOK_SKILL = "look_at";
+
 export function createPlayerDopamine(parts: {
   scorebook: Scorebook;
   novelty: NoveltyMemory;

@@ -23,6 +23,8 @@ export interface PrefrontalOptions {
 
 /** A goal carries at most this many loaded responses. */
 const MAX_IF_THEN = 3;
+/** A plan may ask to be told in full about this many kinds or ids of things. */
+const MAX_DETAIL = 5;
 
 /**
  * The slow, deliberate region: in the background, describes the situation to a planner and
@@ -63,6 +65,7 @@ export function createPrefrontalRegion(options: PrefrontalOptions): Region {
         watchFor: plan.watchFor ?? [],
         ifThen: (plan.ifThen ?? []).slice(0, MAX_IF_THEN),
         holdBack: plan.holdBack ?? [],
+        detail: (plan.detail ?? []).slice(0, MAX_DETAIL),
         stepsDone: sameSteps ? Math.max(reported, shown.stepsDone) : 0,
         stepDoneAt: advanced ? Date.now() : (shown?.stepDoneAt ?? null),
       });

@@ -26,6 +26,7 @@ export function createWorkspace(): WorkspaceStore {
   const events: SkillEvent[] = [];
   let attended: Attended | null = null;
   let needs: Needs | null = null;
+  const views = new Map<string, State>();
 
   return {
     update(nextState, nextCurrent) {
@@ -59,8 +60,8 @@ export function createWorkspace(): WorkspaceStore {
         get recentEvents() {
           return [...events];
         },
-        setGoal({ text, steps, reason, wants = [], watchFor = [], ifThen = [], holdBack = [], stepsDone = 0, stepDoneAt = null }) {
-          const copies = { steps: [...steps], wants: wants.map((w) => ({ ...w })), watchFor: [...watchFor], ifThen: ifThen.map((r) => ({ ...r })), holdBack: [...holdBack] };
+        setGoal({ text, steps, reason, wants = [], watchFor = [], ifThen = [], holdBack = [], detail = [], stepsDone = 0, stepDoneAt = null }) {
+          const copies = { steps: [...steps], wants: wants.map((w) => ({ ...w })), watchFor: [...watchFor], ifThen: ifThen.map((r) => ({ ...r })), holdBack: [...holdBack], detail: [...detail] };
           goal = { text, reason, ...copies, stepsDone, stepDoneAt, setBy: region, setAt: Date.now() };
         },
         clearGoal() {
@@ -71,6 +72,11 @@ export function createWorkspace(): WorkspaceStore {
         },
         setAttended(next) {
           attended = next && { ...next };
+        },
+        view: (reader) => views.get(reader) ?? state,
+        setView(reader, view) {
+          if (view) views.set(reader, view);
+          else views.delete(reader);
         },
         setNeeds(next) {
           needs = next && { ...next, readings: next.readings.map((r) => ({ ...r })) };

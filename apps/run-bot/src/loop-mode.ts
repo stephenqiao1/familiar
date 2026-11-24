@@ -112,7 +112,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -149,6 +149,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   // Focus, effect b: how much nearby detail and how many memories are taken in.
   const attention = createAttention();
   const budget = () => (focusSettings.attention > 0 ? attention.budget(focus(), Date.now()) : NEUTRAL_BUDGET);
+  /** The budget in force for the state being read (worked out as each state is made, as it always was). */
+  let budgetNow = NEUTRAL_BUDGET;
   let swamped: string | null = null;
   /** What the focus region logs each tick: remembered values used or rejected, and attention warnings. */
   const focusNotes = () => {
@@ -247,7 +249,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       showPrimitives: brainArgs.primitives ?? false,
       sameTime: brainArgs.sameTime ?? false,
       focusNotes,
-      memoriesForPlanner: () => budget().remembered,
+      attentionBudget: () => budgetNow,
+      thalamus,
       memory,
       persistence,
       storage,
@@ -266,7 +269,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     `Alarm: gain ${noradrenaline.alarmGain}, fades in ${noradrenaline.alarmDecaySeconds}s. Search: resting ${noradrenaline.searchResting}. Memories: ${memory.entries().memories.length} remembered.`,
   );
   console.log(`Focus: resting ${focusSettings.resting}, trust in remembered things halves every ${focusSettings.trustHalfLifeMinutes} min.`);
-  console.log(`Colliculus: threshold ${colliculus.threshold}, field of view ${colliculus.fieldOfView > 0 ? "on (the deciding layers are told only what is seen or heard)" : "off"}.`);
+  console.log(`Colliculus: threshold ${colliculus.threshold}, scanning ${colliculus.scanning}.`);
+  console.log(`Thalamus: ${thalamus.gate > 0 ? `gate on (instinct is told up to ${thalamus.limits.instinct ?? "?"} characters, the planner ${thalamus.limits.prefrontal ?? "?"})` : "gate off (the deciding layers are told the nearest few of each kind)"}, field of view ${thalamus.fieldOfView > 0 ? "on (they are told only what is seen or heard)" : "off"}.`);
   console.log(`Defence: innate threats ${defence.innateThreats === "game" ? "the game's hostile flag" : `[${defence.innateThreats.join(", ")}]`}, ${Object.keys(threatRecord.entries()).length} kinds learned about, route checks ${defence.reachCheck > 0 ? "on" : "off"}.`);
   console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}.`);
   console.log(`Arousal: resting ${arousal.resting}, bedtime ${arousal.bedtime}, wake threshold ${arousal.wakeThreshold}, gate ${arousal.gate}.`);
@@ -385,7 +389,10 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     alongside: { isSide: runsAlongside, onAction: (action: Action) => ("skill" in action ? executor.startAlongside(action.skill, action.target) : undefined) },
     getState: () => {
       const { x, y, z } = bot.entity.position.floored();
-      const limit = budget().nearby;
+      // The state is no longer cut by the attention budget: the whole brain reads up to the encoder's own cap.
+      // The budget is still worked out here, for the thalamus to cut what the deciding layers are told.
+      budgetNow = budget();
+      const limit = budgetNow.nearby;
       runningAtTick = executor.current()?.skill;
       const state = encodeState(bot, encoded++, {
         base,
@@ -402,7 +409,6 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
         senses,
         defence: threats.assess,
         memory: feelingNear(memory, { x, y, z, dimension: bot.game.dimension }, Date.now()),
-        limit,
       });
       if (focusSettings.attention > 0) {
         const { nearby } = state.data as unknown as MinecraftStateData;

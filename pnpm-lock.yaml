@@ -220,6 +220,9 @@ importers:
       '@familiar/region-reflex':
         specifier: workspace:*
         version: link:../../packages/region-reflex
+      '@familiar/region-thalamus':
+        specifier: workspace:*
+        version: link:../../packages/region-thalamus
 
   packages/arbiter:
     dependencies:
@@ -299,6 +302,9 @@ importers:
       '@familiar/region-reflex':
         specifier: workspace:*
         version: link:../region-reflex
+      '@familiar/region-thalamus':
+        specifier: workspace:*
+        version: link:../region-thalamus
       mineflayer:
         specifier: ^4.39.0
         version: 4.39.0
@@ -370,6 +376,16 @@ importers:
         version: link:../core
 
   packages/region-reflex:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/region-thalamus:
     dependencies:
       '@familiar/contracts':
         specifier: workspace:*

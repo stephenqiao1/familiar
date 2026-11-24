@@ -10,11 +10,16 @@ import { lightAt } from "./bearing.js";
 import type { Senses } from "../senses.js";
 import { dangerAlong, headInBlock, touchingOf } from "./touching.js";
 import { scanHazards } from "./scan-hazards.js";
-import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
+import { scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { Defence, MinecraftStateData } from "./state-data.js";
 
 export const SCHEMA_VERSION = 19;
+/**
+ * A safety cap on each kind of nearby thing (the nearest are kept), so that a crowd cannot blow
+ * up the cost of a state. It is not the attention budget: the whole brain reads up to this many.
+ */
+export const NEARBY_CAP = 32;
 
 export interface EncodeContext {
   base: Base;
@@ -44,7 +49,7 @@ export interface EncodeContext {
   senses?: Senses;
   /** The threat sense: sizes up what is near and chooses a defence. Default: none (the cheap rules are used by whoever asks). */
   defence?: (data: MinecraftStateData, now: number) => Defence;
-  /** How many of each kind of nearby thing to keep (focus sets it). Default: 10. */
+  /** The most of each kind of nearby thing to keep. Default: `NEARBY_CAP`. (What a deciding layer is told is cut further by the thalamus, not here.) */
   limit?: number;
 }
 
@@ -54,7 +59,7 @@ const STANDING: MinecraftStateData["self"]["locomotion"] = { moving: false, patt
 /** Turns the bot's view of the world into a compact, game-agnostic State. */
 export function encodeState(bot: EncodableBot, tick: number, ctx: EncodeContext): State {
   const now = Date.now();
-  const limit = ctx.limit ?? DEFAULT_LIMIT;
+  const limit = ctx.limit ?? NEARBY_CAP;
   const { senses } = ctx;
   const mobs = scanMobs(bot, limit).map((m) => sighted(bot, m, senses));
   const blocks = scanUsefulBlocks(bot, limit).map((b) => sighted(bot, b, senses));

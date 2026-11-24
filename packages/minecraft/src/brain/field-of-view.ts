@@ -1,10 +1,11 @@
-import type { State, Workspace } from "@familiar/contracts";
+import type { State } from "@familiar/contracts";
 import type { MinecraftStateData, Nearby, Sighted } from "../encode/state-data.js";
 import { minecraftDataOf, sightedOf } from "./read-state.js";
 
-// Seeing only what is in view. With this on, the deciding layers (instinct, planner) are told
-// only about what the bot can see or hear, what is touching distance, and what it saw a moment
-// ago. The reflexes are not affected: they read the full state.
+// Seeing only what is in view: a filter the thalamus applies to what the deciding layers
+// (instinct, planner) are told, when its `fieldOfView` is on. They are then told only about
+// what the bot can see or hear, what is touching distance, and what it saw a moment ago. The
+// reflexes are not affected: they read the full state.
 
 /** Within this many blocks a thing is felt, seen or not. */
 const FELT_WITHIN = 2;
@@ -57,9 +58,4 @@ export function createFieldOfView(): FieldOfView {
       return told.state;
     },
   };
-}
-
-/** A workspace that shows a different state: what a deciding layer is told. Everything else is the real workspace. */
-export function toldView(ws: Workspace, state: State): Workspace {
-  return Object.create(ws, { state: { get: () => state } }) as Workspace;
 }
