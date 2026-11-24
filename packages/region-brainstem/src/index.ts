@@ -6,7 +6,14 @@ export { createLoadedResponses, LOADED_URGENCY, type LoadedResponses, type Thing
 export { brainstemProblem, DEFAULT_BRAINSTEM, type BrainstemSettings } from "./settings.js";
 export { AIR_SIGNAL, AROUSAL_SIGNAL, COLD_SIGNAL, HUNGER_SIGNAL, HURT_SIGNAL, RESERVE_SIGNAL, SICK_SIGNAL, TIRED_SIGNAL, URGE_SIGNAL, VITALS_SIGNAL, ORIENTING_SIGNAL, PAIN_SIGNAL, SORE_SIGNAL, STARTLE_SIGNAL, STUCK_SIGNAL, UNSTEADY_SIGNAL, UPPER_PAUSED_SIGNAL } from "./signals.js";
 export { createColliculusRegion, COLLICULUS_LIMIT_MS, type ColliculusOptions, type Percept } from "./colliculus-region.js";
-export { colliculusProblem, DEFAULT_COLLICULUS, FEATURES, type ColliculusSettings, type Feature, type Features } from "./colliculus-settings.js";
+export { AS_BEFORE as COLLICULUS_AS_BEFORE, colliculusProblem, DEFAULT_COLLICULUS, FEATURES, NEW_STRENGTHS as COLLICULUS_NEW_STRENGTHS, type ColliculusSettings, type Feature, type Features } from "./colliculus-settings.js";
+export { FIELD_BEYOND, fieldOf, jumpTo, type Field } from "./field.js";
+export { LEAN, leanOf, type Lean, type LeanFacts } from "./lean.js";
+export { BRAKE, brakeOf } from "./fixation.js";
+export { boostOf, WATCH_BOOST } from "./priority.js";
+export { LOST_IN_DARK, leftInLight } from "./darkness.js";
+export { createOrienting, ORIENTING_FADE_MS } from "./orienting.js";
+export { FOLLOWS_WITHIN_MS, NEED_MOVED } from "./worth.js";
 export { partsOf, salienceOf, type Sense } from "./salience.js";
 export { createHabituation } from "./habituation.js";
 export { LOADED_SIGNAL, LOOMING_SIGNAL } from "./signals.js";

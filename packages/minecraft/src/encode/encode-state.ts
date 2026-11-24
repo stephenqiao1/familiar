@@ -6,6 +6,7 @@ import type { Hurt } from "../pain.js";
 import { balanceSense } from "./balance.js";
 import { encodeSelf } from "./encode-self.js";
 import { gazeOf, heardThings, positionOf, sighted, suddenThings, unseenHostileHeard } from "./perceive.js";
+import { lightAt } from "./bearing.js";
 import type { Senses } from "../senses.js";
 import { dangerAlong, headInBlock, touchingOf } from "./touching.js";
 import { scanHazards } from "./scan-hazards.js";
@@ -13,7 +14,7 @@ import { DEFAULT_LIMIT, scanMobs, scanPlayers } from "./scan-mobs.js";
 import { scanUsefulBlocks } from "./scan-useful-blocks.js";
 import type { Defence, MinecraftStateData } from "./state-data.js";
 
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 export interface EncodeContext {
   base: Base;
@@ -105,14 +106,11 @@ function nightProgress(bot: EncodableBot): { nightProgress?: number } {
 }
 
 /** How much darker the sky is at night: the game dims sky light by this much. */
-const NIGHT_SKY_DIMMING = 11;
 
 /**
  * The brighter of block light and sky light where the bot stands. A block's sky light is how open
  * it is to the sky, whatever the time, so at night it is dimmed the way the game dims it.
  */
 function lightLevel(bot: EncodableBot): number {
-  const here = bot.blockAt(bot.entity.position.floored());
-  if (!here) return 0;
-  return Math.max(here.light, here.skyLight - (bot.time.isDay ? 0 : NIGHT_SKY_DIMMING), 0);
+  return lightAt(bot, bot.entity.position);
 }

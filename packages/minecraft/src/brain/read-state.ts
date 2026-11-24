@@ -38,5 +38,5 @@ export function nearestThreat(data: MinecraftStateData) {
 
 /** What the eyes say of a nearby thing; one from a state made without eyes counts as seen, straight ahead and still. */
 export function sightedOf(thing: Partial<Sighted>): Sighted {
-  return { bearing: thing.bearing ?? { side: "ahead", angle: 0 }, seen: thing.seen ?? true, closing: thing.closing ?? 0, ...(thing.speed === undefined ? {} : { speed: thing.speed }), ...(thing.lastSeen ? { lastSeen: thing.lastSeen } : {}) };
+  return { bearing: thing.bearing ?? { side: "ahead", angle: 0 }, seen: thing.seen ?? true, closing: thing.closing ?? 0, ...(thing.speed === undefined ? {} : { speed: thing.speed }), ...(thing.elevation === undefined ? {} : { elevation: thing.elevation }), ...(thing.height === undefined ? {} : { height: thing.height }), ...(thing.light === undefined ? {} : { light: thing.light }), ...(thing.lastSeen ? { lastSeen: thing.lastSeen } : {}) };
 }

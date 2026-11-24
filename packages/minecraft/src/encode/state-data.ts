@@ -1,6 +1,6 @@
 import type { Choice } from "@familiar/region-brainstem";
 import type { ThreatView } from "../defence/size-up.js";
-/** What a schemaVersion 18 Minecraft State carries in `data`. Distances are whole blocks. */
+/** What a schemaVersion 19 Minecraft State carries in `data`. Distances are whole blocks. */
 export interface MinecraftStateData {
   /** `nightProgress`: at night, how far through it is, 0 (dusk) to 1 (dawn); left out by day and by a state made without a clock. `dayTick`: the game's tick of the day, 0 to 23999 (left out without a clock). `blockLight`: the light here that is not from the sky (lamps, torches), 0 to 15. */
   time: { isNight: boolean; lightLevel: number; nightProgress?: number; dayTick?: number; blockLight?: number };
@@ -71,7 +71,8 @@ export interface MinecraftStateData {
     /** How steady the body is, 0 to 1: 1 on flat solid ground with room around, 0 in the air over a landing that would hurt. */
     balance: number;
     /** What the head is pointed at: the nearest seen thing close to straight ahead (or null), and the compass heading in degrees (0 north, growing to the left). */
-    gaze: { id: string | null; yaw: number };
+    /** `pitch`: how far up (positive) or down the head points, in degrees (left out by a state made without it). */
+    gaze: { id: string | null; yaw: number; pitch?: number };
     /** What the locomotion controller is doing: travelling or not, the pattern and gait, and whether it is stuck. */
     locomotion: { moving: boolean; pattern: "walk" | "swim" | "dash" | null; gait: "walk" | "jog" | "sprint"; stuck: boolean };
     /**
@@ -107,7 +108,7 @@ export interface MinecraftStateData {
      * (placed, broken, a door) or something looming (closing faster than about 4 blocks a second,
      * or a projectile heading this way).
      */
-    sudden: { id: string; what: "appeared" | "started_moving" | "changed" | "looming"; bearing: Bearing; dist: number }[];
+    sudden: { id: string; what: "appeared" | "started_moving" | "changed" | "looming"; bearing: Bearing; dist: number; elevation?: number }[];
     /**
      * Sounds heard in the last 2 seconds: "explosion", "thunder", "hurt", "door", "shot", "sound"
      * (anything else), or "presence" (an unseen hostile close by, a stand-in for footsteps).
@@ -165,6 +166,12 @@ export interface Sighted {
   closing: number;
   /** How fast it is moving at all, in blocks per second. */
   speed?: number;
+  /** Degrees above (positive) or below eye level, from the bot's eyes to the thing's middle. */
+  elevation?: number;
+  /** How tall it is, in blocks (a block is 1). */
+  height?: number;
+  /** The light where it stands, 0 to 15 (the brighter of block light and sky light, the sky dimmed at night). */
+  light?: number;
   /** Set when the thing is out of view but was seen lately: how long ago, and where (only with the field of view switched on). */
   lastSeen?: { msAgo: number; at: { x: number; y: number; z: number } };
 }

@@ -1,7 +1,7 @@
 import type { State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { describe, expect, it } from "vitest";
-import { createFocusRegion, type FocusInput } from "./focus-region.js";
+import { createFocusRegion, justNoticed, type FocusInput } from "./focus-region.js";
 import { DEFAULT_FOCUS } from "./settings.js";
 
 const signal = new AbortController().signal;
@@ -108,5 +108,21 @@ describe("createFocusRegion", () => {
   it("adds extra notes to the log", async () => {
     const { tick } = setup({ notes: () => ({ remembered: [{ what: "chest pos:1,2,3", used: false }] }) });
     expect((await tick()).trace).toMatchObject({ remembered: [{ what: "chest pos:1,2,3", used: false }] });
+  });
+});
+
+describe("justNoticed", () => {
+  it("a strong thing that stood out pushes focus up for a few seconds; a weak one does not", () => {
+    const store = createWorkspace();
+    let happened = 0;
+    const input = justNoticed(() => happened);
+    const read = (ms: number) => (store.update(state(ms / 1000, {}), null), input.read(store.viewFor("acetylcholine"), ms));
+    happened = 0.3;
+    expect(read(0)).toBe(0);
+    happened = 0.8;
+    expect(read(1000)).toBeCloseTo(0.8);
+    happened = 0;
+    expect(read(3500)).toBeCloseTo(0.4);
+    expect(read(6000)).toBe(0);
   });
 });

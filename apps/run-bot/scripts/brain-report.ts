@@ -336,6 +336,25 @@ console.log(`BLINDSIDED (hurt by something not attended in the 5 s before): ${bl
 const worstMap = Math.max(0, ...colliculus.map((c) => (c.worstMs as number | undefined) ?? 0));
 console.log(`SLOWEST MAP: ${worstMap.toFixed(3)} ms${worstMap > 2 ? " (!! over the 2 ms limit)" : ""}; field of view: ${ticks.some((t) => JSON.stringify(trace(t, "instinct")).includes("lastSeen")) ? "on" : "not seen in use"}`);
 
+// The two-dimensional map: where the looks went, what they leaned the body toward, the brake, wants, and whether a look was worth it.
+type MapWon = Won & { field?: string; lean?: string; drawnBy?: string };
+const fields = count(looked, (l) => (l.won as MapWon).field ?? "level");
+console.log(`LOOKS BY FIELD: ${list(fields) || "none"}`);
+const leanTicks = ticks.filter((t, i) => {
+  const lean = (t as Tick & { attended?: { lean?: string } | null }).attended?.lean;
+  return lean !== undefined && lean !== (i > 0 ? (ticks[i - 1] as Tick & { attended?: { lean?: string } | null }).attended?.lean : undefined);
+});
+const leanSkills = ticks.flatMap((t) => (t.skillEvents ?? []).filter((e) => e.type === "started" && (e.skill === "take_cover" || e.skill === "hold_still")).map((e) => e.skill));
+console.log(`LEANS: ${list(count(leanTicks, (t) => (t as Tick & { attended?: { lean?: string } | null }).attended!.lean!)) || "none"}; the defence circuit then: ${list(count(leanSkills, (skill) => (skill === "take_cover" ? "ran for cover" : "held still and watched"))) || "nothing"}`);
+const braked = colliculus.flatMap((c) => (c.brake ? [c.brake as { kind: string }] : []));
+console.log(`STOPPED BY THE BRAKE (the gaze held on the task): ${braked.length} ticks${braked.length ? `: ${list(count(braked, (b) => b.kind), 6)}` : ""}`);
+console.log(`LOOKS DRAWN BY A KIND: ${list(count(looked.filter((l) => (l.won as MapWon).drawnBy), (l) => `${(l.won as MapWon).drawnBy} ${l.won.kind}`), 8) || "none"}`);
+const lookEnded = colliculus.flatMap((c) => (c.released ? [c.released as { worth: boolean; why: string }] : []));
+const worthAfter = colliculus.filter((c) => c.worthAfter).length;
+console.log(`WORTH THE LOOK: ${lookEnded.filter((r) => r.worth).length} of ${lookEnded.length} looks${worthAfter ? `, and ${worthAfter} more by what followed just after` : ""}${lookEnded.some((r) => r.worth) ? `; why: ${list(count(lookEnded.filter((r) => r.worth), (r) => r.why.replace(/ \(.*\)$/, "")), 6)}` : ""}`);
+const orientings = ticks.map((t) => t.signals.orienting?.value ?? 0).filter((v) => v > 0);
+console.log(`ORIENTING SIGNAL: sent on ${orientings.length} ticks${orientings.length ? `, strongest ${Math.max(...orientings).toFixed(2)}, typical ${(middle(orientings.map((v) => Math.round(v * 100))) ?? 0) / 100}` : ""}`);
+
 // The hypothalamus: what the body wanted, what pressed early, stress, and what it learned is enough.
 type Shown = { level: number; pressing: number; projected?: number; target?: number; why?: string };
 type Drives = { needs?: Record<string, Shown>; top?: { name: string; unmet?: boolean } | null; stress?: number; loadBy?: string; learned?: string[]; desperate?: { need: string }; slow?: string; worstMs?: number };

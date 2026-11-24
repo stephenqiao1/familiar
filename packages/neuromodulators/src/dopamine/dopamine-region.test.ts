@@ -444,11 +444,11 @@ describe("createDopamineRegion", () => {
 
   describe("learning by surprise", () => {
     /** Runs eat for one tick with `gain` food arriving, where 1 was expected. Returns what was learned. */
-    async function learnFrom(gain: number, surpriseLearning?: number) {
+    async function learnFrom(gain: number, surpriseLearning?: number, noticed?: (ms: number) => number) {
       const store = createWorkspace();
       const scorebook = createScorebook();
       scorebook.learn("day", "eat", 1 / 0.19, 0.1); // expects 1 (two levels, a tenth each)
-      const region = createDopamineRegion({ rules: [fed], situationOf: () => "day", scorebook, ...(surpriseLearning === undefined ? {} : { surpriseLearning }) });
+      const region = createDopamineRegion({ rules: [fed], situationOf: () => "day", scorebook, ...(surpriseLearning === undefined ? {} : { surpriseLearning }), ...(noticed ? { noticed: (ws: { state: State }) => noticed(ws.state.timestamp) } : {}) });
       const at = (food: number, ms: number): State => ({ schemaVersion: 1, tick: 0, timestamp: ms, data: { food } });
       const tick = (food: number, ms: number) => {
         store.update(at(food, ms), null);
@@ -459,8 +459,22 @@ describe("createDopamineRegion", () => {
       await tick(0, 500);
       store.addEvent({ skill: "eat", type: "done", timestamp: 0 });
       const out = await tick(gain, 1000);
-      return { expected: scorebook.get("day", "eat").expected, episode: (out.trace!.episodes as { attention?: number }[])[0]! };
+      return { expected: scorebook.get("day", "eat").expected, episode: (out.trace!.episodes as { attention?: number; noticed?: number }[])[0]!, total: out.trace!.total as number };
     }
+
+    it("a run that ends just after something stood out is learned from in full, and the event itself pays nothing", async () => {
+      // Something stood out (strength 1) half a second before the run ended: the same dull outcome is now learned at the whole step.
+      const dull = await learnFrom(1.03, 1);
+      const noticed = await learnFrom(1.03, 1, (ms) => (ms === 500 ? 1 : 0));
+      expect(noticed.episode.attention).toBeUndefined();
+      expect(noticed.episode.noticed).toBe(1);
+      expect(noticed.expected).toBeCloseTo(1 + 0.19 * 0.03);
+      expect(Math.abs(noticed.expected - 1)).toBeGreaterThan(Math.abs(dull.expected - 1));
+      // It is not a reward: the tick's rewards are the same with and without it.
+      expect(noticed.total).toBe(dull.total);
+      // A weak one counts for as much as its strength; one long past counts for nothing.
+      expect((await learnFrom(1.03, 1, (ms) => (ms === 500 ? 0.6 : 0))).episode.attention).toBeCloseTo(0.6);
+    });
 
     it("a real surprise is learned from at the full step, with nothing else having to happen first", async () => {
       for (const gain of [3, 0]) {

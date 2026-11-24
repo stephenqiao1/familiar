@@ -6,7 +6,7 @@ export interface EncodableBot {
   food: number;
   heldItem: { name: string } | null;
   /** `metadata`: the bot's own flags as the server sent them (burning, air left); see body.ts. */
-  entity: { id: number; position: Vec3; onGround?: boolean; yaw?: number; metadata?: unknown[]; effects?: unknown; velocity?: { x: number; y: number; z: number } };
+  entity: { id: number; position: Vec3; onGround?: boolean; yaw?: number; pitch?: number; metadata?: unknown[]; effects?: unknown; velocity?: { x: number; y: number; z: number } };
   /** What the bot is riding, if anything. */
   vehicle?: { name?: string | undefined } | null;
   /** The hidden reserve behind the food bar. */

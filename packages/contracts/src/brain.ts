@@ -75,6 +75,13 @@ export interface Attended {
   salience: number;
   /** When it won attention. */
   since: number;
+  /** Degrees from straight ahead (left is positive) and above eye level, when it won. Left out if not known. */
+  angle?: number;
+  elevation?: number;
+  /** The part of the view it is in: "upper" (well above eye level), "lower" (well below) or "level". */
+  field?: "upper" | "lower" | "level";
+  /** What its place and movement lean the body toward, from physical facts alone: advice, not a decision. Left out for none. */
+  lean?: "avoid" | "freeze" | "approach";
 }
 
 /** One need as the hypothalamus read it this tick. */

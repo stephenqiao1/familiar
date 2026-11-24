@@ -1,5 +1,5 @@
 import type { NeedReading, Region, SkillEvent, State, Workspace } from "@familiar/contracts";
-import { aimAt, cueProposals, type Thing } from "./cues.js";
+import { aimAt, cueProposals, type Cue, type Thing } from "./cues.js";
 import { aimOf, createEpisodeTracker, type EndedEpisode } from "./episodes.js";
 import { createMood } from "../mood.js";
 import { needChangeReward } from "./need-change.js";
@@ -24,6 +24,16 @@ export interface DopamineOptions {
    * in. Default: 0 (always learn in full).
    */
   surpriseLearning?: number;
+  /**
+   * Something notable just happened, 0 to 1 (the colliculus's `orienting`: a thing stood out,
+   * before anything knew what it was). A run that ends within `NOTICED_MS` of it is learned from
+   * at no less than this share of the usual step, so what the bot was just doing is linked to
+   * the event. It is not a reward: it pays nothing and moves no expectation by itself.
+   * Default: never.
+   */
+  noticed?(ws: Workspace): number;
+  /** Told each tick what is wanted in view and how much (the cues), for whoever else needs it: wanting is worked out once, here. Default: nobody. */
+  onCues?(cues: Cue[]): void;
   /**
    * The body's needs, as read this tick (by the hypothalamus; or worked out from the state with
    * it left out). With this, a need is not a rule: each is paid the signed change in its level
@@ -76,6 +86,9 @@ const FULL_ATTENTION_AT = 0.3;
  * How much of the usual learning step a surprise of this size gets (0.2 to 1). The surprise
  * itself says how much there is to learn: nothing else has to have happened first.
  */
+/** A notable event counts for the runs that end within this long of it. */
+export const NOTICED_MS = 2000;
+
 export function attentionTo(surprise: number): number {
   return LEAST_ATTENTION + (1 - LEAST_ATTENTION) * Math.min(1, Math.abs(surprise) / FULL_ATTENTION_AT);
 }
@@ -145,9 +158,14 @@ export function createDopamineRegion(options: DopamineOptions): Region {
 
   const surpriseLearning = Math.min(1, Math.max(0, options.surpriseLearning ?? 0));
   /** Learns one outcome at the step its own surprise calls for; returns the surprise and the share of the usual step it got. */
+  /** The strongest notable event lately, and when. */
+  let noticed = { strength: 0, at: -Infinity };
+  let clock = 0;
   function learnAt(situation: string, skill: string, outcome: number, aim: Aim | undefined) {
-    const attention = 1 - surpriseLearning * (1 - attentionTo(outcome - scorebook.get(situation, skill, aim).expected));
-    return { surprise: scorebook.learn(situation, skill, outcome, learningRate * attention, aim), attention };
+    const event = clock - noticed.at <= NOTICED_MS ? noticed.strength : 0;
+    const bySurprise = attentionTo(outcome - scorebook.get(situation, skill, aim).expected);
+    const attention = 1 - surpriseLearning * (1 - Math.max(event, bySurprise));
+    return { surprise: scorebook.learn(situation, skill, outcome, learningRate * attention, aim), attention, ...(event > bySurprise ? { noticed: event } : {}) };
   }
 
   /** Wants that are waiting to be tried again (see retryAfter), by skill and thing, and until when. */
@@ -202,7 +220,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
     // The work it took (a run cut short took at least what such runs usually take).
     const usualWork = scorebook.get(e.situation, effortOf(e.skill), aimOf(e)).expected;
     if (e.effort > 0 || usualWork !== 0) learnAt(e.situation, effortOf(e.skill), cut ? Math.max(e.effort, usualWork) : e.effort, aimOf(e));
-    const { surprise, attention } = learnAt(e.situation, e.skill, outcome, aimOf(e));
+    const { surprise, attention, noticed: byEvent } = learnAt(e.situation, e.skill, outcome, aimOf(e));
     mood.feel(surprise, before?.timestamp ?? 0);
     return {
       ...e,
@@ -212,6 +230,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       ...(unfinished > 0 ? { unfinished } : {}),
       ...(cut && trust < 1 ? { trust } : {}),
       ...(attention < 1 ? { attention: Math.round(attention * 100) / 100 } : {}),
+      ...(byEvent === undefined ? {} : { noticed: Math.round(byEvent * 100) / 100 }),
       ...(wasted > 0 ? { wasted } : {}),
       ...(Object.keys(reliefs).length ? { reliefs } : {}),
       ...scorebook.get(e.situation, e.skill, aimOf(e)),
@@ -224,6 +243,9 @@ export function createDopamineRegion(options: DopamineOptions): Region {
     everyMs: 0,
     run(ws) {
       const after = ws.state;
+      clock = after.timestamp;
+      const event = Math.min(1, options.noticed?.(ws) ?? 0);
+      if (event > 0 && (event >= noticed.strength || clock - noticed.at > NOTICED_MS)) noticed = { strength: event, at: clock };
       const events = ws.recentEvents.filter((e) => !seen.has(e));
       for (const e of events) seen.add(e);
       const moment = before && { before, after, events };
@@ -300,6 +322,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       if (learned.length) lastEnded = { episode: learned.at(-1)!, at: after.timestamp };
       const situation = there;
       const { cues, proposals } = cueProposals({ things: (options.cueThingsOf ?? thingsOf)(after), situation, da, needs: readings ? Object.fromEntries(readings.map((r) => [r.name, r.pressing])) : now, scorebook, skillsToward: (thing) => skillsToward(thing).filter((skill) => !((heldUntil.get(wantKey(skill, thing.id)) ?? -Infinity) > after.timestamp)), strength: options.wanting ?? 1 });
+      options.onCues?.(cues);
       const asleep = options.asleep?.(ws) ?? false;
       ws.setSignal(WANT_SIGNAL, asleep || !proposals.length ? 0 : Math.min(1, Math.max(...cues.map((c) => c.want))));
       return {

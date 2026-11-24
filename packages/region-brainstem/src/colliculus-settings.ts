@@ -26,6 +26,20 @@ export interface ColliculusSettings {
   scanning: number;
   /** The deciding layers are told only what is seen or heard (off by default). */
   fieldOfView: number;
+  /** Up and down on the map: the upper and lower fields, and glances at the sky, ceiling and floor. At 0 everything is "level". */
+  elevation: number;
+  /** What the bot wants right now draws its eye (the same boost a watched kind gets). At 0 only a goal's watched kinds do. */
+  wants: number;
+  /** Holding the gaze on what the running skill is aimed at: other things must be stronger to pull it away. */
+  fixation: number;
+  /** Sky and ground: the lean ("avoid", "freeze", "approach") a thing's place and movement give. At 0 there is none. */
+  fields: number;
+  /** The `orienting` signal is graded by the winner's strength and fades in half a second. At 0 it is 1 on a new winner, else 0. */
+  event: number;
+  /** A thing in darkness stands out less. At 0 light does not matter. */
+  darkness: number;
+  /** A look also counts as worth it when a skill was started on the thing, a need moved, or the defence changed mode for it. At 0 only damage or a reward counts. */
+  followUp: number;
 }
 
 /**
@@ -43,9 +57,21 @@ export const DEFAULT_COLLICULUS: ColliculusSettings = {
   habituation: 1,
   scanning: 1,
   fieldOfView: 0,
+  elevation: 1,
+  wants: 1,
+  fixation: 1,
+  fields: 1,
+  event: 1,
+  darkness: 1,
+  followUp: 1,
 };
 
-const STRENGTHS = ["sight", "hearing", "looming", "topDown", "habituation", "scanning", "fieldOfView"] as const;
+/** The strengths added with the two-dimensional map, each of which at 0 leaves the colliculus as it was before. */
+export const NEW_STRENGTHS = ["elevation", "wants", "fixation", "fields", "event", "darkness", "followUp"] as const;
+/** Every new strength at 0. */
+export const AS_BEFORE = Object.fromEntries(NEW_STRENGTHS.map((key) => [key, 0])) as Record<(typeof NEW_STRENGTHS)[number], number>;
+
+const STRENGTHS = ["sight", "hearing", "looming", "topDown", "habituation", "scanning", "fieldOfView", ...NEW_STRENGTHS] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function colliculusProblem(s: ColliculusSettings): string | null {

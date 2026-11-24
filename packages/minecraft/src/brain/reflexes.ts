@@ -73,7 +73,7 @@ export const corneredFight = rule("cornered_fight", "hard", (data) => {
  * Every reflex for a bot with these settings, checked every tick: the hard ones (the three that
  * were always there, the cornered fight, then withdrawal, buried and about-to-touch), then the soft ones (defence first).
  */
-export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1, defence: { recuperate: number } = { recuperate: 1 }): ReflexRule[] {
+export function createPlayerReflexes(settings: ReflexSettings = DEFAULT_REFLEXES, righting = 1, defence: { recuperate: number; lean?: number } = { recuperate: 1 }): ReflexRule[] {
   const protective = protectiveReflexes(settings, righting);
   return [inLavaOrFire, drowning, lastStand, corneredFight, ...protective.hard, ...defenceReflexes(defence), ...protective.soft];
 }

@@ -1,8 +1,9 @@
 import type { State, Workspace } from "@familiar/contracts";
-import { DEFENCE_RULES, RECOVERING_SIGNAL, THREAT_LEVEL, type BrainstemOptions, type Choice, type Mode } from "@familiar/region-brainstem";
+import { DEFENCE_BASE as BASE, DEFENCE_RULES, RECOVERING_SIGNAL, THREAT_LEVEL, type BrainstemOptions, type Choice, type Mode } from "@familiar/region-brainstem";
 import type { ReflexRule } from "@familiar/region-reflex";
 import type { ThreatView } from "../defence/size-up.js";
 import type { MinecraftStateData } from "../encode/state-data.js";
+import { leanFromState } from "./colliculus-percepts.js";
 import { defenceOf, minecraftDataOf } from "./read-state.js";
 
 // The defence circuit, read from the state: the three defence reflexes (one fires, whichever
@@ -15,6 +16,8 @@ import { defenceOf, minecraftDataOf } from "./read-state.js";
 export const DEFENCE_REFLEXES: string[] = Object.values(DEFENCE_RULES);
 /** The skill each defence runs. */
 export const DEFENCE_SKILL = { freeze: "freeze", flee: "flee", fight: "attack" } as const;
+/** What the colliculus's lean changes (advice from where a thing is and how it moves, never from what it is): a dive from above is fled to cover; something crossing the sky is held still for. */
+export const LEAN_SKILL = { avoid: "take_cover", freeze: "hold_still" } as const;
 /** Resting to recover starts from this urgency, and stops once health is back to this. */
 export const RECUPERATE = { name: "recuperate", base: 0.4, untilHealth: 15 };
 
@@ -41,16 +44,26 @@ export function pressingThreat(data: MinecraftStateData): ThreatView | null {
   return defenceOf(data).threats.find((t) => t.canReach && THREAT_LEVEL[t.stage] >= THREAT_LEVEL.coming) ?? null;
 }
 
-/** The reflex for one mode: fires when the defence chosen for this state is that mode. */
-function defenceRule(mode: keyof typeof DEFENCE_RULES): ReflexRule {
+/**
+ * The reflex for one mode: fires when the defence chosen for this state is that mode. `lean`
+ * (0 to 1) is how far the colliculus's lean is taken as advice. It never overrides a threat
+ * that is on the bot, and the defence's own choice always comes first.
+ */
+function defenceRule(mode: keyof typeof DEFENCE_RULES, lean = 0): ReflexRule {
   return {
     name: DEFENCE_RULES[mode],
     kind: "soft",
     check(ws) {
       const data = minecraftDataOf(ws.state);
       const choice = data && defenceOf(data).choice;
+      const leaning = lean > 0 ? ws.attended?.lean : undefined;
+      // Something crossing overhead, and nothing coming: treated as seen and not noticed. Hold still and watch.
+      if (mode === "freeze" && leaning === "freeze" && choice && choice.mode !== "freeze" && choice.threat < THREAT_LEVEL.coming) return { action: { skill: LEAN_SKILL.freeze, target: ws.attended!.id }, urgency: BASE.freeze * lean, reason: "something is crossing overhead without coming nearer: holding still and watching" };
       if (!choice || choice.mode !== mode || choice.target === null) return null;
-      return { action: { skill: DEFENCE_SKILL[mode], target: choice.target }, urgency: choice.base, reason: choice.why };
+      // Fleeing from something diving from above (and not yet on the bot): cover beats running in the open.
+      // (The colliculus speaks after the reflexes, so on the first tick of a dive the same table is asked about the threat itself.)
+      const toCover = mode === "flee" && lean > 0 && choice.threat < THREAT_LEVEL.on_it && (leaning === "avoid" || leanFromState(data!, choice.target) === "avoid");
+      return { action: { skill: toCover ? LEAN_SKILL.avoid : DEFENCE_SKILL[mode], target: choice.target }, urgency: choice.base, reason: toCover ? `${choice.why}; it is coming from above: making for cover` : choice.why };
     },
   };
 }
@@ -74,8 +87,8 @@ function recuperateRule(strength: number): ReflexRule {
 }
 
 /** The defence reflexes for a bot: freeze, flee, fight, and (with `recuperate` above 0) resting to recover. */
-export function defenceReflexes(strengths: { recuperate: number } = { recuperate: 1 }): ReflexRule[] {
-  return [defenceRule("fight"), defenceRule("flee"), defenceRule("freeze"), ...(strengths.recuperate > 0 ? [recuperateRule(strengths.recuperate)] : [])];
+export function defenceReflexes(strengths: { recuperate: number; lean?: number } = { recuperate: 1 }): ReflexRule[] {
+  return [defenceRule("fight"), defenceRule("flee", strengths.lean ?? 0), defenceRule("freeze", strengths.lean ?? 0), ...(strengths.recuperate > 0 ? [recuperateRule(strengths.recuperate)] : [])];
 }
 
 /** What the brainstem region needs to share the defence signals and log the defence. */

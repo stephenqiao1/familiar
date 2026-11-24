@@ -2,15 +2,18 @@
 // Most scenes run with no Jev and no planner calls (the scenes say what to do); the field-of-view
 // scene runs Jev, since that option only changes what the deciding layers are told.
 // Needs the server container (MC_CONTAINER, default familiar-m6).
-//   pnpm colliculus-check [scene ...]
+//   pnpm colliculus-check [--runs 3] [scene ...]
+// The scenes for the two-dimensional map (overhead, circling, ground, hungry_eye, on_task, dark,
+// learning) are in colliculus-map-scenes.ts and run after these; `--runs` repeats those.
 import { spawn } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
+import { mapScenes, printMapTable, worstSeen, type MapRow } from "./colliculus-map-scenes.ts";
 import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 
 const BOT = "Gazer";
 /** The same bot with the field of view switched on (bots.json). */
 const WARY = "Wary";
-const REGIONS = "reflex,medulla,brainstem,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+const REGIONS = "reflex,medulla,hypothalamus,brainstem,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
 /** Facing north (toward z=36); behind it is south. */
 const START = "60.5 151 40.5 180 0";
 
@@ -313,8 +316,12 @@ const scenes: Record<string, () => Promise<Row>> = {
   },
 };
 
-const wanted = process.argv.slice(2);
+const args = process.argv.slice(2);
+const runsAt = args.indexOf("--runs");
+const runs = runsAt >= 0 ? Number(args[runsAt + 1]) || 1 : 1;
+const wanted = args.filter((_, i) => runsAt < 0 || (i !== runsAt && i !== runsAt + 1));
 const rows: Row[] = [];
+const mapRows: MapRow[] = [];
 try {
   for (const [name, run] of Object.entries(scenes)) {
     if (wanted.length && !wanted.includes(name)) continue;
@@ -322,6 +329,16 @@ try {
     const result = await run().catch((error: unknown): Row => ({ scene: name, outcome: `ERROR: ${error instanceof Error ? error.message : error}`, won: "", turnMs: null, how: "", worstMs: 0, ok: false }));
     rows.push(result);
     console.log(`    ${result.ok ? "ok" : "NOT ok"}: ${result.outcome}`);
+  }
+  for (const [name, run] of Object.entries(mapScenes)) {
+    if (wanted.length && !wanted.includes(name)) continue;
+    for (let i = 1; i <= runs; i++) {
+      console.log(`=== ${name}${runs > 1 ? ` (run ${i} of ${runs})` : ""}`);
+      const result = await run().catch((error: unknown): MapRow => ({ scene: name, field: "", lean: "", won: "", defence: "", problem: `the scene broke: ${error instanceof Error ? error.message : error}` }));
+      mapRows.push({ ...result, scene: runs > 1 ? `${result.scene} ${i}` : result.scene });
+      for (const line of [`field ${result.field}; lean ${result.lean}`, ...result.won.split(" | "), ...result.defence.split(" | ")]) console.log(`    ${line}`);
+      console.log(`    ${result.problem ? `PROBLEM: ${result.problem}` : "no problem seen"}`);
+    }
   }
 } finally {
   for (const command of ["kill @e[type=!player,x=60,y=151,z=40,distance=..60]", "fill 40 151 20 80 160 45 air", "fill 40 149 36 80 150 44 stone", "fill 39 151 35 81 152 35 glass", "fill 39 151 45 81 152 45 glass", "gamerule spawn_mobs true", "forceload remove 39 35 81 45", `tp ${BOT} -8 69 14`, `tp ${WARY} -8 69 14`]) rcon(command);
@@ -334,7 +351,8 @@ for (const [i, r] of table.entries()) {
   console.log(r.map((cell, c) => cell.padEnd(widths[c]!)).join(" | "));
   if (i === 0) console.log(widths.map((w) => "-".repeat(w)).join("-|-"));
 }
-console.log(`\nSlowest map in any scene: ${Math.max(0, ...rows.map((r) => r.worstMs)).toFixed(3)} ms (it should stay under 2).`);
-const failed = rows.filter((r) => !r.ok);
-console.log(failed.length ? `FAIL: ${failed.map((r) => r.scene).join(", ")}` : `PASS: all ${rows.length} scenes.`);
+if (mapRows.length) printMapTable(mapRows);
+console.log(`\nSlowest map in any scene: ${Math.max(0, worstSeen(), ...rows.map((r) => r.worstMs)).toFixed(3)} ms (it should stay under 2).`);
+const failed = [...rows.filter((r) => !r.ok).map((r) => r.scene), ...mapRows.filter((r) => r.problem).map((r) => r.scene)];
+console.log(failed.length ? `FAIL: ${failed.join(", ")}` : `PASS: all ${rows.length + mapRows.length} scenes.`);
 process.exit(failed.length ? 1 : 0);

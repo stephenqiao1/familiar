@@ -88,6 +88,11 @@ describe("loadBotConfig", () => {
     expect((await loadBotConfig("Nobody", file)).colliculus.fieldOfView).toBe(0);
     await expect(loadBotConfig("Bad", file)).rejects.toThrow(/colliculus.hearing must be 0 to 1/);
     await expect(loadBotConfig("Odd", file)).rejects.toThrow(/colliculus.weights.hostile is not a feature/);
+    // The parts added with the two-dimensional map are each 0 to 1, and on unless said otherwise.
+    await writeFile(file, JSON.stringify({ Flat: { colliculus: { elevation: 0, wants: 0, fixation: 0, fields: 0, event: 0, darkness: 0, followUp: 0 } }, Bad: { colliculus: { fixation: 1.5 } } }));
+    expect((await loadBotConfig("Flat", file)).colliculus).toMatchObject({ elevation: 0, wants: 0, fixation: 0, fields: 0, event: 0, darkness: 0, followUp: 0 });
+    expect((await loadBotConfig("Nobody", file)).colliculus).toMatchObject({ elevation: 1, wants: 1, fixation: 1, fields: 1, event: 1, darkness: 1, followUp: 1 });
+    await expect(loadBotConfig("Bad", file)).rejects.toThrow(/colliculus.fixation must be 0 to 1/);
   });
 
   it("reads the posture block: what the bot is born knowing is loose, and each part's strength", async () => {

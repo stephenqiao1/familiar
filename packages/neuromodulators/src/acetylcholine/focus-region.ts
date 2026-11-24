@@ -40,6 +40,25 @@ export function predictionsFailing(surpriseOf: (ws: Workspace) => { size: number
   };
 }
 
+/** A thing that stood out this strongly or more raises focus, for this long (fading). */
+const NOTICED = { atLeast: 0.5, ms: 5000 };
+
+/**
+ * Something just stood out (the colliculus's `orienting`, 0 to 1, read by `happened`): look
+ * closely for a moment. Only a strong one counts, and it fades over a few seconds.
+ */
+export function justNoticed(happened: (ws: Workspace) => number): FocusInput {
+  let last = { strength: 0, at: -Infinity };
+  return {
+    name: "just_noticed",
+    read(ws, now) {
+      const strength = happened(ws);
+      if (strength >= NOTICED.atLeast && strength >= last.strength * Math.max(0, 1 - (now - last.at) / NOTICED.ms)) last = { strength, at: now };
+      return last.strength * Math.max(0, 1 - (now - last.at) / NOTICED.ms);
+    },
+  };
+}
+
 export interface FocusOptions {
   /** What moves focus. Add or remove one to change what the bot pays attention to. */
   inputs: FocusInput[];

@@ -75,7 +75,8 @@ describe("the map: one winner", () => {
     const out = await tick({ percepts: [appeared("entity:1", { kind: "zombie" }), thing("entity:2", { nearness: 0.9 })] });
     expect(out.target).toBe("entity:1");
     expect(store.attended()).toMatchObject({ id: "entity:1", kind: "zombie", bearing: "left", salience: 0.6 });
-    expect(value("orienting")).toBe(1);
+    // The signal is the winner's strength (its salience, up to 1).
+    expect(value("orienting")).toBeCloseTo(0.6);
     expect(out.trace).toMatchObject({ winner: { id: "entity:1", why: "sight: suddenness" }, threshold: 0.45, top: [{ id: "entity:1", parts: { suddenness: 0.5, nearness: 0.1 } }, { id: "entity:2" }] });
     expect((await tick({ percepts: [thing("entity:1", { nearness: 0.3 })] })).proposals).toEqual([]);
     expect(value("orienting")).toBe(0);

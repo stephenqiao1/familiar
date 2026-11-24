@@ -1,8 +1,14 @@
 import type { Proposal, Region, Workspace } from "@familiar/contracts";
 import { type ColliculusSettings, type Features } from "./colliculus-settings.js";
+import { fieldOf, jumpTo, type Field } from "./field.js";
+import { brakeOf } from "./fixation.js";
 import { createHabituation } from "./habituation.js";
+import { leanOf, type Lean } from "./lean.js";
+import { createOrienting } from "./orienting.js";
+import { boostOf, type Boost } from "./priority.js";
 import { partsOf, type Sense } from "./salience.js";
 import { LOOMING_SIGNAL, ORIENTING_SIGNAL } from "./signals.js";
+import { FOLLOWS_WITHIN_MS, standing, whyWorth, type Before, type DefenceNow } from "./worth.js";
 
 /** One thing on the map this tick. */
 export interface Percept {
@@ -19,6 +25,15 @@ export interface Percept {
   features: Features;
   /** It just did something new (started moving, came at the bot, changed): it is no longer something to be used to. */
   fresh?: boolean;
+  /** Where it is on the map, in degrees: from straight ahead (left is positive), and above eye level. Default: 0 and 0. */
+  angle?: number;
+  elevation?: number;
+  /** How well lit it is where it stands, 0 (dark) to 1 (daylight). Default: 1. */
+  light?: number;
+  /** Plain physical facts for the lean (see lean.ts). Default: none, so no lean. */
+  shape?: { dist: number; across: number; closing: number; height?: number; /** How big it looks, in degrees of the view. */ size?: number };
+  /** The bot's own doing (something it just dug, placed or struck): looked at like anything else, but no `orienting` signal. */
+  own?: boolean;
 }
 
 export interface ColliculusOptions {
@@ -27,6 +42,16 @@ export interface ColliculusOptions {
   percepts(ws: Workspace): Percept[];
   /** Whether the layers above are looking for this kind of thing. Default: the goal's `watchFor` names it. */
   watched?(kind: string, ws: Workspace): boolean;
+  /** How much the bot wants this kind of thing right now, given its needs, 0 to 1. Default: 0. */
+  wantOf?(kind: string, ws: Workspace): number;
+  /** The thing the running skill is aimed at: the gaze is held on it. Default: the running skill's target, unless the skill is the look itself. */
+  fixated?(ws: Workspace): string | null;
+  /** A need for safety presses: nothing is worth a closer look. Default: a need of kind "safety" presses. */
+  safetyPresses?(ws: Workspace): boolean;
+  /** The defence chosen right now and the thing it is about, for telling whether a look was worth it. Default: unknown. */
+  defenceOf?(ws: Workspace): DefenceNow | null;
+  /** How far up (positive) or down the head points now, in degrees. Default: 0. */
+  pitchOf?(ws: Workspace): number;
   /** Alarm, 0 to 1. Default: 0. */
   alarmOf?(ws: Workspace): number;
   /** Arousal, 0 to 1. Default: 0.5. */
@@ -57,14 +82,12 @@ export interface ColliculusOptions {
   layer?: number;
 }
 
-/** A watched kind gets this much added. */
-const WATCH_BOOST = 0.4;
 /** How far alarm and arousal lower the threshold, and a demanding skill raises it. */
 const THRESHOLD = { alarm: 0.25, arousal: 0.2, wary: 0.1, demanding: 0.3, floor: 0.05 };
 /** Asleep, a sound must be at least this loud to get through. */
 const WAKING_LOUDNESS = 0.5;
 /** A winner is held at least this long, and let go after this long unless it is still the most striking. */
-const HOLD_MS = { least: 1000, most: 2000 };
+const HOLD_MS = { least: 1000, most: 2000, closerLook: 3000 };
 /** The thing just looked at cannot win again for this long, unless it looms or touches. */
 const NO_RETURN_MS = 3000;
 /** At most one new look per this long. */
@@ -82,6 +105,8 @@ interface Scored extends Percept {
   parts: Features;
   damped: number;
   pressing: boolean;
+  boost: Boost;
+  field: Field;
 }
 
 /**
@@ -89,13 +114,20 @@ interface Scored extends Percept {
  * seen, heard and felt on one map, scores each by physical features only (never by what it is),
  * and turns the head to the most striking thing, before the rest of the brain has worked out
  * what that is. It never calls a model.
- *   a) the map: salience = suddenness + motion + looming + nearness + loudness + touch (weighted);
- *   b) bias from above: watched kinds get a boost; the threshold falls with alarm and arousal
- *      and rises during a demanding skill; asleep, only touch and loud sounds get through;
+ *   a) the map, in two dimensions: salience = suddenness + motion + looming + nearness + loudness
+ *      + touch (weighted), what is seen scaled by the light where it stands (darkness.ts); each
+ *      thing has an angle, an elevation and a field (field.ts);
+ *   b) priority: watched and wanted kinds get a boost (priority.ts); the threshold falls with
+ *      alarm and arousal and rises during a demanding skill; while the running skill is aimed at
+ *      a thing the gaze is held there and others must be stronger (fixation.ts); asleep, only
+ *      touch and loud sounds get through;
  *   c) habituation: a thing that wins and brings nothing counts for less next time (for about a
- *      minute, or until it does something new); what was just looked at cannot win straight back;
- *   d) one winner, written to the workspace as `attended` and held for 1 to 2 seconds;
- *   e) it proposes a look at the winner, shares `orienting` (a new winner) and `looming`;
+ *      minute, or until it does something new); what was just looked at cannot win straight
+ *      back; a look that was worth it is not got used to (worth.ts);
+ *   d) one winner, written to the workspace as `attended` with its place and its lean (lean.ts),
+ *      and held for 1 to 2 seconds (3 for a closer look);
+ *   e) it proposes a look at the winner, shares `orienting` (graded, fading in half a second;
+ *      orienting.ts) and `looming`;
  *   f) with nothing standing out and the body at rest, it glances somewhere not looked at lately.
  * Everything is in the trace.
  */
@@ -103,7 +135,11 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
   const { settings, name = "colliculus", layer = 0 } = options;
   const habituation = createHabituation();
   const watched = options.watched ?? ((kind, ws) => ws.goal?.watchFor.includes(kind) ?? false);
-  let held: { percept: Percept; since: number; eventful: boolean } | null = null;
+  const orienting = createOrienting();
+  type Look = { percept: Percept; since: number; worth: string | null; before: Before; most: number };
+  let held: Look | null = null;
+  /** Looks that ended lately and were got used to: what follows soon after still counts for them. */
+  let ended: (Look & { until: number })[] = [];
   let lastLooked: { id: string; at: number } | null = null;
   let lastLookAt = -Infinity;
   let lastScanAt = 0;
@@ -111,9 +147,13 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
   const keysOf = (p: Percept) => [`thing ${p.id}`, ...(p.place ? [`${p.kind} at ${p.place}`] : [])];
 
   /** Lets go of what was attended; if nothing followed while it was, it counts for less next time. */
-  function release(now: number): void {
+  function release(now: number, trace: Record<string, unknown>): void {
     if (!held) return;
-    if (!held.eventful && settings.habituation > 0) habituation.damp(keysOf(held.percept), now);
+    if (!held.worth && settings.habituation > 0) {
+      habituation.damp(keysOf(held.percept), now);
+      if (settings.followUp > 0) ended.push({ ...held, until: now + FOLLOWS_WITHIN_MS });
+    }
+    trace.released = { id: held.percept.id, worth: held.worth !== null, why: held.worth ?? "nothing followed" };
     lastLooked = { id: held.percept.id, at: now };
     held = null;
   }
@@ -133,11 +173,12 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
       // a) The map.
       const scored: Scored[] = options.percepts(ws).map((p) => {
         if (p.fresh) habituation.restore(keysOf(p));
-        const parts = partsOf(p.features, p.via, settings);
-        const boost = settings.topDown > 0 && watched(p.kind, ws) ? WATCH_BOOST * settings.topDown : 0;
+        const parts = partsOf(p.features, p.via, settings, p.light ?? 1);
+        const boost = settings.topDown > 0 ? boostOf(watched(p.kind, ws), settings.wants > 0 ? (options.wantOf?.(p.kind, ws) ?? 0) : 0, settings) : { boost: 0, from: null };
         const kept = settings.habituation > 0 ? 1 - settings.habituation * (1 - habituation.factor(keysOf(p), now)) : 1;
-        const raw = Object.values(parts).reduce((sum, part) => sum + part, 0) + boost;
-        return { ...p, parts, salience: raw * kept, damped: kept, pressing: parts.touch > 0 || (p.features.looming >= PRESSING && parts.looming > 0) };
+        const raw = Object.values(parts).reduce((sum, part) => sum + part, 0) + boost.boost;
+        const field = settings.elevation > 0 ? fieldOf(p.elevation ?? 0) : "level";
+        return { ...p, parts, boost, field, salience: raw * kept, damped: kept, pressing: parts.touch > 0 || (p.features.looming >= PRESSING && parts.looming > 0) };
       });
       scored.sort((a, b) => b.salience - a.salience);
       const looming = Math.max(0, ...scored.map((s) => (s.parts.looming > 0 ? s.features.looming : 0)));
@@ -145,36 +186,77 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
 
       // b) The threshold in force.
       const lowered = settings.topDown * (THRESHOLD.alarm * (options.alarmOf?.(ws) ?? 0) + THRESHOLD.arousal * ((options.arousalOf?.(ws) ?? 0.5) - 0.5) + THRESHOLD.wary * (options.waryOf?.(ws) ?? 0));
-      const threshold = Math.max(THRESHOLD.floor, settings.threshold - lowered + (busy === "demanding" ? settings.topDown * THRESHOLD.demanding : 0));
+      const raised = busy === "demanding" ? settings.topDown * THRESHOLD.demanding : 0;
+      const threshold = Math.max(THRESHOLD.floor, settings.threshold - lowered + raised);
+      // The brake: the gaze is held on what the running skill is aimed at.
+      const fixated = settings.fixation > 0 ? (options.fixated ?? ((w: Workspace) => (w.current && w.current.skill !== options.lookSkill ? (w.current.target ?? null) : null)))(ws) : null;
+      const brake = brakeOf(fixated !== null, raised, settings.fixation);
 
       // c) Who may win.
-      const mayWin = (s: Scored) => {
-        if (s.salience < threshold) return false;
+      const mayWin = (s: Scored, braked = true) => {
+        if (fixated !== null && s.id === fixated) return false;
+        if (s.salience < threshold + (braked && !s.pressing ? brake : 0)) return false;
         if (asleep && !(s.parts.touch > 0 || s.features.loudness >= WAKING_LOUDNESS)) return false;
         if (busy && !s.pressing) return false;
         const justLooked = settings.habituation > 0 && lastLooked !== null && lastLooked.id === s.id && now - lastLooked.at < NO_RETURN_MS;
         return !justLooked || s.pressing;
       };
-      const best = scored.find(mayWin) ?? null;
+      let best = scored.find((s) => mayWin(s)) ?? null;
+      // A want raises priority, but never past a pressing thing (touch, strong looming).
+      if (best && !best.pressing && best.boost.from === "wanted") best = scored.find((s) => s.pressing && mayWin(s)) ?? best;
+      const unbraked = brake > 0 ? (scored.find((s) => mayWin(s, false)) ?? null) : null;
+      if (unbraked && unbraked.id !== best?.id) trace.brake = { stopped: unbraked.id, kind: unbraked.kind, salience: round(unbraked.salience), needed: round(threshold + brake), heldOn: fixated };
 
       // d) One winner, held for a moment.
-      if (held && options.eventful?.(ws)) held.eventful = true;
+      const eventful = held || ended.length ? (options.eventful?.(ws) ?? false) : false;
+      const defence = settings.followUp > 0 ? (options.defenceOf?.(ws) ?? null) : null;
+      const worthOf = (look: Look) => (eventful ? "the body was hurt or rewarded" : settings.followUp > 0 ? whyWorth(look.before, ws, defence, look.percept.id, options.lookSkill) : null);
+      if (held && !held.worth) held.worth = worthOf(held);
+      // What follows just after a look still counts: the thing gets back what it had lost.
+      ended = ended.filter((look) => {
+        const why = look.until >= now ? worthOf(look) : null;
+        if (why) {
+          habituation.restore(keysOf(look.percept));
+          trace.worthAfter = { id: look.percept.id, why };
+        }
+        return !why && look.until >= now;
+      });
       const heldFor = held ? now - held.since : 0;
       const stillBest = held !== null && best !== null && best.id === held.percept.id;
       let fresh: Scored | null = null;
       if (!held) fresh = best;
       else if (best && !stillBest && (heldFor >= HOLD_MS.least || best.pressing)) fresh = best;
-      else if (!stillBest && heldFor >= HOLD_MS.most) release(now);
+      else if (!stillBest && heldFor >= held!.most) release(now, trace);
       if (fresh && now - lastLookAt < LOOK_GAP_MS && !fresh.pressing) fresh = null;
+      // Sky and ground: what a thing's place and movement lean the body toward.
+      const leanFor = (s: Scored): Lean | null => (settings.fields > 0 && s.shape ? leanOf({ ...s.shape, field: s.field, looming: s.parts.looming > 0 ? s.features.looming : 0, safetyPresses: (options.safetyPresses ?? safetyNeedPresses)(ws) }) : null);
+      const attend = (s: Scored, since: number, lean: Lean | null) => {
+        const where = s.angle === undefined ? {} : { angle: Math.round(s.angle), elevation: Math.round(s.elevation ?? 0), field: s.field };
+        ws.setAttended({ id: s.id, kind: s.kind, bearing: s.bearing, salience: round(s.salience), since, ...where, ...(lean ? { lean } : {}) });
+      };
+      let lean: Lean | null = null;
       if (fresh) {
-        release(now);
-        held = { percept: fresh, since: now, eventful: false };
+        release(now, trace);
+        lean = leanFor(fresh);
+        held = { percept: fresh, since: now, worth: null, before: standing(ws, defence), most: lean === "approach" ? HOLD_MS.closerLook : HOLD_MS.most };
         lastLookAt = now;
-        ws.setAttended({ id: fresh.id, kind: fresh.kind, bearing: fresh.bearing, salience: round(fresh.salience), since: now });
-      } else if (!held && ws.attended) {
+        attend(fresh, now, lean);
+      } else if (held) {
+        // Still held: the lean follows what the thing is doing now (a thing passing over may start to dive).
+        const seen = scored.find((s) => s.id === held!.percept.id);
+        lean = seen ? leanFor(seen) : ((ws.attended?.lean as Lean | undefined) ?? null);
+        if (seen && lean !== (ws.attended?.lean ?? null)) {
+          attend(seen, held.since, lean);
+          if (lean === "approach") held.most = HOLD_MS.closerLook;
+          trace.lean = lean ?? "none";
+        }
+      } else if (ws.attended) {
         ws.setAttended(null);
       }
-      ws.setSignal(ORIENTING_SIGNAL, fresh ? 1 : 0);
+      // The fast "something happened" signal. What the bot caused itself sends none.
+      if (fresh && !fresh.own) orienting.fire(fresh.salience, now);
+      const happened = settings.event > 0 ? round(settings.event * orienting.level(now)) : fresh ? 1 : 0;
+      ws.setSignal(ORIENTING_SIGNAL, happened);
 
       // e) Turn to it.
       const alongside = options.looksAlongside?.(ws) ?? false;
@@ -187,7 +269,8 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
       if (fresh) {
         const strength = Math.min(1, Math.max(0, (fresh.salience - threshold) / (URGENCY.full - threshold)));
         const why = `${fresh.via}: ${strongest(fresh.parts)}`;
-        trace.winner = { id: fresh.id, kind: fresh.kind, via: fresh.via, bearing: fresh.bearing, salience: round(fresh.salience), why };
+        const jump = fresh.angle === undefined ? {} : { jump: jumpTo({ angle: fresh.angle, elevation: fresh.elevation ?? 0 }, options.pitchOf?.(ws) ?? 0) };
+        trace.winner = { id: fresh.id, kind: fresh.kind, via: fresh.via, bearing: fresh.bearing, salience: round(fresh.salience), why, field: fresh.field, ...jump, ...(lean ? { lean } : {}), ...(fresh.boost.from ? { drawnBy: fresh.boost.from } : {}), ...(fresh.own ? { own: true } : {}) };
         trace.look = propose(fresh.id, URGENCY.from + (URGENCY.to - URGENCY.from) * strength, `striking (${why}), ${fresh.bearing}`);
       }
 
@@ -201,7 +284,21 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
       }
 
       trace.threshold = round(threshold);
-      trace.top = scored.slice(0, 3).map((s) => ({ id: s.id, kind: s.kind, via: s.via, bearing: s.bearing, salience: round(s.salience), parts: rounded(s.parts), ...(s.damped < 1 ? { damped: round(s.damped) } : {}) }));
+      trace.top = scored.slice(0, 3).map((s) => ({
+        id: s.id,
+        kind: s.kind,
+        via: s.via,
+        bearing: s.bearing,
+        salience: round(s.salience),
+        parts: rounded(s.parts),
+        ...(s.damped < 1 ? { damped: round(s.damped) } : {}),
+        ...(s.angle === undefined ? {} : { angle: Math.round(s.angle), elevation: Math.round(s.elevation ?? 0) }),
+        field: s.field,
+        ...(s.via === "sight" && s.light !== undefined ? { light: round(s.light) } : {}),
+        ...(s.boost.from ? { boost: round(s.boost.boost), boostFrom: s.boost.from } : {}),
+      }));
+      if (happened > 0) trace.orienting = happened;
+      if (fixated !== null) trace.fixated = fixated;
       const damped = habituation.damped(now);
       if (Object.keys(damped).length) trace.damped = damped;
       if (held) trace.attended = held.percept.id;
@@ -215,6 +312,7 @@ export function createColliculusRegion(options: ColliculusOptions): Region {
   };
 }
 
+const safetyNeedPresses = (ws: Workspace) => ws.needs?.readings.some((r) => r.kind === "safety" && r.pressing > 0) ?? false;
 const round = (n: number) => Math.round(n * 100) / 100;
 const rounded = (parts: Features) => Object.fromEntries(Object.entries(parts).filter(([, v]) => v > 0).map(([k, v]) => [k, round(v)]));
 /** The feature that counted most, in words. */

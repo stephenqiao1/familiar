@@ -1,6 +1,6 @@
 import { Vec3 } from "vec3";
 import type { Senses } from "../senses.js";
-import { bearingOf, FIELD, sightOf, type Bearing } from "./bearing.js";
+import { bearingOf, elevationOf, eyesOf, FIELD, lightAt, sightOf, type Bearing } from "./bearing.js";
 import type { EncodableBot } from "./encodable-bot.js";
 import { posId } from "./scan-blocks.js";
 import type { MinecraftStateData, Nearby, Sighted } from "./state-data.js";
@@ -38,7 +38,9 @@ export function sighted<T extends Nearby>(bot: EncodableBot, thing: T, senses: S
   const { bearing, seen } = at ? sightOf(bot, at) : { bearing: { side: "ahead" as const, angle: 0 }, seen: false };
   const entity = thing.id.startsWith("entity:") ? Number(thing.id.slice(7)) : null;
   const speed = entity === null ? 0 : senses.speed(entity);
-  return { ...thing, bearing, seen, closing: entity === null ? 0 : senses.closing(entity), ...(speed > 0 ? { speed } : {}) };
+  // Up and down, how tall, and how well lit: physical facts for the map (nothing here says what the thing is).
+  const place = at ? { elevation: elevationOf(eyesOf(bot), at), height: entity === null ? 1 : (bot.entities[String(entity)]?.height ?? 1), light: lightAt(bot, at) } : {};
+  return { ...thing, bearing, seen, closing: entity === null ? 0 : senses.closing(entity), ...(speed > 0 ? { speed } : {}), ...place };
 }
 
 /**
@@ -53,22 +55,23 @@ export function suddenThings(bot: EncodableBot, things: (Nearby & Sighted)[], se
     if (!t.seen || !t.id.startsWith("entity:")) continue;
     const id = Number(t.id.slice(7));
     const what = t.closing >= LOOMING_ABOVE ? "looming" : just(senses.startedMovingAt(id)) ? "started_moving" : just(senses.appearedAt(id)) ? "appeared" : null;
-    if (what) sudden.push({ id: t.id, what, bearing: t.bearing, dist: t.dist });
+    if (what) sudden.push({ id: t.id, what, bearing: t.bearing, dist: t.dist, ...(t.elevation === undefined ? {} : { elevation: t.elevation }) });
   }
   const me = bot.entity.position;
+  const eyes = eyesOf(bot);
   for (const p of senses.incoming(now)) {
     const at = bot.entities[String(p.id)]?.position ?? p.position;
     const { bearing, seen } = sightOf(bot, at);
-    if (seen && !sudden.some((s) => s.id === `entity:${p.id}`)) sudden.push({ id: `entity:${p.id}`, what: "looming", bearing, dist: Math.round(at.distanceTo(me)) });
+    if (seen && !sudden.some((s) => s.id === `entity:${p.id}`)) sudden.push({ id: `entity:${p.id}`, what: "looming", bearing, dist: Math.round(at.distanceTo(me)), elevation: elevationOf(eyes, at) });
   }
   // Things that are not creatures, players or projectiles (a lit explosive, a falling block): seen appearing, not known for what they are.
   for (const o of senses.appearedOthers(now)) {
     const { bearing, seen } = sightOf(bot, o.position);
-    if (seen) sudden.push({ id: `entity:${o.id}`, what: "appeared", bearing, dist: Math.round(o.position.distanceTo(me)) });
+    if (seen) sudden.push({ id: `entity:${o.id}`, what: "appeared", bearing, dist: Math.round(o.position.distanceTo(me)), elevation: elevationOf(eyes, o.position) });
   }
   for (const c of senses.changed(now)) {
     const { bearing, seen } = sightOf(bot, c.position.offset(0.5, 0.5, 0.5));
-    if (seen && !sudden.some((s) => s.id === posId(c.position))) sudden.push({ id: posId(c.position), what: "changed", bearing, dist: Math.round(c.position.distanceTo(me)) });
+    if (seen && !sudden.some((s) => s.id === posId(c.position))) sudden.push({ id: posId(c.position), what: "changed", bearing, dist: Math.round(c.position.distanceTo(me)), elevation: elevationOf(eyes, c.position.offset(0.5, 0.5, 0.5)) });
   }
   return sudden;
 }
@@ -104,7 +107,8 @@ export function heardThings(bot: EncodableBot, senses: Senses, now: number): Nea
 export function gazeOf(bot: EncodableBot, things: (Nearby & Sighted)[]): MinecraftStateData["self"]["gaze"] {
   const ahead = things.filter((t) => t.seen && Math.abs(t.bearing.angle) <= GAZE_WITHIN).sort((a, b) => a.dist - b.dist)[0];
   const degrees = Math.round((((bot.entity.yaw ?? 0) * 180) / Math.PI) % 360);
-  return { id: ahead?.id ?? null, yaw: (degrees + 360) % 360 };
+  const pitch = Math.round(((bot.entity.pitch ?? 0) * 180) / Math.PI) || 0;
+  return { id: ahead?.id ?? null, yaw: (degrees + 360) % 360, pitch };
 }
 
 /** Whether a bearing is in the sharp middle of the view. */

@@ -3,7 +3,7 @@ import type { Bot } from "mineflayer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Vec3 } from "vec3";
 import { headingFor, trackSenses } from "../senses.js";
-import { bearingOf } from "./bearing.js";
+import { bearingOf, elevationOf } from "./bearing.js";
 import type { EncodableBot } from "./encodable-bot.js";
 import { encodeState } from "./encode-state.js";
 import type { MinecraftStateData } from "./state-data.js";
@@ -105,9 +105,9 @@ describe("what the eyes deliver", () => {
     const w = world();
     w.add(2, "cow", "animal", 0, -6);
     w.add(3, "cow", "animal", 6, 0);
-    expect(w.data().self.gaze).toEqual({ id: "entity:2", yaw: 0 });
+    expect(w.data().self.gaze).toEqual({ id: "entity:2", yaw: 0, pitch: 0 });
     w.me.yaw = -Math.PI / 2; // facing east
-    expect(w.data().self.gaze).toEqual({ id: "entity:3", yaw: 270 });
+    expect(w.data().self.gaze).toEqual({ id: "entity:3", yaw: 270, pitch: 0 });
   });
 
   it("closing is right for something approaching fast, slowly, and moving away", async () => {
@@ -141,7 +141,7 @@ describe("what the eyes deliver", () => {
     w.add(2, "cow", "animal", 0, -8);
     w.add(3, "cow", "animal", 0, 8); // behind
     await w.run(300);
-    expect(w.data().nearby.sudden).toEqual([{ id: "entity:2", what: "appeared", bearing: { side: "ahead", angle: 0 }, dist: 8 }]);
+    expect(w.data().nearby.sudden).toMatchObject([{ id: "entity:2", what: "appeared", bearing: { side: "ahead", angle: 0 }, dist: 8 }]);
     await w.run(1500);
     expect(w.data().nearby.sudden).toEqual([]);
     await w.run(300, { 2: [3, 0] });
@@ -159,7 +159,7 @@ describe("what the eyes deliver", () => {
     w.packet("spawn_entity", { entityId: 9, velocity: { x: 0, y: 0, z: 1.5 } });
     w.add(10, "arrow", "projectile", 8, -16, 64.5);
     w.packet("spawn_entity", { entityId: 10, velocity: { x: 1.5, y: 0, z: 0 } });
-    expect(w.data().nearby.sudden).toEqual([{ id: "entity:9", what: "looming", bearing: { side: "ahead", angle: 0 }, dist: 16 }]);
+    expect(w.data().nearby.sudden).toMatchObject([{ id: "entity:9", what: "looming", bearing: { side: "ahead", angle: 0 }, dist: 16 }]);
     expect(headingFor(new Vec3(0, 64, -16), { x: 0, y: 0, z: -1.5 }, new Vec3(0, 64, 0))).toBe(false);
   });
 
@@ -206,5 +206,29 @@ describe("what the ears deliver", () => {
     w.add(4, "zombie", "hostile", 0, 14); // behind, too far
     w.add(5, "cow", "animal", 3, 5); // behind, not hostile
     expect(w.data().nearby.heard).toEqual([{ type: "presence", bearing: { side: "behind", angle: 180 }, dist: 5, position: { x: 0, y: 63, z: 5 }, loudness: 0.2 }]);
+  });
+});
+
+describe("up and down", () => {
+  it("elevation is degrees above or below eye level", () => {
+    const eyes = new Vec3(0, 64.62, 0);
+    expect(elevationOf(eyes, new Vec3(0, 74.62, -10))).toBe(45);
+    expect(elevationOf(eyes, new Vec3(10, 64.62, 0))).toBe(0);
+    expect(elevationOf(eyes, new Vec3(0, 54.62, 10))).toBe(-45);
+    expect(elevationOf(eyes, new Vec3(0, 80, 0))).toBe(90);
+  });
+
+  it("each seen thing carries its elevation, its height and the light where it stands; the gaze carries the head's pitch", () => {
+    const w = world();
+    w.add(2, "phantom", "hostile", 0, -10, 75); // 10 blocks north, 12 up
+    w.add(3, "cow", "animal", 6, 0);
+    const mobs = w.data().nearby.mobs;
+    const above = mobs.find((m) => m.id === "entity:2")!;
+    const level = mobs.find((m) => m.id === "entity:3")!;
+    expect(above.elevation).toBeGreaterThan(40);
+    expect(level.elevation).toBeLessThan(0);
+    expect(level.elevation).toBeGreaterThan(-20);
+    expect(above).toMatchObject({ height: 1.8, light: 15 });
+    expect(w.data().self.gaze.pitch).toBe(0);
   });
 });

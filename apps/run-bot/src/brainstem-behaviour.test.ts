@@ -23,7 +23,7 @@ import { createArbiter, createBrain } from "./brain.js";
 
 const signal = new AbortController().signal;
 const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, potentiation: 0, warning: 0, habituation: 0, selfCaused: 0, startReact: 0, loadedResponses: 0, holdBack: 0, arousalStartle: 0, bodySignals: 0 };
-const AROUSAL_OFF: ArousalSettings = { resting: 0.5, sleepPressure: 0, bedtime: 0, wakeThreshold: 0.5, inertia: 0, gate: 0, quietRest: 0, frazzled: 0, stress: 0 };
+const AROUSAL_OFF: ArousalSettings = { resting: 0.5, sleepPressure: 0, bedtime: 0, wakeThreshold: 0.5, inertia: 0, gate: 0, quietRest: 0, frazzled: 0, stress: 0, orienting: 0 };
 type Mob = MinecraftStateData["nearby"]["mobs"][number];
 const mob = (type: string, dist: number, id = 1): Mob => ({ id: `entity:${id}`, type, dist, hostile: true, reachable: true });
 
@@ -247,7 +247,7 @@ describe("defence by distance through the real brain", () => {
     await tick({}, "idle");
     const out = await tick(appears(mob("zombie", 12)), "idle");
     expect(out.reflexes).toEqual([]);
-    expect(value("orienting")).toBe(1);
+    expect(value("orienting")).toBeGreaterThan(0.5);
     expect(out.winner).toMatchObject({ region: "colliculus", action: { skill: "look_at", target: "entity:1" } });
     expect(store.attended()).toMatchObject({ id: "entity:1", kind: "zombie", bearing: "ahead" });
     expect(out.candidates.some((c) => "skill" in c.action && c.action.skill === "flee")).toBe(false);

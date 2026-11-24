@@ -74,7 +74,7 @@ describe("encodeState", () => {
     });
     const state = encodeState(bot, 7, { base, current: null, deaths: 2 });
 
-    expect(state).toMatchObject({ schemaVersion: 18, tick: 7 });
+    expect(state).toMatchObject({ schemaVersion: 19, tick: 7 });
     expect(state.data).toEqual({
       time: { isNight: false, lightLevel: 15, blockLight: 0 },
       self: {
@@ -109,7 +109,7 @@ describe("encodeState", () => {
         inBlock: false,
         pushed: null,
         motion: null,
-        gaze: { id: "entity:43", yaw: 0 },
+        gaze: { id: "entity:43", yaw: 0, pitch: 0 },
         support: { on: "stone", kind: "solid", edges: 0, headroom: 3 },
         velocity: { x: 0, y: 0, z: 0, onGround: true },
         landing: null,
@@ -120,8 +120,8 @@ describe("encodeState", () => {
       nearby: {
         hazards: [{ id: "pos:0,62,5", type: "lava", dist: 5 }],
         mobs: [
-          { id: "entity:43", type: "cow", dist: 4, hostile: false, reachable: true, bearing: { side: "ahead", angle: 0 }, seen: true, closing: 0 },
-          { id: "entity:42", type: "zombie", dist: 6, hostile: true, reachable: true, bearing: { side: "right", angle: -90 }, seen: true, closing: 0 },
+          { id: "entity:43", type: "cow", dist: 4, hostile: false, reachable: true, bearing: { side: "ahead", angle: 0 }, seen: true, closing: 0, elevation: -16, height: 1, light: 15 },
+          { id: "entity:42", type: "zombie", dist: 6, hostile: true, reachable: true, bearing: { side: "right", angle: -90 }, seen: true, closing: 0, elevation: -11, height: 1, light: 15 },
         ],
         blocks: [],
         players: [],
@@ -211,7 +211,7 @@ describe("encodeState", () => {
         entities: [mob(5, "zombie", "hostile", 25, 0), mob(6, "Steve", "player", 2, 0), mob(7, "Alex", "player", 30, 0)],
       }),
     );
-    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [{ id: "entity:6", type: "player", dist: 2, bearing: { side: "right", angle: -90 }, seen: true, closing: 0 }], sudden: [], heard: [] });
+    expect(data.nearby).toEqual({ hazards: [], mobs: [], blocks: [], players: [{ id: "entity:6", type: "player", dist: 2, bearing: { side: "right", angle: -90 }, seen: true, closing: 0, elevation: -29, height: 1, light: 15 }], sudden: [], heard: [] });
   });
 
   it("dims the sky's light at night", () => {

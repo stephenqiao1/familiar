@@ -35,7 +35,7 @@ export interface Row {
  * `settings` are the bot's settings for this run, as its entry in bots.json would be (default:
  * whatever FAMILIAR_BOTS_FILE or bots.json says); `keep` leaves what it learned last run in place.
  */
-export async function play(act: (bot: { say(command: string): void }) => Promise<void>, options: { plan?: object; whole?: boolean; settings?: object; keep?: boolean } = {}): Promise<Tick[]> {
+export async function play(act: (bot: { say(command: string): void }) => Promise<void>, options: { plan?: object; whole?: boolean; settings?: object; keep?: boolean; also?: string[]; flags?: string[] } = {}): Promise<Tick[]> {
   if (!options.keep) rmSync(`data/${BOT}`, { recursive: true, force: true });
   const env = { ...process.env };
   if (options.settings) {
@@ -43,8 +43,9 @@ export async function play(act: (bot: { say(command: string): void }) => Promise
     env.FAMILIAR_BOTS_FILE = "logs/live-bots.json";
     writeFileSync(env.FAMILIAR_BOTS_FILE, JSON.stringify({ [BOT]: options.settings }));
   }
-  const brain = options.whole ? ["--engine", "jev"] : ["--engine", "echo", "--regions", NO_INSTINCT];
-  const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", ...brain, "--planner", "echo", ...(options.plan ? ["--plan", JSON.stringify(options.plan)] : []), "--manual", "--name", BOT], { stdio: ["pipe", "pipe", "pipe"], env });
+  // `also`: regions the usual list leaves out (the colliculus); `flags`: more command-line flags.
+  const brain = options.whole ? ["--engine", "jev"] : ["--engine", "echo", "--regions", [NO_INSTINCT, ...(options.also ?? [])].join(",")];
+  const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", ...brain, "--planner", "echo", ...(options.plan ? ["--plan", JSON.stringify(options.plan)] : []), ...(options.flags ?? []), "--manual", "--name", BOT], { stdio: ["pipe", "pipe", "pipe"], env });
   let output = "";
   let exited = false;
   child.stdout.on("data", (d: Buffer) => (output += d));

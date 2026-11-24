@@ -3,7 +3,7 @@ import { asleepLevel, bandOf, BANDS, depthOf, GROGGY, rateOf, restful, sleepDriv
 import type { ArousalSettings } from "./arousal-settings.js";
 import { createBedtime, type Bed } from "./bedtime.js";
 import { FULL } from "./startle.js";
-import { AROUSAL_SIGNAL, DEPTH_SIGNAL, FRAZZLED_SIGNAL, PAIN_SIGNAL, QUIET_SIGNAL, RECOVERING_SIGNAL, SLEEPY_SIGNAL, STARTLE_SIGNAL, THREAT_SIGNAL, TIRED_SIGNAL, UPPER_PAUSED_SIGNAL, UPPER_RATE_SIGNAL, URGE_SIGNAL } from "./signals.js";
+import { AROUSAL_SIGNAL, DEPTH_SIGNAL, ORIENTING_SIGNAL, FRAZZLED_SIGNAL, PAIN_SIGNAL, QUIET_SIGNAL, RECOVERING_SIGNAL, SLEEPY_SIGNAL, STARTLE_SIGNAL, THREAT_SIGNAL, TIRED_SIGNAL, UPPER_PAUSED_SIGNAL, UPPER_RATE_SIGNAL, URGE_SIGNAL } from "./signals.js";
 
 /** What the reticular formation needs to know of the moment. */
 export interface Moment {
@@ -78,6 +78,7 @@ export function createReticularRegion(options: ReticularOptions): Region {
   let arousal = settings.resting;
   let at: number | null = null;
   let health: number | null = null;
+  let novelAt = -Infinity;
   let band: Band = bandOf(arousal);
   let bandSince = -Infinity;
   let sleptSince: number | null = null;
@@ -103,7 +104,9 @@ export function createReticularRegion(options: ReticularOptions): Region {
       // The two drives.
       const threat = level(THREAT_SIGNAL);
       const startle = level(STARTLE_SIGNAL);
-      const novel = ws.attended !== null && now - ws.attended.since <= NOVEL_MS;
+      // Novelty: something just drew the eye (the colliculus's `orienting`), remembered for a moment.
+      if (settings.orienting * level(ORIENTING_SIGNAL) > 0) novelAt = now;
+      const novel = now - novelAt <= NOVEL_MS;
       const wake = wakeDrive({ alarm: options.alarmOf(ws), threat, startle, pain: level(PAIN_SIGNAL), urge: level(URGE_SIGNAL), novel, demanding: moment.demanding });
       const strength = wakeDrive({ alarm: options.alarmOf(ws), threat, startle, pain: level(PAIN_SIGNAL), urge: level(URGE_SIGNAL) });
       // Stress acts on the sleep side only: alarm, which it shares its causes with, is already in the wake drive.

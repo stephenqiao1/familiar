@@ -33,12 +33,18 @@ export function playerInstinct<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, widen: (ws: 
     questions(ws) {
       if (!minecraftDataOf(ws.state)) return [];
       return playerQuestions({
-        nextAction: buildActionQuestion(menu, ctx, withGoal(PLAYER_CONTEXT, ws), ws.current?.skill),
+        nextAction: buildActionQuestion(menu, ctx, withCloserLook(withGoal(PLAYER_CONTEXT, ws), ws), ws.current?.skill),
         target: buildTargetQuestion(thingsInView(ws.state).map((t) => t.id)),
       });
     },
     toProposals: (answers, ws) => actionProposal(answers, { acceptsTarget, ...(narrow(ws) ? NARROW : widen(ws) ? WIDE : {}) }),
   };
+}
+
+/** The context, plus one line when the eye has been caught by something small on the ground that is worth a closer look (the colliculus's lean). */
+export function withCloserLook(context: string, ws: Workspace): string {
+  const seen = ws.attended;
+  return seen?.lean === "approach" ? `${context}\nSomething small and slow is moving on the ground close by (${seen.kind}, ${seen.id}). Nothing is pressing: it may be worth a closer look.` : context;
 }
 
 /**

@@ -47,7 +47,7 @@ same tick; a signal from a region listed later is read one tick late.
 | Region | One brain part. Has a `name`, a `layer` (speed rank) and `everyMs` (0 = every tick). |
 | Proposal | A region's suggestion: an action, an `urgency` from 0 to 1, and a `reason`. |
 | Workspace | Shared memory. Holds the world state, the current goal, signals, the one thing being attended to, and recent skill events. |
-| Attended | The one thing the bot is attending to right now: `{ id, kind, bearing, salience, since }`, or null. Set by the colliculus (`ws.setAttended`); logged each tick. |
+| Attended | The one thing the bot is attending to right now: `{ id, kind, bearing, salience, since, angle, elevation, field, lean }`, or null. Set by the colliculus (`ws.setAttended`); logged each tick. |
 | Needs | The body's needs as the hypothalamus read them this tick (`ws.needs`): each need's level, how hard it presses, where it is heading and its target; the need wanted most; the body clock; stress. Null with no hypothalamus. |
 | Signal | A named level from 0 to 1 that one region shares with the others (e.g. `in_danger`, `dopamine`, `patience`, `alarm`). |
 | Goal | What the prefrontal cortex wants the bot working toward: text, steps (and how many are done), what to carry (`wants`), things to watch for (`watchFor`), responses loaded in advance (`ifThen`) and reflexes to hold back (`holdBack`). Instinct reads it each tick. |
@@ -529,12 +529,30 @@ regions that read the needs and checks they say what they said.
 ## The colliculus: where is it, and how sudden
 
 The colliculus (`colliculus` region, `packages/region-brainstem/src/colliculus-region.ts`;
-Minecraft settings in `packages/minecraft/src/brain/colliculus.ts`; per bot in `bots.json` under
-`colliculus`) turns the bot toward sights and sounds before the rest of the brain has worked out
-what they are. It runs every tick, never calls a model, and can be left out with `--regions`
-(then nothing turns the head, and `attended` stays null).
+Minecraft side in `packages/minecraft/src/brain/colliculus.ts`, `colliculus-percepts.ts` and
+`glance.ts`; per bot in `bots.json` under `colliculus`) keeps one map of the space around the
+bot, scores every place on it, picks one winner and turns the head to it, before the rest of
+the brain has worked out what the thing is. It runs every tick, never calls a model, and can be
+left out with `--regions` (then nothing turns the head, and `attended` stays null).
 
-**What the eyes and ears deliver** (state schema 15; `encode/perceive.ts`, `senses.ts`):
+Each part of it is one small file in `region-brainstem/src`:
+
+| File | What it holds | Its strength in `bots.json` |
+|---|---|---|
+| `salience.ts` | How striking a thing is, from six physical features | `sight`, `hearing`, `looming` |
+| `darkness.ts` | A thing in the dark stands out less (one table) | `darkness` |
+| `field.ts` | Up and down: the upper, lower and level fields | `elevation` |
+| `priority.ts` | The boost for a kind that is watched or wanted | `topDown`, `wants` |
+| `fixation.ts` | The brake: the gaze held on what the running skill is aimed at | `fixation` |
+| `lean.ts` | Sky and ground: avoid, freeze or approach, from physical facts | `fields` |
+| `orienting.ts` | The fast "something happened" signal | `event` |
+| `worth.ts` | Whether a look was worth it | `followUp` |
+| `habituation.ts` | Getting used to what brings nothing | `habituation` |
+
+With `elevation`, `wants`, `fixation`, `fields`, `event`, `darkness` and `followUp` all at 0 the
+colliculus is the flat map it was before (`COLLICULUS_AS_BEFORE`).
+
+**What the eyes and ears deliver** (state schema 19; `encode/perceive.ts`, `senses.ts`):
 
 | Field | What it says |
 |---|---|
@@ -543,7 +561,10 @@ what they are. It runs every tick, never calls a model, and can be left out with
 | `closing`, `speed` | How fast it is coming nearer by its own movement, and how fast it is moving at all, in blocks per second. Walking up to a still thing does not make it close in. |
 | `nearby.sudden` | Things that just changed in view: `appeared`, `started_moving`, `changed` (a block placed, broken, opened or shut within 8 blocks) or `looming` (closing at 4 blocks a second or more, or a projectile heading this way) |
 | `nearby.heard` | Sounds in the last 2 seconds: `{ type, bearing, dist, position, loudness }`. It replaces `nearby.loud`. |
-| `self.gaze` | What the head is pointed at: the nearest seen thing within 12 degrees of straight ahead (or null), and the compass heading in degrees |
+| `self.gaze` | What the head is pointed at: the nearest seen thing within 12 degrees of straight ahead (or null), the compass heading in degrees, and `pitch` (degrees up) |
+| `elevation`, `height`, `light` (on each nearby mob, player and listed block) | Degrees above or below eye level, from the eyes to the thing's middle; how tall it is in blocks; the light where it stands, 0 to 15. Things in `nearby.sudden` carry `elevation` too. |
+
+`seen` still goes by the sideways angle only: the bot sees what is overhead without looking up.
 
 *What can be heard.* On 1.21.11 Mineflayer names sounds wrongly (a cow's hurt arrives as
 "coral_block.step"), so nothing is told apart by its sound name. What arrives reliably is used:
@@ -575,12 +596,52 @@ arithmetic (`salience.ts`) takes the six features and nothing else, the Minecraf
 them from physical facts only (`featuresOf`), and tests fail if a kind, type or hostile field
 reaches either.
 
-**Bias from above** (`topDown`). A kind named in the goal's `watchFor` gets 0.4 added. The
-threshold falls with alarm (by up to 0.25) and arousal, and rises by 0.3 during a skill that
+**Two dimensions** (`elevation`; `field.ts`). Every thing on the map has an angle and an
+elevation in degrees. More than 20 degrees up is the `upper` field, more than 20 down the
+`lower`, else `level`. (A pig two blocks off on flat ground is in the lower field: the eyes are
+1.6 blocks up.) `attended` carries `angle`, `elevation` and `field`; the trace gives the `jump`
+the head would make.
+
+**Sight in the dark** (`darkness`; `darkness.ts`). What is seen is scaled by the light where the
+thing stands. In complete darkness nearness keeps 0.2 of its weight, suddenness 0.5, motion 0.7
+and looming 0.8: a still thing is lost first, a moving one last. Sound and touch are not scaled.
+
+**Priority: salience plus what the bot wants** (`topDown`, `wants`; `priority.ts`). Salience
+stays physical. A kind gets up to 0.4 added, × the larger of "watched" (the goal's `watchFor`
+names it: 1) and "wanted" (how much dopamine wants that kind right now, 0 to 1, from its cues).
+So a bot short of food has its eye drawn to what it has learned gives food, with no goal
+asking. Wanting is worked out once, by dopamine, and handed over (`wants.ts` in `run-bot`). A
+want never wins against a pressing thing (touch, or looming of 0.5 or more).
+The threshold falls with alarm (by up to 0.25) and arousal, and rises by 0.3 during a skill that
 marks itself `demanding`. Asleep, only touch and sounds of loudness 0.5 or more get through.
 
-**Habituation** (`habituation`). A thing that wins a look and brings nothing (no damage, no
-reward) counts 0.8 as much next time, per thing and per kind-at-place (to 8 blocks). What was lost
+**Holding the gaze on the task** (`fixation`; `fixation.ts`). While the running skill is aimed at
+a thing (it has a target, and is not the look itself), that thing is fixated: anything else
+must beat the threshold by a further 0.3 to win, unless it is pressing. The fixated thing itself
+is never looked at again or got used to. With a demanding skill the two raises never exceed 0.4
+in all. The trace says when the brake stopped a winner (`brake`).
+
+**Sky and ground** (`fields`; `lean.ts`). From where a thing is and how it moves, never from what
+it is, the winner may carry a `lean` on `attended`:
+
+| Lean | When (the table in `lean.ts`) | What is done with it |
+|---|---|---|
+| `avoid` | In the upper field and looming (0.5 or more) | The defence circuit, when it flees and the threat is not yet on the bot, runs for a roof (`take_cover`) instead of running in the open |
+| `freeze` | In the upper field, crossing at 1 block a second or more, coming nearer no faster than 0.5 | With nothing coming, the defence circuit holds still and watches (`hold_still`) |
+| `approach` | Not in the upper field, no taller than 1 block, moving but no faster than 2 blocks a second, within 6 blocks, not coming at the bot, and no need for safety pressing | The look is held up to 3 seconds, and Jev is told in one line that it may be worth a closer look |
+| none | Anything else | As before |
+
+The lean follows a held thing from tick to tick. It is advice: the two defence lines are in
+`brain/defence.ts` (`defence.lean` in `bots.json`), the defence's own choice comes first, and a
+lean never overrides a threat that is on the bot. Because the reflexes run before the
+colliculus, the flee rule also asks the same table about its own threat (`leanFromState`), so
+the first tick of a dive is not lost.
+
+**Habituation** (`habituation`, `followUp`; `worth.ts`). A look was worth it if, while the thing
+was attended or within 2 seconds after, the body was hurt or rewarded, a skill was started that
+targets it, a need moved by 0.1 or more, or the defence circuit changed mode because of it. A
+thing that was worth the look is not got used to and gets back what it had lost; each release is
+logged with why. A thing that wins a look and brings nothing counts 0.8 as much next time, per thing and per kind-at-place (to 8 blocks). What was lost
 comes back over about a minute, and at once if the thing does something new (starts moving,
 comes fast, changes). The thing just looked at cannot win again for 3 seconds unless it looms or
 touches.
@@ -602,11 +663,24 @@ striking. At most one new look per second.
   distance: the thing itself if that is a threat, else the nearest threat in sight (most likely
   what threw it). There is no list of which mobs shoot. (The defence circuit reads looming from
   the state, so it holds with `colliculus.looming` at 0 too.)
-- Shares `orienting` (1 on the tick of a new winner), as the brainstem did.
+- *The fast "something happened" signal* (`event`; `orienting.ts`): `orienting` is the new
+  winner's strength (its salience, up to 1) and fades to 0 within half a second. Something the
+  bot caused itself is looked at but sends none: a block it just broke or placed, a creature it
+  struck (as for the startle), and anything at the target of its running or just-ended skill
+  (the lid of the chest it opened). It is not a
+  reward and raises no alarm. Its readers, each with its own strength:
+
+  | Reader | What it does | Strength |
+  |---|---|---|
+  | Dopamine | A run that ends within 2 seconds of it is learned from at no less than that share of the usual step (`noticed`); it pays nothing | `focus.eventLearning` |
+  | Acetylcholine | One of 0.5 or more raises focus for 5 seconds, fading (`justNoticed`) | `focus.orienting` |
+  | The reticular formation | Novelty for 2 seconds (it used to read `attended.since`) | `arousal.orienting` |
 
 **When nothing stands out** (`scanning`). Travelling, the head looks where the body is going.
 Standing or idling, every 4 seconds it glances toward the compass direction looked at longest
-ago, so things behind get seen. The `idle` skill no longer looks around itself.
+ago, so things behind get seen. With `elevation` on, every fourth glance goes up or down: the
+sky when outdoors; under a roof, the ceiling and the floor ahead in turn (`glance.ts`). The
+`idle` skill no longer looks around itself.
 
 **Seeing only what is in view** (`fieldOfView`, off by default; `brain/field-of-view.ts`). With
 it on, the deciding layers (instinct, planner) are told only about things that are seen, heard
@@ -616,11 +690,16 @@ or within 2 blocks. A thing seen lately stays known for 10 seconds after it leav
 full state. The bot `Wary` in `bots.json` has it on.
 
 **In the trace** (`colliculus`): `threshold`, `top` (the three most striking things, each with
-its parts), `winner` (and why), `look` (target, urgency, and `how`: alongside, takes over or
-competes), `scan`, `damped` and `worstMs` (the map should stay under 2 ms). `pnpm brain-report`
-has a COLLICULUS section: looks per minute, what drew them (sight, sound, touch, looming), the
-median time from event to head turned, how the looks ran, what was habituated to, and
-"blindsided" events (hurt by something not attended in the 5 seconds before).
+its parts, angle, elevation, field, light, and its boost and where that came from), `winner`
+(why, its field, the jump, its lean, what kind of boost drew it), `look` (target, urgency, and
+`how`: alongside, takes over or competes), `brake` (what the held gaze stopped), `fixated`,
+`released` (was the look worth it, and why), `worthAfter`, `orienting`, `scan`, `damped` and
+`worstMs` (the map should stay under 2 ms). `pnpm brain-report` has a COLLICULUS section: looks
+per minute, what drew them, the median time from event to head turned, how the looks ran, what
+was habituated to, "blindsided" events, and for the two-dimensional map: looks by field, leans
+and what the defence circuit did with them, winners stopped by the brake, looks drawn by a
+want, and how often a look was worth it. `pnpm colliculus-check [--runs 3]` runs the live
+scenes (the map's own are in `scripts/colliculus-map-scenes.ts`).
 
 ## Balance and posture
 
@@ -906,6 +985,11 @@ in `data/<name>/`.
 | Add a sound the bot can hear | `packages/minecraft/src/senses.ts`: listen for the event, call `hear("<type>", position)`, and give it a loudness in `LOUD` |
 | Replace the stand-in for footsteps | `unseenHostileHeard` in `packages/minecraft/src/encode/perceive.ts` |
 | Make the bot know only what it sees | `bots.json`: `colliculus.fieldOfView: 1` |
+| Make a bot more distractible while it works | `bots.json`: lower `colliculus.fixation` (0: nothing holds its gaze); the size of the brake is `BRAKE` in `region-brainstem/src/fixation.ts` |
+| Change what counts as overhead | `FIELD_BEYOND` in `region-brainstem/src/field.ts` (degrees up and down); what a dive, a fly-over or a small thing is: the `LEAN` table in `lean.ts` |
+| Stop wants drawing the eye | `bots.json`: `colliculus.wants: 0` (a goal's watched kinds still do; `topDown: 0` stops both) |
+| Stop the defence taking the colliculus's advice | `bots.json`: `defence.lean: 0`; no leans at all: `colliculus.fields: 0` |
+| Change what darkness hides | `LOST_IN_DARK` in `region-brainstem/src/darkness.ts`; off: `colliculus.darkness: 0` |
 | Add a reason to refuse an action | `packages/minecraft/src/posture/rules.ts` (`breakReason`, `placeReason` or `moveReason`: return a plain sentence, or null) |
 | Make something new ask the check | Call `postureCheck(bot, "<action>", { kind: "break" \| "place" \| "move", ... })` before acting, and return its reason as the failure |
 | Change what the bot is born knowing about surfaces | `bots.json`: `posture.innateLoose` (an empty list makes it learn every loose block by digging under it) |

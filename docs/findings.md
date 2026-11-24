@@ -147,6 +147,115 @@ entries named in brackets hold the evidence.*
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
 
+## The colliculus: a map with up and down, wants, a brake, sky and ground
+
+*Built and run live 2026-11-23 and 24.*
+
+**The problem.** The colliculus scored things by six physical features on a flat map. It knew
+left, right, ahead and behind, never up or down. Only a goal's `watchFor` could bias it, so a
+hungry bot's eye was drawn no more to food than a fed one's. Nothing held its gaze on what it
+was working on. Something diving from above and something small on the ground were treated
+alike. `orienting` was 1 or 0 and had no reader. And a look was only "worth it" if the bot was
+hurt or rewarded.
+
+**The rule now** (each part one small file in `region-brainstem/src`, each with a strength in
+`colliculus` in `bots.json`; all at 0 is the map as it was).
+
+1. **Up and down** (`elevation`): every thing has an elevation and a field (upper, lower,
+   level); glances go to the sky, ceiling and floor too; the state carries `elevation`,
+   `height`, `light` and the head's `pitch` (schema 19).
+2. **Sight in the dark** (`darkness`): a still thing loses most, a looming one least.
+3. **Priority from wants** (`wants`): a kind dopamine wants right now gets the boost a watched
+   kind gets.
+4. **The brake** (`fixation`): while a skill is aimed at a thing, others need 0.3 more to win.
+5. **Sky and ground** (`fields`): a lean of avoid, freeze or approach from physical facts, which
+   the defence circuit and Jev take as advice (`defence.lean`).
+6. **A graded `orienting`** (`event`), read by dopamine, acetylcholine and the reticular region.
+7. **A fairer "did anything follow?"** (`followUp`).
+
+**Seen live** (`pnpm colliculus-check --runs 3`; each new scene three times, all 21 runs pass).
+
+| Scene | Field | Lean | What won and why | What the defence circuit did |
+|---|---|---|---|---|
+| `overhead`: a phantom dives from 17 blocks up and out | upper | avoid | The phantom (looming, 0.74 to 1.08); head up 44 degrees | Fled to the roof 7 blocks off and ended under it (3 of 3). With `defence.lean` 0: fled in the open (3 of 3) |
+| `circling`: a bat on an arc 10 blocks out, 14 up | upper | freeze | The bat (it started moving, 0.59 to 0.68); head up 53 degrees | Held still and watched (3 of 3), its own choice staying "none". With the lean ignored: nothing |
+| `ground`: a chicken walking a block a second, 4 blocks off | level | approach (a cow: none) | The chicken (0.71); held 2.5 to 3.5 s, the cow 1.5 to 2 s; Jev was told | Nothing |
+| `hungry_eye`: a learned chest, a bell and a cow, no goal watching | level | none | Out of bread, the first look went to the chest 0.5 s later, "drawn by a wanted kind" (0.51). Stocked: no look, no boost | Nothing |
+| `on_task`: walking to a far spot, a pig appears to the side, then a hit | level | none | The pig (0.67) was stopped by the brake (needed 0.75); the hit turned the head (3.25). Brake off: the pig drew a look | Nothing |
+| `dark`: a still cow 4 blocks off | level | none | Its nearness counts 0.19 by day (light 1.0) and 0.08 at night (light 0.27) | Wary at night |
+| `learning`: a pig moves just before a trip to the chest ends | level | none | The trip, 0.09 off what was expected, was learned from at 0.70 to 0.76 of the step; with `focus.eventLearning` 0 at 0.44 | Nothing |
+| The eight existing colliculus scenes | | | Pass | |
+| `startle-check` (9 scenes) | | | Pass | |
+| `defence-check` (11 scenes) | | | 10 pass; `around` fails, and fails the same on the two commits before this work (below) | |
+
+The slowest map tick in the batch was 1.64 ms; one earlier single run showed 2.11 ms.
+
+**What only showed up live.**
+- **The lean reached the defence a tick late.** The reflexes run before the colliculus, and a
+  flee for a dive is proposed for one tick: by the time `attended.lean` said "avoid", the bot
+  was already running in the open. The flee rule now also asks the same table about its own
+  threat from the state (`leanFromState`). The lean is still worked out in two places on that
+  first tick (problem 5).
+- **A thing's own noise took the look from it.** A chicken's clucking arrives as a sound at its
+  place, a different thing on the map, which won after a second and ended the longer hold. The
+  scene's animals are silent; in play, a noisy small animal is held for less than 3 seconds.
+- **The bot's own chest lid sent `orienting`.** Opening a chest is a sound at the chest, and the
+  startle's "self-caused" covers digging, placing and striking, not opening. For the signal
+  only, anything at the target of the running or just-ended skill now counts as its own doing.
+  The startle's rule is unchanged.
+- **A still chest got the lean "approach"** (small, close, not coming at the bot). The row now
+  asks for some movement.
+- **A new thing is seen up to 2.5 s after the server makes it**, but one that starts moving is
+  seen within a tick or two. Scenes that need a timed event move a thing; they do not summon it.
+- **While a skill is aimed at a thing, a thing that appears rarely sends `orienting`**: the
+  brake stops it winning (0.67 against 0.75). So the learning effect is mostly for events before
+  a short skill, or strong ones.
+- **Short of bread the bot fetches it by itself at once**, so a typed `do take_items` in a scene
+  arrives second and fails with "cannot run". The scenes let it make its own trip.
+
+**Limits.**
+- **Dopamine has no learning window to open.** It was removed with the acetylcholine redesign.
+  The equivalent was built: a run that ends within 2 s of an `orienting` is learned from at no
+  less than that strength of the usual step. A big surprise is already learned in full, so the
+  event only matters for runs that went about as expected.
+- **A friend sprinting at the bot at eye level is as looming as before.** The lean tells a dive
+  from above from a charge on the ground, and a small slow thing from the rest. It says nothing
+  about a fast thing at eye level, so that limit stands.
+- **"Freeze" is for anything crossing the sky, harmless or not.** A bat makes the bot hold
+  still for about 2.5 s. Habituation is what stops it: the thing counts 0.8 as much each time.
+- **"Avoid" only changes how the bot flees.** If the defence circuit does not choose to flee
+  (the diving thing is not a threat by its own sizing up), nothing is done but the look.
+- **Cover is the nearest standable spot with a solid block within 4 above, within 10 blocks.**
+  It is found by plain block checks, not by whether the diving thing can get in. With none
+  close, the bot flees as before.
+- **The bot still sees what is overhead without looking up.** `seen` goes by the sideways angle
+  only; elevation changes the field and the lean, not what is in view.
+- **A thing on flat ground close by is in the lower field** (the eyes are 1.6 blocks up): a pig 2
+  blocks off sits at about −30 degrees.
+- **The lean is worked out when a thing wins and while it is held.** A thing that never wins a
+  look (below the threshold, or used to) gives no lean.
+- **A want draws the eye only to kinds dopamine has a cue for**: things in view it has learned
+  to aim a skill at. In the scene the pull itself was switched off (`personality.wanting` 0);
+  with it on, the trip starts the same tick and the chest becomes the fixated thing, so the
+  look is not made.
+- **A need that moves for its own reasons makes a look "worth it".** Hunger ticking down 0.1
+  while a cow is attended counts. The 0.1 is `NEED_MOVED`.
+- **`TAKE_OVER_URGENCY` is as needed as before.** The brake acts while a skill with a target
+  runs; the take-over is for when nothing runs.
+- **`followUp` is a seventh strength**, not in the six asked for, so that Part 6 can be turned
+  off too. `defence.lean`, `arousal.orienting`, `focus.orienting` and `focus.eventLearning` are
+  the readers' own.
+- **The state is bigger again**: three more numbers on each nearby thing.
+- **The `colliculus-check` scenes now run with the hypothalamus**; the bot does not glance
+  around in the map's scenes (`scanning` 0), so that what is in view is known.
+
+**Found on the way, not from this change: `defence-check around` fails.** A journey past a husk
+that has not noticed it is interrupted beside the husk and the bot freezes; it never arrives
+(8 of 8 runs: with this change, with every new strength at 0, on the commit before it and on
+the one before that). What interrupts the journey was not found. Open.
+
+**Status.** Built. Open: the limits above, and `around`.
+
 ## Hypothalamus: one owner for the needs, and what it adds
 
 *Built and run live 2026-11-22 and 23.*
@@ -1412,20 +1521,29 @@ whole region call was slow (most likely the runtime pausing, not the map). The l
   sight (a dispenser, a shooter behind a wall) it does nothing but look and take alarm.
 - **Anything fast is looming, friend or not.** A wolf or a player sprinting at the bot (over 4
   blocks a second) raises alarm and can set off a retreat. That is the price of not knowing what
-  things are; a soft reflex and habituation are what temper it.
+  things are; a soft reflex and habituation are what temper it. *Not narrowed by the lean
+  (2026-11-24): the lean tells a dive from above from a charge at eye level, and a small slow
+  thing on the ground from the rest, but a friend sprinting at the bot at eye level is as
+  looming as before. See "The colliculus: a map with up and down".*
 - **The stand-in for footsteps knows what is hostile.** It is the one identity leak, kept in one
   function. A silent, unseen friendly mob is not heard; a hostile behind a wall within 8 blocks is.
 - **"Seen" is a ray to the middle of the thing.** A mob whose feet show under a ledge is unseen;
   one whose middle is visible through a one-block gap is seen. Leaves and other see-through
-  blocks do not block sight at all. Darkness does not reduce it.
+  blocks do not block sight at all. Darkness does not reduce it (since 2026-11-24 it lowers how
+  much a seen thing stands out, not whether it is seen).
 - **`changed` covers blocks placed or broken and doors within 8 blocks**, including the bot's
   own digging and placing, which then draw its own eye for a moment (it is usually looking there
-  already). Crops growing, levers and redstone are not changes.
+  already; since 2026-11-24 such a look sends no `orienting` signal). Crops growing, levers and redstone are not changes.
 - **Habituation's "nothing followed" is only damage or a reward** while the thing was attended.
   A thing that led to something useful in a way dopamine did not reward is got used to all the
-  same. Kind-at-place uses 8-block squares worked out from bearing and distance, so it is rough.
+  same. *Closed 2026-11-24 (`colliculus.followUp`): a skill started on the thing, a need that
+  moved, or a change of defence because of it also count, up to 2 seconds after the look.*
+  Kind-at-place still uses 8-block squares worked out from bearing and distance, so it is rough.
 - **Glances are to eight fixed compass directions at eye level.** The bot never looks up or
-  down on its own, and does not glance while travelling.
+  down on its own, and does not glance while travelling. *Partly closed 2026-11-24
+  (`colliculus.elevation`): every fourth glance goes to the sky, or under a roof to the ceiling
+  or the floor ahead, and a look at a thing overhead turns the head up. It still does not glance
+  while travelling.*
 - **The field of view filters only mobs, players and listed blocks.** Hazards, the base, the
   inventory and memory are told as before. "Heard" means a sound within a block of where the
   thing stands. With it on, Jev's target list shrinks, which changes what it picks; the planner

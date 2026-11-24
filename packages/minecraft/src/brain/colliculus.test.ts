@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
 import { fakeData, fakeState, inView } from "../encode/state.test-helper.js";
 import { createScan, featuresOf, perceptsOf, playerColliculus, type Physical } from "./colliculus.js";
 import { defenceReflexes } from "./defence.js";
+import { withCloserLook } from "./instinct.js";
 
-const still: Physical = { dist: 8, angle: 0, closing: 0, speed: 0, sudden: false, incoming: false, loudness: 0, touch: false };
+const still: Physical = { dist: 8, angle: 0, elevation: 0, size: 0, closing: 0, speed: 0, sudden: false, incoming: false, loudness: 0, touch: false };
 const mob = (id: number, type: string, dist: number, over: Partial<ReturnType<typeof inView>> & { hostile?: boolean; speed?: number } = {}) => ({ id: `entity:${id}`, type, dist, hostile: false, reachable: true, ...inView(over), ...over });
 const salience = (p: Partial<Physical>) => salienceOf(featuresOf({ ...still, ...p }), "sight", DEFAULT_COLLICULUS);
 
@@ -13,7 +14,7 @@ describe("featuresOf", () => {
   it("takes physical facts only: nothing in its input says what the thing is", () => {
     const identity = ["kind", "type", "name", "hostile", "friendly", "reachable", "id"];
     expect(Object.keys(still).filter((key) => identity.includes(key))).toEqual([]);
-    expect(Object.keys(still).sort()).toEqual(["angle", "closing", "dist", "incoming", "loudness", "speed", "sudden", "touch"]);
+    expect(Object.keys(still).sort()).toEqual(["angle", "closing", "dist", "elevation", "incoming", "loudness", "size", "speed", "sudden", "touch"]);
     expect(Object.keys(featuresOf(still)).sort()).toEqual([...FEATURES].sort());
   });
 
@@ -150,5 +151,86 @@ describe("looming in the defence reflexes and in alarm", () => {
     expect(check({ nearby: { mobs: [charging], sudden: [{ ...arrow, id: "entity:2", dist: 15 }] } })).toMatchObject({ action: { skill: "flee", target: "entity:2" } });
     // A projectile with nothing hostile in sight: nothing to run from.
     expect(check({ nearby: { sudden: [arrow] } })).toBeNull();
+  });
+});
+
+describe("up and down", () => {
+  it("a seen thing carries its angle, elevation, light and the plain facts the lean goes by", () => {
+    const bat = { ...mob(4, "bat", 10, { bearing: { side: "left", angle: 40 } }), elevation: 50, height: 0.9, light: 3, speed: 5 };
+    const [p] = perceptsOf(fakeData({ nearby: { mobs: [bat] } }));
+    expect(p).toMatchObject({ id: "entity:4", angle: 40, elevation: 50, light: 0.2, shape: { dist: 10, across: 5, closing: 0, height: 0.9 } });
+    // Nothing in the facts says what it is.
+    expect(Object.keys(p!.shape!).sort()).toEqual(["across", "closing", "dist", "height", "size"]);
+  });
+
+  it("something looming that is on no list carries its elevation; a block the bot itself changed is marked as its own doing", () => {
+    const arrow = { id: "entity:9", what: "looming" as const, bearing: { side: "ahead" as const, angle: 0 }, dist: 12, elevation: 35 };
+    const dug = { id: "pos:1,64,2", what: "changed" as const, bearing: { side: "ahead" as const, angle: 0 }, dist: 2 };
+    const percepts = perceptsOf(fakeData({ nearby: { sudden: [arrow, dug] } }), () => true, (id) => id === "pos:1,64,2");
+    expect(percepts[0]).toMatchObject({ id: "entity:9", elevation: 35 });
+    expect(percepts[0]!.own).toBeUndefined();
+    expect(percepts[1]).toMatchObject({ id: "pos:1,64,2", own: true });
+  });
+
+  it("glances cover up and down: the sky outdoors, the ceiling and the floor under a roof; never with elevation at 0", () => {
+    const heights = (skyLight: number, upDown: number) => {
+      const scan = createScan();
+      return Array.from({ length: 16 }, (_, i) => Number(scan(fakeData({ self: { skyLight, gaze: { id: null, yaw: 0 } } }), 1000 * (i + 1), upDown).split(",")[1]));
+    };
+    const eye = 64; // the fake bot stands at y 63
+    expect(new Set(heights(15, 0))).toEqual(new Set([eye]));
+    expect(heights(15, 1).filter((y) => y > eye).length).toBe(4);
+    expect(heights(15, 1).filter((y) => y < eye).length).toBe(0);
+    const under = heights(0, 1);
+    expect(under.filter((y) => y > eye).length).toBe(2);
+    expect(under.filter((y) => y < eye).length).toBe(2);
+    // One glance at a time: every call names one place.
+    expect(under.every(Number.isFinite)).toBe(true);
+  });
+});
+
+describe("the lean, as the defence circuit and instinct take it", () => {
+  const rules = defenceReflexes({ recuperate: 1, lean: 1 });
+  const rule = (name: string) => rules.find((r) => r.name === name)!;
+  const check = (name: string, patch: Parameters<typeof fakeState>[0], lean: "avoid" | "freeze" | "approach" | undefined, reflexes = rules) => {
+    const store = createWorkspace();
+    store.update(fakeState(patch), null);
+    if (lean) store.viewFor("colliculus").setAttended({ id: "entity:7", kind: "phantom", bearing: "ahead", salience: 1, since: 0, field: "upper", lean });
+    return reflexes.find((r) => r.name === name)!.check(store.viewFor("reflex"));
+  };
+  const diving = { ...mob(7, "phantom", 12, { hostile: true }), closing: 7 };
+  const looming = { id: "entity:7", what: "looming" as const, bearing: { side: "ahead" as const, angle: 0 }, dist: 12 };
+
+  it("fleeing from something diving from above goes for cover; with no lean, or the lean ignored, it runs as before", () => {
+    const patch = { nearby: { mobs: [diving], sudden: [looming] } };
+    expect(check("defence_flee", patch, "avoid")).toMatchObject({ action: { skill: "take_cover", target: "entity:7" }, urgency: 0.7 });
+    expect(check("defence_flee", patch, undefined)).toMatchObject({ action: { skill: "flee", target: "entity:7" }, urgency: 0.7 });
+    expect(check("defence_flee", patch, "avoid", defenceReflexes())).toMatchObject({ action: { skill: "flee" } });
+    expect(rule("defence_flee")).toBeDefined();
+  });
+
+  it("a lean never overrides a threat that is on the bot", () => {
+    const onIt = { nearby: { mobs: [{ ...mob(7, "phantom", 2, { hostile: true }) }] } };
+    const flee = check("defence_flee", onIt, "avoid");
+    const fight = check("defence_fight", onIt, "avoid");
+    expect([flee, fight].filter(Boolean).map((p) => (p!.action as { skill: string }).skill)).not.toContain("take_cover");
+    expect(check("defence_freeze", onIt, "freeze")).toBeNull();
+  });
+
+  it("something crossing overhead with nothing coming: hold still and watch; never while something is coming", () => {
+    expect(check("defence_freeze", {}, "freeze")).toMatchObject({ action: { skill: "hold_still", target: "entity:7" }, urgency: 0.5 });
+    expect(check("defence_freeze", {}, undefined)).toBeNull();
+    expect(check("defence_freeze", {}, "freeze", defenceReflexes())).toBeNull();
+    expect(check("defence_freeze", { nearby: { mobs: [diving], sudden: [looming] } }, "freeze")).toBeNull();
+  });
+
+  it("a thing worth a closer look is one line in what Jev is told", () => {
+    const store = createWorkspace();
+    store.update(fakeState({}), null);
+    expect(withCloserLook("context", store.viewFor("instinct"))).toBe("context");
+    store.viewFor("colliculus").setAttended({ id: "entity:3", kind: "rabbit", bearing: "left", salience: 0.7, since: 0, lean: "approach" });
+    const told = withCloserLook("context", store.viewFor("instinct"));
+    expect(told.split("\n")).toHaveLength(2);
+    expect(told).toContain("rabbit");
   });
 });

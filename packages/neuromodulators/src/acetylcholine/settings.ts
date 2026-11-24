@@ -20,6 +20,10 @@ export interface FocusSettings {
   cuePulse: number;
   /** Effect f: how fast a run is learned from goes by how surprising it was (see attentionTo). */
   surpriseLearning: number;
+  /** A thing that stood out strongly (the colliculus's `orienting`) raises focus for a few seconds. */
+  orienting: number;
+  /** A run that ends just after something stood out is learned from at up to the full step (see `noticed` in the dopamine region). */
+  eventLearning: number;
 }
 
 export const FOCUS_MIN = 0.05;
@@ -35,9 +39,11 @@ export const DEFAULT_FOCUS: FocusSettings = {
   consolidation: 1,
   cuePulse: 1,
   surpriseLearning: 1,
+  orienting: 1,
+  eventLearning: 1,
 };
 
-const EFFECTS = ["sensesVsMemory", "attention", "memoryWrite", "consolidation", "cuePulse", "surpriseLearning"] as const;
+const EFFECTS = ["sensesVsMemory", "attention", "memoryWrite", "consolidation", "cuePulse", "surpriseLearning", "orienting", "eventLearning"] as const;
 
 /** What is wrong with the settings, or null if they are fine. */
 export function focusProblem(s: FocusSettings): string | null {

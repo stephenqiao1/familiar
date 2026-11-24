@@ -1,4 +1,5 @@
 import { createValueWeightedArbiter } from "@familiar/arbiter";
+import { createWantsInView } from "./wants.js";
 import { COMPETE, createHypothalamusRegion, DEFAULT_DRIVES, describeDrives, DESPERATE_SIGNAL, pressing, STRESS_SIGNAL, UNMET_SIGNAL, type DriveSettings, type Need, type TargetMemory } from "@familiar/region-hypothalamus";
 import { createDriveWatch, createReliefIndex, stressOnOutlook } from "./drives.js";
 import type { Arbiter, Candidate, DecisionEngine, NeedReading, Planner, Region, Skill, State, Workspace } from "@familiar/contracts";
@@ -63,6 +64,8 @@ import {
   WANT_SIGNAL,
   createDopamineRegion,
   createFocusRegion,
+  justNoticed,
+  type Cue,
   createNoradrenalineRegion,
   gettingNowhere,
   CUE_SIGNAL,
@@ -97,6 +100,7 @@ import {
 import {
   ANALGESIA_SIGNAL,
   AROUSAL_SIGNAL,
+  ORIENTING_SIGNAL,
   WARY_SIGNAL,
   createBrainstemRegion,
   createColliculusRegion,
@@ -239,6 +243,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
   // Over-aroused, instinct is offered fewer options (the far side of the inverted U).
+  const wants = createWantsInView();
   const instinct = playerInstinct(skills, ctx, (ws) => noradrenaline.widerOptions > 0 && (ws.signals[SEARCH_SIGNAL]?.value ?? 0) > WIDER_OPTIONS_ABOVE, parts.showPrimitives, (ws) => up(ws, FRAZZLED_SIGNAL));
   // The graded gate: with arousal low the deciding layers are called less often (never while asleep).
   // A call a signal has asked for at once (an alarm interrupt, a plan that just failed) is never held.
@@ -246,7 +251,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const held = (gate: keyof typeof gates, ws: Workspace, urgent: boolean) => gates[gate].hold(level(ws, UPPER_RATE_SIGNAL, 1), ws.state.timestamp, urgent);
   const all: Region[] = [
     createReflexRegion({
-      rules: createPlayerReflexes(parts.reflexes, posture.righting, defence),
+      // The lean is the colliculus's to give: with its sky and ground off (or the colliculus left out) the defence takes none.
+      rules: createPlayerReflexes(parts.reflexes, posture.righting, { ...defence, lean: hasColliculus && colliculus.fields > 0 && colliculus.elevation > 0 ? defence.lean : 0 }),
       ...(gainOf ? { gainOf } : {}),
     }), //                                                                                  layer 0, every tick
     // The medulla: vital signs, and the graded urges of upkeep. Left out (--regions), the hard reflexes above still fire.
@@ -290,8 +296,10 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     }), //                                                                                  layer 0, every tick
     // The colliculus: the fast map of where things are and how sudden. It turns the head; left out (--regions), nothing does.
     createColliculusRegion({
-      ...playerColliculus(skills, parts.sameTime),
+      ...playerColliculus(skills, parts.sameTime, colliculus.elevation),
       settings: colliculus,
+      // What dopamine wants in view right now draws the eye too (worked out there, last tick).
+      wantOf: (kind) => wants.of(kind),
       alarmOf,
       arousalOf: (ws) => level(ws, AROUSAL_SIGNAL, 0.5),
       waryOf: (ws) => level(ws, WARY_SIGNAL),
@@ -299,7 +307,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       spoken: (ws) => up(ws, REFLEX_SIGNAL) || level(ws, STARTLE_SIGNAL) > FULL || up(ws, LOADED_SIGNAL),
     }), //                                                                                  layer 0, every tick
     createFocusRegion({
-      inputs: playerFocus(memory),
+      // A thing that stood out strongly raises focus for a moment.
+      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : [])],
       settings: focus,
       asleep,
       moved,
@@ -316,8 +325,10 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       asleep,
       // A skill that lists no body parts (idle) is rest; one that does not say uses the whole body.
       usesBody: (name) => skills.find((s) => s.name === name)?.parts?.length !== 0,
-      // A learning window opens on a notable reward, an alarm jump or a cue.
+      // How fast a run is learned from goes by its surprise; one that ends just after something stood out is learned from in full.
       surpriseLearning: focus.surpriseLearning,
+      noticed: (ws) => focus.eventLearning * level(ws, ORIENTING_SIGNAL),
+      onCues: wants.set,
     }), //                                                                                  layer 0, every tick
     createNoradrenalineRegion({
       // Alarm is read from the same needs; search from whether a pressing one is being answered.
@@ -400,6 +411,10 @@ export function createPlayerDopamine(parts: {
   surpriseLearning?: number;
   /** Asleep: cues propose nothing. Default: never. */
   asleep?(ws: Workspace): boolean;
+  /** Something notable just happened, 0 to 1: runs that end just after are learned from in full. Default: never. */
+  noticed?(ws: Workspace): number;
+  /** Told each tick what is wanted in view. Default: nobody. */
+  onCues?(cues: Cue[]): void;
   /** Whether a skill uses any part of the body: time on one that does not is rest, not effort. Default: every skill does. */
   usesBody?(skill: string): boolean;
 }): Region {
@@ -431,6 +446,8 @@ export function createPlayerDopamine(parts: {
     skillsToward: parts.skillsToward,
     ...(parts.asleep ? { asleep: parts.asleep } : {}),
     ...(parts.surpriseLearning === undefined ? {} : { surpriseLearning: parts.surpriseLearning }),
+    ...(parts.noticed ? { noticed: parts.noticed } : {}),
+    ...(parts.onCues ? { onCues: parts.onCues } : {}),
   });
 }
 

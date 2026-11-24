@@ -44,6 +44,22 @@ describe("createReticularRegion", () => {
     expect(await region.run(createWorkspace().viewFor("reticular"), signal)).toEqual({ proposals: [] });
   });
 
+  describe("novelty", () => {
+    it("something that just drew the eye (orienting) counts as novelty for 2 seconds; with the strength at 0 it does not", async () => {
+      const wakeOf = (out: Awaited<ReturnType<ReturnType<typeof bot>["tick"]>>) => (out.trace as { wake: { value: number; by: string } }).wake;
+      const b = bot();
+      expect(wakeOf(await b.tick()).by).toBe("nothing");
+      b.set("orienting", 0.6);
+      expect(wakeOf(await b.tick())).toEqual({ value: 0.15, by: "novelty" });
+      b.set("orienting", 0);
+      expect(wakeOf(await b.tick(day, null, 1500)).by).toBe("novelty");
+      expect(wakeOf(await b.tick(day, null, 1000)).by).toBe("nothing");
+      const deaf = bot({ orienting: 0 });
+      deaf.set("orienting", 1);
+      expect(wakeOf(await deaf.tick()).by).toBe("nothing");
+    });
+  });
+
   describe("the arousal level", () => {
     it("rests at 0.5 awake by day, with the gate fully open", async () => {
       const { run, value } = bot();

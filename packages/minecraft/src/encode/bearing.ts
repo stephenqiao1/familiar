@@ -22,6 +22,20 @@ export function bearingOf(from: Vec3, yaw: number, to: Vec3): Bearing {
   return { side: wide <= AHEAD_WITHIN ? "ahead" : wide >= BEHIND_BEYOND ? "behind" : angle > 0 ? "left" : "right", angle };
 }
 
+/** How far above (positive) or below eye level a point is, in whole degrees, from eyes at `eyes`. */
+export function elevationOf(eyes: Vec3, to: Vec3): number {
+  const flat = Math.hypot(to.x - eyes.x, to.z - eyes.z);
+  return Math.round((Math.atan2(to.y - eyes.y, flat) * 180) / Math.PI) || 0;
+}
+
+/** The brighter of block light and sky light at a point, 0 to 15: sky light is dimmed at night the way the game dims it. Unloaded: 0. */
+export function lightAt(bot: EncodableBot, at: Vec3): number {
+  const block = bot.blockAt(at.floored());
+  if (!block) return 0;
+  return Math.max(block.light, block.skyLight - (bot.time.isDay ? 0 : NIGHT_SKY_DIMMING), 0);
+}
+const NIGHT_SKY_DIMMING = 11;
+
 /** Where the bot's eyes are. */
 export function eyesOf(bot: EncodableBot): Vec3 {
   return bot.entity.position.offset(0, EYE_HEIGHT, 0);

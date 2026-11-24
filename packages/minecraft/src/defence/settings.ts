@@ -28,6 +28,8 @@ export interface DefenceSettings {
   recuperate: number;
   /** Asking the pathfinder whether a threat can reach the bot and whether there is a way out. Off (0) uses the cheap guess and never counts the bot cornered. */
   reachCheck: number;
+  /** Taking the colliculus's lean as advice: cover from a dive from above, holding still for something crossing the sky. 0 ignores it. */
+  lean: number;
 }
 
 export const DEFAULT_DEFENCE: DefenceSettings = {
@@ -41,9 +43,10 @@ export const DEFAULT_DEFENCE: DefenceSettings = {
   analgesia: 1,
   recuperate: 1,
   reachCheck: 1,
+  lean: 1,
 };
 
-const KEYS = ["freeze", "avoid", "cornered", "flightDistance", "learnThreats", "analgesia", "recuperate", "reachCheck"] as const;
+const KEYS = ["freeze", "avoid", "cornered", "flightDistance", "learnThreats", "analgesia", "recuperate", "reachCheck", "lean"] as const;
 const names = (list: unknown): list is string[] => Array.isArray(list) && list.every((name) => typeof name === "string" && name.length > 0);
 
 /** What is wrong with the settings, or null if they are fine. */
