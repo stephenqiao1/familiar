@@ -54,6 +54,8 @@ export function playerColliculus<Ctx>(
   sameTime = false,
   /** How far the bot glances up and down as well as round (its `colliculus.elevation`). */
   upDown = 0,
+  /** Whether a look with nothing running is proposed at full urgency (needed only when the look has to beat idling in one contest). */
+  takeOver = true,
 ): Pick<ColliculusOptions, "percepts" | "asleep" | "busy" | "eventful" | "idle" | "looksAlongside" | "scan" | "lookSkill" | "idleLookUrgency" | "pitchOf" | "defenceOf"> {
   const find = (name: string | undefined) => skills.find((s) => s.name === name);
   const scan = createScan();
@@ -103,6 +105,6 @@ export function playerColliculus<Ctx>(
       return { mode, target };
     },
     lookSkill: "look_at",
-    idleLookUrgency: TAKE_OVER_URGENCY,
+    ...(takeOver ? { idleLookUrgency: TAKE_OVER_URGENCY } : {}),
   };
 }

@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@familiar/arbiter": "workspace:*",
+    "@familiar/basal-ganglia": "workspace:*",
     "@familiar/contracts": "workspace:*",
     "@familiar/core": "workspace:*",
     "@familiar/engine-claude": "workspace:*",

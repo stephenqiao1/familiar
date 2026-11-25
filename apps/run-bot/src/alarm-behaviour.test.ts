@@ -1,3 +1,4 @@
+import { NO_SELECTION } from "@familiar/basal-ganglia";
 // Behaviour tests for alarm, search and memory (noradrenaline and the hippocampus), run through
 // the bot's real wiring: the player's alarm and memory triggers, the noradrenaline and memory
 // regions, the instinct questions and the arbiter. Only the world is made up.
@@ -177,7 +178,7 @@ describe("search behaviour", () => {
   function pick(switching: number | null, settings = DEFAULT_PATIENCE) {
     const persistence = createPersistence({ patience: () => 0.5, chanceOf: () => 0.5, strength: settings.persistence });
     persistence.observe({ skill: "go_to", type: "started", timestamp: Date.now() });
-    const arbiter = createArbiter({ scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: settings, persistence, skills });
+    const arbiter = createArbiter({ selection: NO_SELECTION, scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: settings, persistence, skills });
     const store = createWorkspace();
     store.update(state({}, 0), null);
     if (switching !== null) store.viewFor("noradrenaline").setSignal("search_switching", switching);
@@ -185,7 +186,7 @@ describe("search behaviour", () => {
   }
 
   it("makes switching easier when search is high: the margin is smaller at 0.9 than at 0.1", () => {
-    expect(pick(0.1)).toMatchObject({ action: { skill: "go_to" }, reason: expect.stringContaining("bonus +0.18") });
+    expect(pick(0.1)).toMatchObject({ action: { skill: "go_to" }, reason: expect.stringContaining("stay +0.18") });
     expect(pick(0.9)?.action).toEqual({ skill: "idle" });
   });
 
@@ -193,20 +194,20 @@ describe("search behaviour", () => {
     const withUrge = (urge: number) => {
       const persistence = createPersistence({ patience: () => 0.5, chanceOf: () => 0.5, strength: DEFAULT_PATIENCE.persistence });
       persistence.observe({ skill: "go_to", type: "started", timestamp: Date.now() });
-      const arbiter = createArbiter({ scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, persistence, skills });
+      const arbiter = createArbiter({ selection: NO_SELECTION, scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, persistence, skills });
       const store = createWorkspace();
       store.update(state({}, 0), null);
       store.viewFor("medulla").setSignal("urge", urge);
       return arbiter.pick([candidate("go_to", 0.5), candidate("idle", 0.6)], store.viewFor("arbiter"));
     };
-    expect(withUrge(0)?.reason).toContain("bonus +0.15");
-    expect(withUrge(0.2)?.reason).toContain("bonus +0.12");
+    expect(withUrge(0)?.reason).toContain("stay +0.15");
+    expect(withUrge(0.2)?.reason).toContain("stay +0.12");
     expect(withUrge(0.9)?.action).toEqual({ skill: "idle" });
   });
 
   it("leaves the margin alone at rest, and when the noradrenaline region is off", () => {
-    expect(pick(0.3)?.reason).toContain("bonus +0.15");
-    expect(pick(null)?.reason).toContain("bonus +0.15");
+    expect(pick(0.3)?.reason).toContain("stay +0.15");
+    expect(pick(null)?.reason).toContain("stay +0.15");
   });
 });
 

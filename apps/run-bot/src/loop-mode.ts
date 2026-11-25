@@ -16,8 +16,6 @@ import {
   DEFENCE_REFLEXES,
   driveFrom,
   encodeState,
-  headFree,
-  usesNothing,
   isHarmful,
   isSignificantChange,
   minecraftSkills,
@@ -58,6 +56,8 @@ import { REFLEX_SIGNAL, type FiredReflex } from "@familiar/region-reflex";
 import type { BrainArgs, ServerArgs } from "./args.js";
 import { loadBotConfig } from "./bot-config.js";
 import { createArbiter, createBrain, patienceOf } from "./brain.js";
+import { createPlayerStriatum } from "./habits.js";
+import { createHabits } from "@familiar/basal-ganglia";
 import { cutShortReason } from "./cut-short.js";
 import { createEngine, createPlanner } from "./create-engine.js";
 import {
@@ -85,6 +85,9 @@ import {
   loadSurfaces,
   surfacesFile,
   loadThreats,
+  loadHabits,
+  saveHabits,
+  habitsFile,
   saveThreats,
   threatsFile,
   saveMemories,
@@ -112,7 +115,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, memory: memorySettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, selection, memory: memorySettings } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -222,6 +225,9 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     chanceOf: (skill) => chanceOfPayoff(scorebook.get(situationOf(view.state), skill)),
     strength: patience.persistence,
   });
+  // The striatum: the bot's habits, learned from who wins and how it ends.
+  const habits = createHabits(await loadHabits(habitsFile(server.name)));
+  const striatum = createPlayerStriatum({ habits, selection, skills, log: (msg) => console.log(`    ${msg}`) });
   const regions = createBrain(
     {
       engine,
@@ -251,6 +257,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       focusNotes,
       attentionBudget: () => budgetNow,
       thalamus,
+      selection,
+      striatum,
       memory,
       persistence,
       storage,
@@ -273,6 +281,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   console.log(`Thalamus: ${thalamus.gate > 0 ? `gate on (instinct is told up to ${thalamus.limits.instinct ?? "?"} characters, the planner ${thalamus.limits.prefrontal ?? "?"})` : "gate off (the deciding layers are told the nearest few of each kind)"}, field of view ${thalamus.fieldOfView > 0 ? "on (they are told only what is seen or heard)" : "off"}.`);
   console.log(`Defence: innate threats ${defence.innateThreats === "game" ? "the game's hostile flag" : `[${defence.innateThreats.join(", ")}]`}, ${Object.keys(threatRecord.entries()).length} kinds learned about, route checks ${defence.reachCheck > 0 ? "on" : "off"}.`);
   console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}.`);
+  console.log(`Selection: body first ${selection.bodyFirst}, wait ${selection.wait}, channels ${selection.channels > 0 ? "on" : "off"}, habits ${selection.habits} (${Object.values(habits.entries()).reduce((n, skills) => n + Object.keys(skills).length, 0)} known, blind ${selection.habit.blind}).`);
   console.log(`Arousal: resting ${arousal.resting}, bedtime ${arousal.bedtime}, wake threshold ${arousal.wakeThreshold}, gate ${arousal.gate}.`);
   if (learned.skills.length) console.log(`Learned skills: ${learned.skills.map((s) => s.name).join(", ")}.`);
   console.log(`Logging to ${logPath}`);
@@ -295,19 +304,6 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     logEvent(event);
   };
   const executor = createSkillExecutor({ skills, ctx, onEvent, onSideEvent, defaultTimeoutMs: persistence.backstopMs() });
-  /** A head-only movement runs alongside idling, and (with --same-time) alongside any running skill that leaves the head free. */
-  const skillNamed = (name: string | undefined) => skills.find((s) => s.name === name);
-  const runsAlongside = (c: Candidate) => {
-    if (!("skill" in c.action)) return false;
-    const skill = skillNamed(c.action.skill);
-    // A reflex that claims no part of the body (a flinch) runs beside whatever is under way.
-    if (skill?.reflexOnly && skill.parts?.length === 0) return true;
-    const parts = skill?.parts;
-    const running = skillNamed(executor.current()?.skill);
-    // Beside a skill that uses no part of the body (idling) always; beside one that leaves the head free with --same-time.
-    return parts?.length === 1 && parts[0] === "head" && (usesNothing(running) || ((brainArgs.sameTime ?? false) && headFree(running)));
-  };
-
   const alarm = () => view.signals[ALARM_SIGNAL]?.value ?? 0;
   let lastReward = 0;
   let lastState: State | null = null;
@@ -385,8 +381,9 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   const loop = createBrainLoop({
     regions,
     workspace,
-    arbiter: createArbiter({ scorebook, personality, patience, persistence, skills }),
-    alongside: { isSide: runsAlongside, onAction: (action: Action) => ("skill" in action ? executor.startAlongside(action.skill, action.target) : undefined) },
+    // The basal ganglia decide what runs alongside too (a contest for each channel of the body).
+    arbiter: createArbiter({ scorebook, personality, patience, persistence, skills, selection, sameTime: brainArgs.sameTime ?? false, onChoice: striatum.observe }),
+    alongside: { onAction: (action: Action) => ("skill" in action ? executor.startAlongside(action.skill, action.target) : undefined) },
     getState: () => {
       const { x, y, z } = bot.entity.position.floored();
       // The state is no longer cut by the attention budget: the whole brain reads up to the encoder's own cap.
@@ -452,6 +449,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       saveHurts(gut.entries(), badFoodsFile(server.name)),
       saveSurfaces(posture.surfaces.entries(), surfacesFile(server.name)),
       saveThreats(threatRecord.entries(), threatsFile(server.name)),
+      saveHabits(habits.entries(), habitsFile(server.name)),
       saveBody({ sleptAtAge: sleepClock.sleptAtAge() }, bodyFile(server.name)),
       saveMemories(memory, memoriesFile(server.name)),
     ]).catch((error) => console.error(`Could not save what the bot learned: ${error}`));

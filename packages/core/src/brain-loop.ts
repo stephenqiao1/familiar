@@ -25,9 +25,10 @@ export interface BrainLoopOptions {
   /**
    * Different body parts at the same time. `isSide` marks a candidate that should run alongside
    * the main action instead of competing with it (e.g. a look while the hands are busy); the most
-   * urgent one is passed to `onAction` after the main action. Default: nothing runs alongside.
+   * urgent one is passed to `onAction` after the main action. An arbiter with `choose` decides
+   * that itself, and `isSide` is not asked. Default: nothing runs alongside.
    */
-  alongside?: { isSide(candidate: Candidate, ws: Workspace): boolean; onAction(action: Action): void | Promise<void> };
+  alongside?: { isSide?(candidate: Candidate, ws: Workspace): boolean; onAction(action: Action): void | Promise<void> };
   logger: { log(entry: TickLog): void };
   /** Shared memory. Default: a new one (reachable as `loop.workspace`). */
   workspace?: WorkspaceStore;
@@ -175,8 +176,8 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
     let decideMs = 0;
     const view: Workspace = workspace.viewFor("arbiter");
     /** Candidates that run alongside the main action never compete for it. */
-    const isSide = (c: Candidate) => options.alongside?.isSide(c, view) ?? false;
-    const competing = () => (options.alongside ? candidates.filter((c) => !isSide(c)) : candidates);
+    const isSide = (c: Candidate) => options.alongside?.isSide?.(c, view) ?? false;
+    const competing = () => (options.alongside?.isSide && !arbiter.choose ? candidates.filter((c) => !isSide(c)) : candidates);
     const settleEarly = () => {
       if (early || !arbiter.settledEarly) return;
       early = arbiter.settledEarly(competing(), [...pending].map((r) => r.layer), view);
@@ -197,8 +198,11 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       }),
     );
 
-    const winner = early ?? arbiter.pick(competing(), view);
-    const beside = options.alongside ? mostUrgent(candidates.filter(isSide)) : null;
+    // An arbiter with channels gives every winner at once; otherwise one winner, and the most urgent of those marked to run alongside.
+    const chosen = arbiter.choose?.(candidates, view, early);
+    const winner = chosen ? chosen.winner : (early ?? arbiter.pick(competing(), view));
+    const selection = arbiter.trace?.();
+    const beside = !options.alongside ? null : chosen ? (chosen.alongside[0] ?? null) : mostUrgent(candidates.filter(isSide));
     const action: Action = winner?.action ?? { keepGoing: true };
     if (acting) {
       await acting;
@@ -219,10 +223,17 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       winner,
       action,
       ...(beside ? { alongside: beside } : {}),
+      ...(selection ? { selection } : {}),
       goal: workspace.goal(),
       signals: workspace.signals(),
       attended: workspace.attended(),
     });
+    // A wait that must end on time: the next tick comes no later than it asks.
+    const again = arbiter.againInMs?.() ?? null;
+    if (again !== null && !stopped) {
+      clearTimeout(regular);
+      regular = setTimeout(() => startTick(), Math.max(again, minGapMs - (Date.now() - lastStart)));
+    }
   }
 
   function startTick(read?: { state: State; encodeMs: number }): void {

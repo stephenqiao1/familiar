@@ -6,7 +6,7 @@ export { createNoveltyMemory, createNoveltyRule, type NoveltyMemory } from "./do
 export { DEFAULT_PERSONALITY, personalityProblem, type DopaminePersonality } from "./dopamine/personality.js";
 export { needLevels } from "./dopamine/rewards.js";
 export type { Reward, RewardMoment, RewardRule } from "./dopamine/rewards.js";
-export { effortOf, reliefOf, trustAfter, holdNow, wantNow, type NeedLevels } from "./dopamine/wanting.js";
+export { effortOf, reliefOf, retryAfter, trustAfter, holdNow, wantNow, type NeedLevels } from "./dopamine/wanting.js";
 export { MAX_WASTE, WASTED_EFFORT_RULE, wastedEffort } from "./dopamine/wasted.js";
 export { chanceOfPayoff, createScorebook, featuresOf, kindFeature, labelFeature, skillFeature, thingFeature, type Aim, type SavedScore, type Scorebook } from "./dopamine/scorebook.js";
 export { BAD_SURPRISE_SIGNAL, DOPAMINE_SIGNAL, NOVELTY_SIGNAL, REWARD_SIGNAL, SURPRISE_SIGNAL, WANT_SIGNAL } from "./dopamine/tonic.js";

@@ -1,6 +1,6 @@
 export { startleOf, threatPresent } from "./alarm.js";
 export { HOLDABLE, leaningOf, playerBrainstem, REFLEX_NOTE } from "./brainstem.js";
-export { asleep, moved, playerFocus, watchedThings } from "./focus.js";
+export { asleep, moved, playerFocus, surprised, watchedThings } from "./focus.js";
 export { approachableThings, rememberedThings, skillsToward, thingsInView } from "./cues.js";
 export { DEFAULT_LOCOMOTION, driveFrom, locomotionProblem, RESTING_DRIVE, type LocomotionSettings } from "./locomotion.js";
 export { DEFAULT_POSTURE, postureProblem, wasDisplaced, type PostureSettings } from "./posture.js";

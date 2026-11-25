@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Action, Region, RegionOutput, State, TickLog, Workspace } from "@familiar/contracts";
+import type { Action, Arbiter, Region, RegionOutput, State, TickLog, Workspace } from "@familiar/contracts";
 import { highestUrgency } from "@familiar/arbiter";
 import { createBrainLoop, type BrainLoopOptions } from "./brain-loop.js";
 
@@ -115,6 +115,37 @@ describe("createBrainLoop", () => {
 
   describe("different body parts at the same time", () => {
     const isLook = (c: { action: Action }) => "skill" in c.action && c.action.skill === "look_at";
+
+    it("an arbiter with `choose` is given every candidate and says itself what runs alongside; `isSide` is not asked", async () => {
+      const regions = [proposer("brainstem", 0, "look_at", 0.9), proposer("instinct", 1, "go_to", 0.5)];
+      const side: Action[] = [];
+      const seen: number[] = [];
+      const arbiter: Arbiter = {
+        name: "channels",
+        pick: () => null,
+        choose(candidates) {
+          seen.push(candidates.length);
+          return { winner: candidates.find((c) => c.region === "instinct") ?? null, alongside: candidates.filter((c) => c.region === "brainstem") };
+        },
+      };
+      const { loop, logs, actions } = setup(regions, { arbiter, alongside: { onAction: (a) => void side.push(a) } });
+      loop.start();
+      await vi.advanceTimersByTimeAsync(500);
+      await loop.stop();
+      expect(seen).toEqual([2]);
+      expect(actions.map((a) => a.action)).toEqual([{ skill: "go_to" }]);
+      expect(side).toEqual([{ skill: "look_at" }]);
+      expect(logs[0]).toMatchObject({ winner: { region: "instinct" }, alongside: { region: "brainstem" } });
+    });
+
+    it("an arbiter that asks for another choice soon gets the next tick by then", async () => {
+      const arbiter: Arbiter = { name: "waits", pick: (candidates) => candidates[0] ?? null, againInMs: () => 200 };
+      const { loop, logs } = setup([proposer("instinct", 1, "go_to", 0.5)], { arbiter });
+      loop.start();
+      await vi.advanceTimersByTimeAsync(500 + 200 + 200 + 10);
+      await loop.stop();
+      expect(logs.length).toBe(3);
+    });
 
     it("a candidate marked to run alongside does not compete, and is acted on after the main action", async () => {
       const side: Action[] = [];

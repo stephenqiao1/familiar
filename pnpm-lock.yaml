@@ -181,6 +181,9 @@ importers:
       '@familiar/arbiter':
         specifier: workspace:*
         version: link:../../packages/arbiter
+      '@familiar/basal-ganglia':
+        specifier: workspace:*
+        version: link:../../packages/basal-ganglia
       '@familiar/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -229,6 +232,16 @@ importers:
       '@familiar/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/basal-ganglia:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/contracts: {}
 

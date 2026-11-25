@@ -1,4 +1,8 @@
-import { createValueWeightedArbiter } from "@familiar/arbiter";
+import { bodyFirst, CONFLICT_SIGNAL, createBasalGanglia, DEFAULT_SELECTION, desperateEasesRestraint, HABIT_SIGNAL, share, type SelectionSettings, type Striatum, givenUp, holdForWant, learnedValue, restraint, standingChoice, stay, switching, urgeLoosensStay } from "@familiar/basal-ganglia";
+import { patienceOf, selectionInputs, type SelectionParts } from "./selection-inputs.js";
+import { bodyOf, partsOf } from "./body-channels.js";
+export { patienceOf } from "./selection-inputs.js";
+export { createOldArbiter } from "./old-arbiter.js";
 import { BURST_SIGNAL, createThalamusRegion, DEFAULT_THALAMUS, type ThalamusSettings } from "@familiar/region-thalamus";
 import { createWantsInView } from "./wants.js";
 import { COMPETE, createHypothalamusRegion, DEFAULT_DRIVES, describeDrives, DESPERATE_SIGNAL, pressing, STRESS_SIGNAL, UNMET_SIGNAL, type DriveSettings, type Need, type TargetMemory } from "@familiar/region-hypothalamus";
@@ -100,6 +104,7 @@ import {
 } from "@familiar/neuromodulators";
 import {
   ANALGESIA_SIGNAL,
+  THREAT_SIGNAL,
   AROUSAL_SIGNAL,
   ORIENTING_SIGNAL,
   WARY_SIGNAL,
@@ -193,6 +198,10 @@ export interface BrainParts<Ctx> {
   showPrimitives?: boolean;
   /** A look may run alongside a skill that leaves the head free. Default: false. */
   sameTime?: boolean;
+  /** This bot's basal ganglia settings (from bots.json). Default: all on. */
+  selection?: SelectionSettings;
+  /** The striatum, whose habits stand in for instinct. Default: none (no habits). */
+  striatum?: Striatum;
   /** Extra notes for the focus log: remembered values used or rejected, attention warnings. Default: none. */
   focusNotes?: () => Record<string, unknown>;
   /** The attention budget for this tick: how many of each kind of nearby thing the deciding layers are told of, and how many memories the planner gets. Default: the neutral budget. */
@@ -228,6 +237,9 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const arousal = parts.arousal ?? DEFAULT_AROUSAL;
   const drives = parts.drives ?? DEFAULT_DRIVES;
   const thalamus = parts.thalamus ?? DEFAULT_THALAMUS;
+  const selection = parts.selection ?? DEFAULT_SELECTION;
+  // With channels the basal ganglia let a look run beside whatever leaves the head free, so a look need not take over.
+  const channels = selection.channels > 0;
   // The needs as the hypothalamus read them; with it left out, the plain reading from the state.
   const needs = (ws: Workspace) => needsNow(ws, drives);
   // Boredom lives in dopamine's novelty memory; the hypothalamus tunes it like any need that can wait.
@@ -251,7 +263,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   // The graded gate: with arousal low the deciding layers are called less often (never while asleep).
   // A call a signal has asked for at once (an alarm interrupt, a plan that just failed) is never held.
   const gates = { instinct: createRateGate(USUAL_MS.instinct), planner: createRateGate(USUAL_MS.planner) };
-  const held = (gate: keyof typeof gates, ws: Workspace, urgent: boolean) => gates[gate].hold(level(ws, UPPER_RATE_SIGNAL, 1), ws.state.timestamp, urgent);
+  // A near tie the basal ganglia are waiting on sets them to full rate too: what they say next may settle it.
+  const held = (gate: keyof typeof gates, ws: Workspace, urgent: boolean) => gates[gate].hold(level(ws, UPPER_RATE_SIGNAL, 1), ws.state.timestamp, urgent || up(ws, CONFLICT_SIGNAL));
   const all: Region[] = [
     createReflexRegion({
       // The lean is the colliculus's to give: with its sky and ground off (or the colliculus left out) the defence takes none.
@@ -299,7 +312,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     }), //                                                                                  layer 0, every tick
     // The colliculus: the fast map of where things are and how sudden. It turns the head; left out (--regions), nothing does.
     createColliculusRegion({
-      ...playerColliculus(skills, parts.sameTime, colliculus.elevation),
+      ...playerColliculus(skills, channels || parts.sameTime, colliculus.elevation, !channels),
       settings: colliculus,
       // What dopamine wants in view right now draws the eye too (worked out there, last tick).
       wantOf: (kind) => wants.of(kind),
@@ -313,7 +326,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     }), //                                                                                  layer 0, every tick
     createFocusRegion({
       // A thing that stood out strongly raises focus for a moment.
-      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : [])],
+      // So does a near tie the basal ganglia are waiting on: look closely while the choice hangs.
+      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []), ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : [])],
       settings: focus,
       asleep,
       moved,
@@ -373,6 +387,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       paused: (reader, ws) => up(ws, UPPER_PAUSED_SIGNAL) || (reader === PLANNER && up(ws, PLANNER_OFFLINE_SIGNAL)),
       lookSkill: LOOK_SKILL,
     }), //                                                                                  layer 0, every tick
+    // The striatum: well-worn choices become habits. Listed before instinct, which is not asked while a habit is acted on.
+    ...(parts.striatum && selection.habits > 0 ? [parts.striatum.region] : []), //          layer 0, every tick
     createInstinctRegion({
       // Jev is asked about, and shown, only what the thalamus passes on (`ws.view("instinct")`).
       engine,
@@ -380,7 +396,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       toProposals: instinct.toProposals,
       // Asleep and undisturbed: the brainstem pauses the deciding layers, so no engine calls are made.
       // Asleep: no engine calls. Drowsy: fewer. Anything urgent, or an alarm interrupt, goes straight through.
-      paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL) || up(ws, BURST_SIGNAL)),
+      // Acting on a habit: Jev is not asked (the striatum lets a call through every few seconds).
+      paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || up(ws, HABIT_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL) || up(ws, BURST_SIGNAL)),
     }), //                                                                                  layer 1, every tick
     createPatienceRegion({
       // The outlook is worked out from the same needs dopamine is paid for, and from the stress they do not already account for.
@@ -485,81 +502,41 @@ function quietened(reading: NeedReading | undefined): number {
   return reading && reading.level > 0 && reading.tuned !== undefined ? reading.tuned / reading.level : 1;
 }
 
-/** The current patience, or the bot's resting level when the serotonin region is off. */
-export function patienceOf(ws: Pick<Workspace, "signals">, patience: PatienceSettings): number {
-  return ws.signals[PATIENCE_SIGNAL]?.value ?? patience.resting;
-}
+/** The striatum's own region: its proposal is a decider's choice made without asking, not a request of the body. */
+const STRIATUM = "striatum";
+/** Whether a decider's option is a rival to what the body asks: it would use the same body parts, or it is to do nothing with the body at all (idling instead). */
+const rivals = (asked: readonly string[] | undefined, option: readonly string[] | undefined) => asked?.length !== 0 && (option?.length === 0 || share(asked, option));
+/** A threat this pressing is on the bot: nothing waits. */
+const ON_IT = 1;
 
 /**
- * THE ARBITER: picks by urgency, nudged by what dopamine has learned about each skill in the
- * current situation (weighed by the current DA level). Patience adds a bonus for staying with the
- * running skill (smaller when search is high or the body has an urge, so switching gets easier)
- * and holds back what has been learned to be costly (deciding layers only). While something is wanted (a cue fired), each option of the deciding
- * layers is weighed down by the worst need it would leave unmet (see holdNow): with a need
- * desperate, a running skill that does not serve it gives way to the thing that does. Reflexes
- * and the want itself are never weighed down, and with nothing on offer nothing changes.
- * A full-urgency reflex always wins.
+ * THE BASAL GANGLIA: the one place that decides which proposal goes ahead. Every rule about who
+ * wins is a named term in this list (packages/basal-ganglia/src/terms), in order:
+ * score = (urgency + the go terms) × the no-go terms; a gate removes a candidate; a term marked
+ * "works on" another scales that one's strength. A full-urgency candidate always wins at once.
+ * There is one contest for each channel of the body (body-channels.ts), and a near tie is waited
+ * on for a moment. To add a rule about who wins, add a term here.
  */
-export function createArbiter<Ctx>(parts: {
-  scorebook: Scorebook;
-  personality: DopaminePersonality;
-  patience: PatienceSettings;
-  /** Default: no bonus for the running skill. */
-  persistence?: Persistence;
-  skills: Skill<Ctx>[];
-}): Arbiter {
-  const { scorebook, personality, patience, persistence } = parts;
-  const risky = new Set(parts.skills.filter((s) => s.risky).map((s) => s.name));
-  /** What is learned about a target: the thing in the state, else the remembered one. */
-  const aimOf = (state: State, target: string) => {
-    const seen = thingsInView(state).find((t) => t.id === target);
-    return seen ? aimAt(seen) : scorebook.things().find((t) => t.id === target);
-  };
-  /**
-   * What the modulators make of one option of the deciding layers (a reflex is never touched: 1).
-   *   Hold: while something is wanted, less the more pressing the worst need the option is not
-   *     expected to relieve.
-   *   Restraint: patience holds back (or, when low, lets loose) an option by how costly it has
-   *     been learned to be here, aimed at this. A skill marked risky starts as costly and one
-   *     not marked as harmless; what happens then moves both.
-   */
-  const modulated = (skill: string, ws: Workspace, { layer, action }: Candidate) => {
-    if (layer < 1) return 1;
-    const target = "target" in action ? action.target : undefined;
-    const [situation, aim] = [situationOf(ws.state), target === undefined ? undefined : aimOf(ws.state, target)];
-    const wanted = (ws.signals[WANT_SIGNAL]?.value ?? 0) > 0;
-    const hold = wanted ? holdNow(Object.fromEntries(needsNow(ws).map((n) => [n.name, n.pressing])), (need) => scorebook.get(situation, reliefOf(skill, need), aim).expected, personality.wanting) : 1;
-    const costly = Math.min(1, Math.max(0, (risky.has(skill) ? 1 : 0) + scorebook.get(situation, skill, aim).cost - 1));
-    // A desperate need loosens the brake: a starving body takes chances it otherwise would not.
-    const desperate = ws.signals[DESPERATE_SIGNAL]?.value ?? 0;
-    return hold * brakeFactor(patienceOf(ws, patience), patience.brake * costly * (1 - COMPETE.brakeOff * desperate));
-  };
-  const arbiter = createValueWeightedArbiter({
-    valueOf: (skill, ws) =>
-      skillValue(scorebook.get(situationOf(ws.state), skill), ws.signals[DOPAMINE_SIGNAL]?.value ?? personality.restingDA),
-    // A body that is asking for something loosens the hold of whatever is running: the stay bonus
-    // shrinks as the medulla's urge grows, so a pressing need is not outvoted by habit alone.
-    bonusOf: (skill, ws) =>
-      (persistence?.stayBonus(skill, Date.now()) ?? 0) *
-      switchMarginFactor(ws.signals[SWITCHING_SIGNAL]?.value ?? NEUTRAL_SEARCH) *
-      (1 - (ws.signals[URGE_SIGNAL]?.value ?? 0)),
-    scaleOf: modulated,
+export function createArbiter<Ctx>(parts: SelectionParts<Ctx>): Arbiter {
+  const read = selectionInputs(parts);
+  const selection = parts.selection ?? DEFAULT_SELECTION;
+  const uses = partsOf(parts.skills);
+  return createBasalGanglia({
+    terms: [
+      givenUp({ heldBack: read.heldBack }), //                                       gate: a skill just given up on waits (deciders only)
+      standingChoice(), //                                                           the running skill's choice stands while its layer is silent
+      learnedValue({ valueOf: read.valueOf }), //                                    go: what dopamine has learned the skill is worth here
+      stay({ bonusOf: read.stayOf }), //                                             go: the running skill, while it is getting somewhere
+      switching({ factorOf: read.switchingOf }), //                                    on stay: searching makes switching easier
+      urgeLoosensStay({ urgeOf: read.urgeOf }), //                                     on stay: a bodily urge loosens it
+      holdForWant({ holdOf: read.holdOf }), //                                       no-go: while something is wanted (deciders only)
+      restraint({ strengthOf: read.brakeStrengthOf, brake: read.brake }), //         no-go: the patience brake on what has cost the bot (deciders only)
+      desperateEasesRestraint({ desperateOf: read.desperateOf, most: read.desperateEases }), // on restraint: a desperate need loosens it
+      // no-go: a request of the body holds back the deciders' rivals for the same body parts
+      bodyFirst({ strength: selection.bodyFirst, body: (c) => c.layer === 0 && c.region !== STRIATUM, clash: (asks, option, ws) => rivals(uses(asks.action, ws), uses(option.action, ws)) }),
+    ],
+    body: bodyOf(parts.skills, { channels: selection.channels, ...(parts.sameTime === undefined ? {} : { sameTime: parts.sameTime }) }),
+    wait: { strength: selection.wait, pressing: (ws) => (ws.signals[THREAT_SIGNAL]?.value ?? 0) >= ON_IT },
+    ...(parts.onChoice ? { onChoice: parts.onChoice } : {}),
   });
-  // The running skill is always in the vote. A deciding layer is not asked every tick; while the
-  // one that chose the running skill says nothing, its choice stands as it was made, so the skill
-  // is not dropped for whatever else happens to speak. Once that layer speaks again, what it says counts.
-  let standing: Candidate | null = null;
-  return {
-    ...arbiter,
-    pick(candidates, ws) {
-      // A skill just given up on waits before a deciding layer may start it again (a reflex may at once).
-      candidates = candidates.filter((c) => !(c.layer >= 1 && "skill" in c.action && persistence?.heldBack(c.action.skill, Date.now())));
-      const kept = standing;
-      const silent = kept !== null && "skill" in kept.action && ws.current?.skill === kept.action.skill && !candidates.some((c) => c.region === kept.region);
-      const winner = arbiter.pick(silent ? [...candidates, kept] : candidates, ws);
-      const chosen = winner && [...candidates, ...(silent ? [kept] : [])].find((c) => c.region === winner.region && c.action === winner.action);
-      if (chosen && chosen.layer >= 1 && "skill" in chosen.action) standing = chosen === kept ? kept : { ...chosen, reason: `${chosen.reason} (still under way)` };
-      return winner;
-    },
-  };
 }

@@ -10,17 +10,16 @@ dopamine, defence, serotonin, noradrenaline and acetylcholine work. Each item is
 shows up in several findings and comes from how the brain is built, not from one bug. The
 entries named in brackets hold the evidence.*
 
-1. **One urgency number decides everything, and the rules for who wins are spread about.** Every
-   proposal competes on the same 0 to 1 scale. What bends that scale now lives in several
-   places: looks at full urgency when idle, the body's urge shrinking the stay bonus, a pressing
-   need loosening Jev's options while something is wanted, patience restraining what has cost
-   the bot, and the cornered fight as a hard reflex. Habit no longer wins by default (the stay
-   bonus goes within 10 s without progress), but a soft reflex can still lose to Jev by a
-   hundredth. *(Reticular: "Jev outvotes bedtime"; medulla: "the urge at its strongest still
-   lost to habit"; colliculus: "the spec's look urgency never wins"; cornered: "freeze (0.78)
-   still loses to Jev's flee (0.79)".)*
-   **Would fix:** rank by layer before urgency (a body need outranks a habit), or score the
-   layers on separate scales that the arbiter combines by one stated rule.
+1. **One urgency number decides everything, and the rules for who wins are spread about.**
+   *Mostly closed 2026-11-24 by the basal ganglia.* Every rule about who wins is now a named
+   term in one list, and the log says what each term did to each candidate. The head has its
+   own contest, so a look no longer needs full urgency to beat idling. A request of the body
+   holds back the deciders' rivals, so a freeze at 0.78 beats Jev's flee at 0.79. What is left
+   open: a weak request of the body still loses (bedtime at 0.35 against Jev's idle at 0.6),
+   and the cornered fight is still a hard reflex (see "The basal ganglia").
+   *(Reticular: "Jev outvotes bedtime", still open; medulla: "the urge at its strongest still
+   lost to habit"; colliculus: "the spec's look urgency never wins", closed; cornered: "freeze
+   (0.78) still loses to Jev's flee (0.79)", closed.)*
 
 2. **The planner can only talk to Jev.** A goal reaches behaviour as text in Jev's prompt. The
    arbiter never sees it, nothing carries out a step, and a finished step is noticed up to 15
@@ -146,6 +145,131 @@ entries named in brackets hold the evidence.*
     **Would fix:** add the other dangers as vital needs, and put a time on every memory.
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
+
+## The basal ganglia: one place decides who goes ahead
+
+*2026-11-24. `packages/basal-ganglia`; the brain's side is `createArbiter` in
+`apps/run-bot/src/brain.ts`. Built in two steps: first the old arbiter was moved into named
+terms with no change in who wins, then body-first, waiting, channels and habits were added.*
+
+**Step One changed nothing about who wins.** 128 recorded runs (26,476 ticks) put to the old
+arbiter and to the terms: the same winner on every tick. 300 made-up runs (12,000 choices) the
+same. After Step Two the same comparison still holds with every new part at 0, through the new
+code. What did change is the winner's reason text (`stay +0.15`, `restraint ×1.14`), which nine
+test assertions and one script read.
+
+**Live results** (`pnpm selection-check`, 5 runs of each scene):
+
+| Scene | Who won, and by which term | Waits | Habit share | Outcome |
+|---|---|---|---|---|
+| 1 Cornered (husk in a shut room, unarmed, Jev on) | the reflex's fight on all 271 cornered ticks, by full urgency | 0 | 0% | 5 of 5. Strongest rival Jev's flee at 0.72 to 0.74; no deaths |
+| 2 Bedtime (tired, night, by the bed, Jev on) | Jev's `idle` on all 348 ticks | 0 | 0% | **0 of 5.** Bed never started |
+| 3 Urge (starving with bread, Jev on) | the medulla's eat at 0.90, on urgency alone | 0 | 0% | 5 of 5. Won within 0.4 s; body-first decided 0 ticks |
+| 4 Idle look (a pig to the side, no take-over) | the colliculus's look at 0.50, alone in the head's contest | 0 | 0% | 5 of 5 |
+| 5 Near tie (a minute of ordinary life, Jev on) | Jev's `idle` | 0 | 0% | **Not tested**: no near tie arose in 10 runs, with or without waiting; 0 switches a minute both ways |
+| 6 Look and walk (no `--same-time`) | the look, beside the walk | 0 | 0% | 5 of 10 tested, all 5 as expected. In the other 5 no look was asked for until the walk was over |
+| 7 Habit (10 minutes of routine, Jev on) | Jev's `idle`, by standing choice | 0 | 63% | 5 of 5. Jev calls a minute 102 at the start, 43 to 48 at the end; 690 calls saved a run; 0 wrong habits; broken 4 times a run by giving up |
+| 8 Habit broken (a husk appears, 2-minute runs) | Jev's `idle` | 0 | 59% | 5 of 5. Habit in use just before, on 0 ticks after ("a threat is in view"); Jev asked at once. Jev calls a minute 102, then 11 |
+| Every part at 0 | Jev's `idle` | 0 | 0% | 2 of 2. No sign of waiting, channels or habits; the old arbiter picks the same winner on all ticks |
+| 9 Existing scenes | | | | Colliculus: all but the walking glance. Defence: all but "around". Whole brain: all but night, dark and far. Each of these failed before this work too |
+
+Scene 7 first failed 5 of 5: dusk came seven minutes in, the need for light at night is a
+safety need, and no habit acts while one presses. The scene now holds the day still. Scene 8
+was not tested in the ten-minute runs (a give-up had just broken the habit each time), so it
+was run on its own.
+
+**What was only seen live.**
+
+- **A weak request of the body still loses.** Bedtime with Jev failed 5 runs of 5: the reticular formation asks
+  for bed at 0.35, Jev's `idle` scores about 0.61, and body-first takes off 0.25 × 0.35, about
+  9%, leaving 0.56. `idle` went ahead on every tick. Body-first settles close calls (a freeze at
+  0.78 against a flee at 0.79); it does not lift a weak request over a confident decider, and
+  by the spec it should not ("a weak reflex at 0.3 can still be overridden"). Bedtime needs
+  either a more urgent request as tiredness grows, or Jev to choose bed. This is the "Jev
+  outvotes bedtime" finding, still open.
+- **A choice that never ends could not become a habit.** Jev chose `idle` for minutes, and
+  `idle` never ends "done", so there was no finished win to learn from. Now every 5 s that a
+  choice is still under way with nothing gone wrong counts as a win.
+- **Focus is up in an unfamiliar place, and that blocked every habit.** The sky plaza is
+  unfamiliar, so focus sat at 0.75 for the whole scene. "Predictions hold" is now read from
+  dopamine's surprise, the way focus itself reads it, not from the focus level.
+- **A habit was filed under the drive its run began in.** The top drive changed during a long
+  run and the habit then never matched the drive of the moment. A win is now filed under the
+  drive at the time of the win.
+- **A given-up skill breaks its habit.** Serotonin gives up `idle` every two
+  minutes or so (boredom), a give-up is a failed skill, and the habit halves (0.98 to 0.49).
+  It takes about 50 s of idling to pass 0.8 again. So over ten minutes a habit acted on 63% of
+  ticks, not nearly all. Whether giving up from boredom should count as the habit failing is
+  open: it is not a bad outcome, only a wish for something else.
+- **While a habit acts, the winner in the log is often Jev's standing choice**, not the
+  striatum's own candidate: both carry the same action, and Jev's last answer scores a little
+  higher. The reports count a tick as "by habit" when the habit was in use and its action went
+  ahead.
+- **A choice takes longer live than in a replay.** Over 8,816 live choices: 0.25 ms in the
+  middle, 1.1 ms for 99 in 100, 121 (1.4%) over the 1 ms limit, the slowest 14 ms. The same
+  ticks replayed take 0.03 ms in the middle and 0.15 ms for 99 in 100. The slow live choices
+  had one to three candidates and are scattered through the runs, so they are pauses of the
+  process (the model runs in the same process), not work in the choice. The limit holds for
+  the work, not for the clock on every tick. `brain-report` prints the slowest.
+
+**Limits and departures from the spec.**
+
+- **Idling counts as a rival to what the body asks**, though it uses no body parts. By the
+  letter of "would use the same body parts" Jev's `idle` would never be held back, and idle is
+  what outvotes most requests.
+- **Body-first does not count the striatum as the body**, though it is a layer-0 region. Its
+  proposal is a decider's choice made without asking.
+- **`channels` is on or off** (any value above 0 is on). `habits` is how fast habits form.
+  `habit.blind` is graded: a change of drive is ignored when strength × blind reaches 0.8.
+- **`TAKE_OVER_URGENCY` is kept, for `channels` 0 only.** With channels on, the idle look is
+  proposed at its graded urgency. Removing the constant would break the promise that every
+  strength at 0 behaves as before.
+- **The executor has one place beside the main skill.** Of everything that may run alongside
+  (the head's winner, a flinch) only the most urgent does. A third channel needs a place
+  there too.
+- **A wait ends at the next tick after 300 ms**, and ticks are at least 150 ms apart, so a
+  wait can last up to about 450 ms on the clock. The loop is asked for a tick at 300 ms.
+- **A tie that drifts in and out of the margin starts a new wait each time.** A settlement
+  stands only while the same two stay within the margin.
+- **With nothing running, a wait means nothing happens** for up to 300 ms.
+- **A habit's proposal is from layer 0**, so the terms for deciders only (restraint, the hold
+  for a want, given-up) do not apply to it, and it wins ties against Jev. Risky skills are
+  never habits, and a failed or given-up skill halves its habit.
+- **A habit belongs to a situation as the scorebook labels it**, which is coarse (day or
+  night, safe or not, fed or not, and so on). Two different moments with the same labels
+  share a habit.
+- **Disuse goes by the wall clock**, so time with the bot switched off counts.
+- **"Jev calls saved" counts ticks on which the habit paused Jev.** The rate gate might have
+  held some of those calls anyway.
+- **Without channels, what runs alongside goes by the skill running at the start of the tick**
+  (the loop used to ask the executor at the moment of choosing).
+- **On a full-urgency win nothing is scored.** The log lists who the winner went ahead of
+  (`rivals`) with their urgency only.
+- **The replay cannot rebuild learned values kept from before a run**, so 206 of 26,476 ticks
+  differ from the recording (both arbiters differ the same way).
+- **The older tests of single rules run with every new part at 0**, so that they test what
+  they tested before. The new parts have their own tests.
+
+**Does the cornered fight still need to be a hard reflex?** Yes, keep it. Against the deciders
+alone it would not be needed: in 5 runs the fight won all 271 cornered ticks, and the strongest
+rival was Jev's flee at 0.72 to 0.74. A soft fight at 0.95 with body-first would hold that
+back to about 0.56. But body-first only holds back deciders. Another request of the body is
+not scaled: an urge at 0.9 with a learned value or the stay bonus, or the defence circuit's
+own flee, can pass 0.95. No such rival showed in these runs (the strongest was 0.00), but
+nothing rules one out, and losing that contest once means dying in a corner. Full urgency
+is the only thing that settles it whatever else is asked. Not changed.
+
+**Does the idle look still need its take-over urgency?** No, not with channels on. In
+5 runs of 5 the look was proposed at its graded urgency (0.50), won the head's own contest and
+went ahead with nothing else running. `TAKE_OVER_URGENCY` now applies only when `channels`
+is 0, where the old single contest runs and the look would lose to Jev's `idle` without it. The
+colliculus scenes pass except the walking glance, which also failed before this
+work: on some runs the pig is not noticed while walking, so no look is asked for until the
+walk is over.
+
+**Status.** Built and run live 2026-11-24. 2,901 tests pass. Open: bedtime
+with Jev (scene 2); waiting on a near tie has only been tested in unit tests, since none arose
+live; the walking look is noticed on only half the runs (the colliculus, not the choice).
 
 ## The thalamus: a view for each decider, with a gate
 
@@ -348,7 +472,9 @@ The slowest map tick in the batch was 1.64 ms; one earlier single run showed 2.1
 - **A need that moves for its own reasons makes a look "worth it".** Hunger ticking down 0.1
   while a cow is attended counts. The 0.1 is `NEED_MOVED`.
 - **`TAKE_OVER_URGENCY` is as needed as before.** The brake acts while a skill with a target
-  runs; the take-over is for when nothing runs.
+  runs; the take-over is for when nothing runs. *Closed 2026-11-24: with the basal ganglia's
+  channels on, the head has its own contest and the look goes ahead at its graded urgency. The
+  constant is used only with `selection.channels` 0.*
 - **`followUp` is a seventh strength**, not in the six asked for, so that Part 6 can be turned
   off too. `defence.lean`, `arousal.orienting`, `focus.orienting` and `focus.eventLearning` are
   the readers' own.
@@ -778,7 +904,9 @@ plaza now walled all round for this scene).
   a threat closes turns to hold and fight. It is cleared once 2 blocks of ground are made.
 - **A mob the bot cannot outrun now ends in a fight** by the same rule. Not run.
 - **Cornered and only being approached, the bot's `freeze` (0.78) still loses to Jev's `flee`
-  (0.79)**, so it runs on the spot until the threat is on it, then fights.
+  (0.79)**, so it runs on the spot until the threat is on it, then fights. *Closed 2026-11-24
+  by body-first: Jev's flee is scaled to 0.79 × (1 − 0.25 × 0.78) = 0.64 (a unit test holds
+  this case).*
 - **A threat that was once on the bot counts as having noticed for 5 s**, so backing off from an
   unaware mob is now fled, not frozen for.
 - **In `defence-check blank` the new rule fired once**: after fleeing 9 ticks the bot held and
@@ -1389,6 +1517,8 @@ refused once at dawn.
   bedtime scenes run without instinct. With Jev it depends on what Jev picks, as before; the
   reticular proposal only adds a vote. Not measured with Jev: in the `night` and `sleepgate`
   scenes the bot had just "slept" (fresh data), was not sleepy, and Jev chose bed itself.
+  *Still open after the basal ganglia (2026-11-24), and now measured with Jev: see "The basal
+  ganglia".*
 - **"Waking" is not getting up.** A waking opens the gate and stops the region speaking for
   sleep. Whether the bot leaves the bed depends on what is proposed next: for hunger, `eat`
   wins. For a far bang with nothing to do about it, nothing replaces `sleep`, so the bot is
@@ -1595,7 +1725,8 @@ whole region call was slow (most likely the runtime pausing, not the map). The l
   and five events with no sound name at all (explosion, lightning bolt, something hurt, a door
   changing, a projectile appearing). Hearing uses only those.
 - **Beside real work a look competes at 0.35 to 0.7 and usually loses**, unless `--same-time`
-  lets it run alongside.
+  lets it run alongside. *Closed 2026-11-24: with channels on, a look runs beside any skill
+  that leaves the head free, with no flag.*
 - **With the field of view on, the bot learnt of the husk when it came within 8 blocks**, by the
   stand-in for footsteps, in both runs: its glances had not found it first. It was hit once or
   twice either way, and died in one of four runs (with it on). Two runs each way are too few to

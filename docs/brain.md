@@ -1,7 +1,8 @@
 # How the Brain Works
 
 The bot's decisions come from **regions** (brain parts). Regions never call each other. They
-share one **workspace** (shared memory), and one **arbiter** picks which proposal to act on.
+share one **workspace** (shared memory), and the **basal ganglia** (the arbiter) pick which
+proposals go ahead.
 
 ```
 Workspace (state · views for the deciders · goal · signals · attended · needs · recent events)
@@ -24,9 +25,10 @@ Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
    the head (look_at)
    │ proposals             │
    ▼                       ▼
-Arbiter: urgency + 0.2 × learned value wins (value from the scorebook, weighed by DA),
-         plus a stay bonus for the running skill and a brake on risky skills (both from patience);
-         the stay bonus shrinks while the body has an urge (the medulla's `urge` signal);
+Basal ganglia: one contest for the body and one for the head. In each,
+         score = (urgency + the go terms) × the no-go terms; every rule about who wins is a named term;
+         a request of the body holds back the deciders' rivals; a near tie is waited on for a moment;
+         a well-worn choice becomes a habit (the striatum), and Jev is asked less;
          a full-urgency proposal (a hard reflex, a startle) always wins; ties go to the faster layer
    ▼
 Skill executor → skills → primitives (every movement) and locomotion (all travel) → Minecraft
@@ -56,7 +58,10 @@ same tick; a signal from a region listed later is read one tick late.
 | Soft reflex | A tunable rule. Its base urgency is multiplied by a gain and capped at 0.95, so it competes in the arbiter. |
 | Primitive | One of the body's built-in movements (`look_at`, `step`, `break_block`, ...): small, stoppable, and reporting what it changed. Skills marked `primitive: true`. The only code that moves the bot's body. |
 | Changes | What a skill run changed (`moved`, `gained`, `targetBlock`, ...), carried on the skill event that ends it. |
-| Arbiter | Picks the winning proposal. |
+| Arbiter | Picks the winning proposals: the basal ganglia. |
+| Term | One named rule about who wins: it adds to a candidate's score (go), scales it (no-go) or removes the candidate (gate). |
+| Channel | A part of the body with a contest of its own: `body` (legs and hands) and `head`. |
+| Habit | How well-worn a choice is in a situation, 0 to 1. Above 0.8 the striatum proposes it without Jev being asked. |
 
 All of these types live in one file: `packages/contracts/src/brain.ts`.
 
@@ -66,7 +71,8 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 |---|---|
 | `contracts` | Shared types only. |
 | `core` | The brain loop (runs regions, asks the arbiter, acts, logs), workspace, skill executor. |
-| `arbiter` | The pickers: `value-weighted` (used) and `highest-urgency`. |
+| `basal-ganglia` | The arbiter in use: the terms (`src/terms/`), the channels, waiting on a near tie, and the striatum (habits). Game-free. |
+| `arbiter` | The older pickers, kept for comparison: `value-weighted` and `highest-urgency`. |
 | `region-reflex` | Runs a list of rules, hard and soft, and logs each fired rule's kind, base urgency, gain and final urgency. |
 | `region-brainstem` | Supplies the reflex gains, the defence circuit's choice of defence, a `brainstem` region (startle, loaded responses, the defence signals), a `reticular` region (arousal, bedtime, waking and the graded gate), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
 | `region-thalamus` | The gateway to the deciding layers: builds a view of the state for instinct and for the planner (`ws.view(reader)`), by channel, priority and a size limit. Game-free; the Minecraft side says what the channels are. |
@@ -1035,6 +1041,97 @@ strengths are in `bots.json` under `locomotion` (`speedFromAlarm`, `speedFromDop
 
 `step`, `jump` and `sneak` are single movements, not journeys, and hold their own key.
 
+## The basal ganglia: who goes ahead
+
+One place decides which proposals go ahead: `createArbiter` in `apps/run-bot/src/brain.ts`, built
+from `packages/basal-ganglia`. Every candidate is held back by default; one is released in each
+channel. The basal ganglia only choose. They never change a proposal or make one up (the
+striatum's habit proposal is a region's, like any other).
+
+**The score.** `score = (urgency + every go term) × every no-go term`. The highest wins; a tie
+goes to the faster layer, then to the first listed. The log has, for every candidate on every
+tick, what each term added or scaled, the go total, the no-go total and the score
+(`selection` in the tick log), and the winner's reason names the terms that decided it.
+
+**The terms**, in the order they are listed:
+
+| Term | Kind | Applies to | What it does |
+|---|---|---|---|
+| `given-up` | gate | deciders | A skill just given up on is not started again yet |
+| `standing-choice` | keeps a candidate | deciders | The running skill's choice stands while the layer that made it is silent |
+| `learned-value` | go | all | + 0.2 × what dopamine has learned the skill is worth here |
+| `stay` | go | all | + the bonus for the running skill, while it is getting somewhere |
+| `switching` | works on `stay` | all | Searching shrinks the stay bonus, settling grows it |
+| `urge-loosens-stay` | works on `stay` | all | A bodily urge shrinks it: × (1 − urge) |
+| `hold-for-want` | no-go | deciders | While something is wanted, options that do not serve the pressing need are scaled down |
+| `restraint` | no-go | deciders | The patience brake on what has cost the bot |
+| `desperate-eases-restraint` | works on `restraint` | deciders | A desperate need takes up to half of the brake off |
+| `body-first` | no-go | deciders | A request of the body in the same contest scales rivals down (below) |
+
+A term is a name, a kind, the layers it applies to and one function
+(`packages/basal-ganglia/src/term.ts`). A term that "works on" another scales that term's
+strength, not the score. The order matters only for those.
+
+**Body first.** While a layer-0 proposal with urgency `u` is in a contest, every option of a
+deciding layer that would use the same body parts and is a different action is scaled by
+`1 − 0.25 × bodyFirst × u`. So a freeze at 0.78 beats a decider's flee at 0.79, and a weak
+reflex at 0.3 is still easily overridden. The striatum's habit does not count as the body.
+
+**Waiting on a near tie.** A conflict is: the top two in a contest are different actions and
+their scores are within `0.05 × wait`. Then whatever is running is kept, and `conflict` (0 to 1,
+by how close) is shared. The reticular gate lets the deciders through at full rate and focus
+rises while it is up. If the tie is still there after 300 ms it is settled: the faster layer
+wins; on the same layer the one already running; with neither running the higher go total. The
+settlement stands while the same two stay that close. The loop is asked for a tick in time
+(`againInMs`), so a wait ends on time.
+
+**Channels.** `CHANNELS` in `apps/run-bot/src/body-channels.ts`: `body` (legs and hands) and
+`head`. A candidate is in the contest of every channel its skill's `parts` touch (no parts: the
+body's; parts not given: both). The body's winner is the action; the head's runs alongside
+through the executor's second place. A skill that uses both must win both, or it gets neither.
+A look that wins the head while the running skill needs the head (or while nothing runs) is
+the action. A reflex that uses no part of the body (a flinch) needs no contest.
+
+**Habits (the striatum).** `packages/basal-ganglia/src/striatum.ts`, a layer-0 region listed
+just before instinct, with the bot's side in `apps/run-bot/src/habits.ts`. It keeps a strength
+from 0 to 1 for each skill in each situation (the scorebook's situation key), saved in
+`data/<bot>/habits.json`.
+
+- A choice of a deciding layer (or of the habit itself) that ends "done" with no bad surprise
+  closes 15% of the gap to 1. So does every 5 s that the choice is still under way with
+  nothing gone wrong (a skill that never ends, like idling, can be a habit too). A failed
+  skill or a bad surprise halves it. Unused, it halves in two hours.
+- Above 0.8, with nothing notable, the striatum proposes the action (at the urgency Jev used to
+  give it) and shares `habit`. While `habit` is up instinct is not asked.
+- Nothing notable means: no near tie, no threat seen or worse, nothing striking just now, no
+  safety need pressing, predictions holding (the reading focus uses, from dopamine's surprise;
+  an unfamiliar place alone does not count), and the same top drive as when the habit was
+  last used (`habit.blind` 1 ignores the drive).
+- Jev is still asked at least every 5 s. If it wants something else the habit loses 30%.
+- A skill marked `risky` is never a habit.
+- A habit is aimed the way the scorebook files things: at the same fixed thing, or at whatever
+  of the same kind is in view now. With nothing to aim at it stands down.
+
+**Never touched.** A proposal at urgency 1 wins its channel at once: no term, wait or habit is
+asked. A wait never holds back a layer-0 proposal above 0.8, never lasts past 300 ms, and never
+starts while a threat is on the bot. The same inputs give the same winners (time comes from the
+state), so a run can be replayed: `pnpm replay-selection <logs>`. No model is called.
+
+**Settings** (`selection` in `bots.json`, each 0 to 1; all at 0 is the plain list of terms):
+
+| Setting | Default | What it does |
+|---|---|---|
+| `bodyFirst` | 1 | How strongly a request of the body holds back the deciders' rivals |
+| `wait` | 1 | How wide a near tie is, as a share of 0.05 |
+| `channels` | 1 | Above 0: a contest for each channel. At 0: one contest, and the older rule for what runs alongside (`--same-time`) |
+| `habits` | 1 | How fast habits form. At 0 none form and none are used |
+| `habit.blind` | 0 | How far a habit ignores a change in what the body wants most |
+
+`pnpm brain-report` prints, under BASAL GANGLIA: wins by layer, what ran alongside, how often a
+decider went ahead over the body and the reverse, near ties and how they were settled, the
+share of ticks by habit with calls saved and wrong habits, and how often each term changed the
+winner. `pnpm selection-check` runs the live scenes.
+
 ## The neuromodulators
 
 Each bot's settings for these live in `bots.json`. What each bot learns and remembers is saved
@@ -1160,7 +1257,11 @@ in `data/<name>/`.
 | Change what the bot remembers | `packages/minecraft/src/brain/memories.ts` (edit `playerMemories`) |
 | Change what Jev is asked | `packages/minecraft/src/player-questions.ts` or `src/brain/instinct.ts` |
 | Change what the planner sees | `packages/minecraft/src/brain/situation.ts` |
-| Change how the arbiter picks | `createArbiter` in `apps/run-bot/src/brain.ts`, or `packages/arbiter/src/` |
+| Add or change a rule about who wins | A term: one small file in `packages/basal-ganglia/src/terms/`, listed in `createArbiter` in `apps/run-bot/src/brain.ts`. What the terms read is in `apps/run-bot/src/selection-inputs.ts`. Check with `pnpm replay-selection <logs>` |
+| Make reflexes stronger against the deciders | `selection.bodyFirst` in `bots.json` (0 to 1), or `BODY_FIRST` in `packages/basal-ganglia/src/terms/body-first.ts` for every bot |
+| Add a channel | One entry in `CHANNELS` in `apps/run-bot/src/body-channels.ts` (the executor has one place beside the main skill, so a third channel also needs a place there) |
+| Make a bot more a creature of habit | `selection.habits` (how fast they form) and `selection.habit.blind` in `bots.json`; the thresholds are `HABIT` in `packages/basal-ganglia/src/habits.ts` |
+| Change what counts as "nothing notable" for a habit | `notable` in `apps/run-bot/src/habits.ts` |
 | Change a bot's temperament | `bots.json` |
 | Turn a region off | Run with `--regions reflex,instinct` (no code change) |
 | Add a new region | See below |
@@ -1193,7 +1294,7 @@ pnpm start -- --engine jev --planner claude          # full brain
 pnpm start -- --regions reflex,instinct              # without the prefrontal cortex
 pnpm start -- --engine jev --primitives              # let Jev choose primitives too
 pnpm start -- --regions reflex,brainstem --manual    # reflexes only; type "do <skill> [target]" to drive the body by hand
-pnpm start -- --engine jev --same-time               # let a look run alongside a skill that leaves the head free
+pnpm start -- --engine jev --same-time               # only with selection.channels 0: let a look run alongside a skill that leaves the head free
 pnpm start -- skill break_block --target dir:forward # run one skill or primitive and print what it changed
 pnpm start -- --plan '{"goal":"Explore","ifThen":[{"when":"creeper","skill":"flee"}]}'   # a fixed plan for the echo planner
 ```

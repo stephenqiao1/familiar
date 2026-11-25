@@ -21,8 +21,8 @@ const serotonin = (t: Tick) => (t.regions.find((r) => r.region === "serotonin")?
 const patience = (t: Tick | undefined) => (t ? (serotonin(t).patience ?? NaN) : NaN);
 /** A threat that can get to the bot is within 8 blocks. */
 const threatened = (t: Tick) => (t.state.data.nearby?.mobs ?? []).some((m) => m.hostile && m.reachable && m.dist < 8);
-/** What the arbiter multiplied the winner's score by, from its reason ("scaled ×0.87"); 1 if it says nothing. */
-const scaleOf = (t: Tick) => Number(/scaled ×([\d.]+)/.exec(t.winner?.reason ?? "")?.[1] ?? 1);
+/** What the arbiter multiplied the winner's score by, by restraint, from its reason ("restraint ×0.87"); 1 if it says nothing. */
+const scaleOf = (t: Tick) => Number(/restraint ×([\d.]+)/.exec(t.winner?.reason ?? "")?.[1] ?? 1);
 
 const scenes: Record<string, () => Promise<Row>> = {
   /** 1. A quiet spell, then a husk walks up: patience should fall while danger presses, not sit where the calm left it. */

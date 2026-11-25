@@ -226,4 +226,14 @@ export interface Arbiter {
    * still running, return the winner if nothing still running could change it; else null.
    */
   settledEarly?(candidates: Candidate[], pendingLayers: number[], ws: Workspace): Candidate | null;
+  /**
+   * Optional: every winner at once, for an arbiter that runs a contest for each part of the body.
+   * It is given every candidate (it sorts out itself which run alongside), and `early` when
+   * `settledEarly` already gave the action. With this, the loop's `alongside.isSide` is not asked.
+   */
+  choose?(candidates: Candidate[], ws: Workspace, early?: Candidate | null): { winner: Candidate | null; alongside: Candidate[] };
+  /** Optional: asks for the next tick within this many ms (a wait that must end on time), or null. */
+  againInMs?(): number | null;
+  /** What the last choice weighed (every candidate and what moved its score), for the log. Default: nothing is logged. */
+  trace?(): Record<string, unknown> | undefined;
 }

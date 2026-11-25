@@ -35,8 +35,15 @@ export interface Row {
  * `settings` are the bot's settings for this run, as its entry in bots.json would be (default:
  * whatever FAMILIAR_BOTS_FILE or bots.json says); `keep` leaves what it learned last run in place.
  */
-export async function play(act: (bot: { say(command: string): void }) => Promise<void>, options: { plan?: object; whole?: boolean; settings?: object; keep?: boolean; also?: string[]; flags?: string[]; without?: string[] } = {}): Promise<Tick[]> {
+export async function play(act: (bot: { say(command: string): void }) => Promise<void>, options: { plan?: object; whole?: boolean; settings?: object; keep?: boolean; also?: string[]; flags?: string[]; without?: string[]; before?: string[]; awakeDays?: number; start?: string } = {}): Promise<Tick[]> {
   if (!options.keep) rmSync(`data/${BOT}`, { recursive: true, force: true });
+  // `before`: world commands before the bot joins. `awakeDays`: how long it has been awake (kept as the world's age when it last woke). `start`: where it stands.
+  for (const command of options.before ?? []) rcon(command);
+  if (options.awakeDays !== undefined) {
+    const age = Number(/(\d+)\s*$/.exec(rcon("time query gametime"))?.[1] ?? NaN);
+    mkdirSync(`data/${BOT}`, { recursive: true });
+    writeFileSync(`data/${BOT}/body.json`, JSON.stringify({ sleptAtAge: Math.max(0, age - Math.round(options.awakeDays * 24_000)) }));
+  }
   const env = { ...process.env };
   if (options.settings) {
     mkdirSync("logs", { recursive: true });
@@ -56,7 +63,7 @@ export async function play(act: (bot: { say(command: string): void }) => Promise
   const joined = Date.now();
   while (!output.includes("Logging to") && !exited && Date.now() - joined < 30_000) await sleep(200);
   if (exited) throw new Error(`The bot stopped before it started playing:\n${output.slice(-500)}`);
-  for (const command of [`gamemode survival ${BOT}`, `clear ${BOT}`, `effect clear ${BOT}`, `effect give ${BOT} instant_health 1 10 true`, `effect give ${BOT} saturation 1 10 true`, `tp ${BOT} ${HOME}`]) rcon(command);
+  for (const command of [`gamemode survival ${BOT}`, `clear ${BOT}`, `effect clear ${BOT}`, `effect give ${BOT} instant_health 1 10 true`, `effect give ${BOT} saturation 1 10 true`, `tp ${BOT} ${options.start ?? HOME}`]) rcon(command);
   await sleep(2500);
   try {
     await act({ say: (command) => void child.stdin.write(`${command}\n`) });

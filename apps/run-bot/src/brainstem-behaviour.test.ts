@@ -1,3 +1,4 @@
+import { DEFAULT_SELECTION, NO_SELECTION, type SelectionSettings } from "@familiar/basal-ganglia";
 // Behaviour tests for the spinal cord and brainstem layer, run through the bot's real wiring:
 // createBrain (every region, the player's reflexes and brainstem settings) and the arbiter.
 // Only the world, the engine and the planner are made up.
@@ -87,7 +88,7 @@ function state(p: Patch, ms: number): State {
 }
 
 const skill = (name: string, flags: Partial<Skill<null>> = {}): Skill<null> => ({ name, description: name, canRun: () => true, run: async () => ({ status: "done" }), ...flags });
-const skills = [
+const SKILLS = [
   ...["go_to", "idle", "flee", "sleep", "consume"].map((name) => skill(name)),
   skill("eat", { parts: ["hands"] }),
   skill("attack", { risky: true }),
@@ -100,7 +101,8 @@ const skills = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[] } = {}) {
+  const skills = options.skills ?? SKILLS;
   const store = createWorkspace();
   const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
   const engine: DecisionEngine = {
@@ -144,6 +146,8 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       arousal: { ...DEFAULT_AROUSAL, ...options.arousal },
       ...(options.drives ? { drives: options.drives } : {}),
       sameTime: options.sameTime ?? false,
+      // These tests are about the layers below the choice: the basal ganglia's own parts have their tests in selection-parts.test.ts.
+      selection: options.selection ?? NO_SELECTION,
       memory: createMemory(),
       persistence,
       storage: { chests: createChestMemory(), baseChest: "pos:0,63,0" },
@@ -152,7 +156,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
     },
     options.only,
   );
-  const arbiter = createArbiter({ scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills });
+  const arbiter = createArbiter({ selection: options.selection ?? NO_SELECTION, sameTime: options.sameTime ?? false, scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills });
   let ms = 0;
   /** Runs every region in the brain's order (the planner too), then the arbiter. */
   async function tick(patch: Patch = {}, running: string | null = null, afterMs = 500) {
@@ -170,10 +174,11 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
         errors.push(region.name);
       }
     }
-    const winner = arbiter.pick(candidates, store.viewFor("arbiter"));
+    const { winner, alongside } = arbiter.choose!(candidates, store.viewFor("arbiter"));
     const won = winner && "skill" in winner.action ? winner.action.skill : null;
+    const beside = alongside.map((c) => ("skill" in c.action ? c.action.skill : null));
     const reflexes = (traces.reflex?.rules as FiredReflex[] | undefined) ?? [];
-    return { winner, won, candidates, traces, errors, reflexes };
+    return { winner, won, beside, candidates, traces, errors, reflexes };
   }
   const value = (name: string) => store.signals()[name]?.value;
   return { store, calls, tick, value };
@@ -576,25 +581,25 @@ describe("looking while the hands are busy (the same-time flag)", () => {
 
   it("on: a look runs alongside a walking skill, since walking leaves the head free", async () => {
     const walk = skill("walk", { parts: ["legs", "hands"] });
-    skills.push(walk);
+    SKILLS.push(walk);
     try {
       const walking = bot({ sameTime: true });
       await walking.tick({}, "walk");
       expect(how(await walking.tick(appears(mob("zombie", 12)), "walk"))).toBe("alongside");
     } finally {
-      skills.pop();
+      SKILLS.pop();
     }
   });
 
   it("a skill that uses no part of the body (idling) always has looks beside it, flag or not", async () => {
     const still = skill("stand", { parts: [] });
-    skills.push(still);
+    SKILLS.push(still);
     try {
       const { tick } = bot();
       await tick({}, "stand");
       expect(how(await tick(appears(mob("zombie", 12)), "stand"))).toBe("alongside");
     } finally {
-      skills.pop();
+      SKILLS.pop();
     }
   });
 });
@@ -1063,5 +1068,33 @@ describe("drives through the real brain", () => {
       expect(out.winner).toMatchObject({ region: "reflex", urgency: 1 });
       if (drives === DEFAULT_DRIVES) expect(value("desperate")).toBe(1);
     }
+  });
+});
+
+describe("the basal ganglia's channels through the real brain", () => {
+  const look = (out: { candidates: Candidate[] }) => out.candidates.find((c) => c.region === "colliculus");
+  // The body parts as the real skills declare them: idling uses none, a look the head, walking the legs and hands.
+  const PARTS: Record<string, Skill<null>["parts"]> = { idle: [], look_at: ["head"], go_to: ["legs", "hands"], flee: ["legs", "hands"] };
+  const skills = SKILLS.map((s) => (s.name in PARTS ? { ...s, parts: PARTS[s.name]! } : s));
+
+  it("without channels a look with nothing running is proposed at full urgency, to beat idling; with them it is graded and runs beside it", async () => {
+    const one = bot({ skills });
+    await one.tick({});
+    const before = await one.tick(appears(mob("zombie", 12)));
+    expect(look(before)?.urgency).toBe(1);
+    expect(before).toMatchObject({ won: "look_at", beside: [] });
+
+    const channels = bot({ skills, selection: { ...NO_SELECTION, channels: 1 } });
+    await channels.tick({});
+    const after = await channels.tick(appears(mob("zombie", 12)));
+    expect(look(after)?.urgency).toBeLessThan(0.8);
+    expect(after).toMatchObject({ won: "idle", beside: ["look_at"] });
+  });
+
+  it("with channels a look runs beside a skill that leaves the head free, with no same-time flag", async () => {
+    const eating = bot({ skills, selection: DEFAULT_SELECTION });
+    await eating.tick({}, "eat");
+    const out = await eating.tick(appears(mob("zombie", 12)), "eat");
+    expect(out).toMatchObject({ won: "eat", beside: ["look_at"] });
   });
 });

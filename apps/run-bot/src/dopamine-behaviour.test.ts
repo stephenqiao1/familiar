@@ -1,3 +1,4 @@
+import { NO_SELECTION } from "@familiar/basal-ganglia";
 // Behaviour tests for dopamine (section 10 of the Neuromodulators doc), run through the bot's real
 // wiring: the player's reward rules, situation labels and cues, the dopamine region and the
 // value-weighted arbiter. Only the world is made up: each tick is a hand-written state.
@@ -124,7 +125,7 @@ describe("dopamine behaviour", () => {
       { feature: "go_to", expected: 0.6, benefit: 2, cost: 1.5 },
       { feature: "idle", expected: 0.3, benefit: 0.8, cost: 0.2 },
     ]);
-    const arbiter = createArbiter({ scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills: [] });
+    const arbiter = createArbiter({ selection: NO_SELECTION, scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills: [] });
     const candidate = (skill: string): Candidate => ({ region: "instinct", layer: 1, urgency: 0.5, action: { skill }, reason: skill });
 
     function pickAt(da: number): string {
@@ -172,7 +173,7 @@ describe("dopamine behaviour", () => {
       const { tripToChest, tick, store, scorebook } = bot();
       for (let i = 0; i < 10; i++) tripToChest(4);
       const wants = tick({ foodItems }).proposals.map((p): Candidate => ({ ...p, region: "dopamine", layer: 0 }));
-      const arbiter = createArbiter({ scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills: [] });
+      const arbiter = createArbiter({ selection: NO_SELECTION, scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills: [] });
       return { wants, winner: arbiter.pick([jev("return_to_base", 0.72), ...others, ...wants], store.viewFor("arbiter"))! };
     }
 
@@ -185,7 +186,7 @@ describe("dopamine behaviour", () => {
     it("with a threat close, the chest is not wanted and Jev's defence keeps its hold; the threat gone, it is wanted again", () => {
       const { tripToChest, tick, store, scorebook } = bot();
       for (let i = 0; i < 10; i++) tripToChest(4);
-      const arbiter = createArbiter({ scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills: [] });
+      const arbiter = createArbiter({ selection: NO_SELECTION, scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills: [] });
       const pick = (out: RegionOutput) => arbiter.pick([jev("attack", 0.72), ...out.proposals.map((p): Candidate => ({ ...p, region: "dopamine", layer: 0 }))], store.viewFor("arbiter"))!;
       const husk = (dist: number) => ({ id: "entity:9", type: "husk", dist, hostile: true, reachable: true });
       const threatened = tick({ foodItems: 0, mobs: [husk(1)] });
@@ -207,7 +208,7 @@ describe("dopamine behaviour", () => {
       // Two of Jev's options, neither serving the need: both are loosened alike.
       const { store, scorebook, tick } = bot();
       tick({ foodItems: 0 });
-      const arbiter = createArbiter({ scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills: [] });
+      const arbiter = createArbiter({ selection: NO_SELECTION, scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills: [] });
       const pick = () => arbiter.pick([jev("return_to_base", 0.5), jev("idle", 0.45)], store.viewFor("arbiter"))!;
       // With nothing wanted (no chest known) nothing is loosened at all.
       expect(pick().reason).not.toMatch(/scaled/);

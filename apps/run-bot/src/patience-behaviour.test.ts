@@ -1,3 +1,4 @@
+import { NO_SELECTION } from "@familiar/basal-ganglia";
 // Behaviour tests for patience (serotonin), run through the bot's real wiring: the player's
 // needs, the serotonin region, the arbiter and the prefrontal region. Only the world is
 // made up: each tick is a hand-written state.
@@ -109,7 +110,7 @@ const skills = [skill("attack", true), skill("go_to")];
 const candidate = (name: string, urgency: number, layer = 1): Candidate => ({ region: "instinct", layer, urgency, action: { skill: name }, reason: name });
 
 function pick(patience: number, settings: PatienceSettings, candidates: Candidate[]) {
-  const arbiter = createArbiter({ scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: settings, skills });
+  const arbiter = createArbiter({ selection: NO_SELECTION, scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: settings, skills });
   return arbiter.pick(candidates, workspaceAt(patience).viewFor("arbiter"));
 }
 
@@ -166,12 +167,12 @@ describe("patience behaviour", () => {
 
     it("keeps the running skill against a slightly better option, but not a clearly better one or a reflex", () => {
       const { persistence, startedAt } = running(0.5, 0, 0);
-      const arbiter = createArbiter({ scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, persistence, skills });
+      const arbiter = createArbiter({ selection: NO_SELECTION, scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, persistence, skills });
       const ws = workspaceAt(0.5).viewFor("arbiter");
       const realNow = Date.now;
       Date.now = () => startedAt; // the arbiter asks the clock; the skill has only just started
       try {
-        expect(arbiter.pick([candidate("go_to", 0.5), candidate("idle", 0.6)], ws)).toMatchObject({ action: { skill: "go_to" }, reason: expect.stringContaining("bonus +0.15") });
+        expect(arbiter.pick([candidate("go_to", 0.5), candidate("idle", 0.6)], ws)).toMatchObject({ action: { skill: "go_to" }, reason: expect.stringContaining("stay +0.15") });
         expect(arbiter.pick([candidate("go_to", 0.5), candidate("idle", 0.7)], ws)?.action).toEqual({ skill: "idle" });
         expect(arbiter.pick([candidate("go_to", 0.5), candidate("attack", 1, 0)], ws)?.action).toEqual({ skill: "attack" });
         Date.now = () => startedAt + 10_000; // ten seconds with nothing to show for it: no protection left
@@ -184,7 +185,7 @@ describe("patience behaviour", () => {
     });
 
     it("keeps the running skill in the vote while the layer that chose it is silent, and lets it go once that layer says otherwise", () => {
-      const arbiter = createArbiter({ scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: OFF, skills });
+      const arbiter = createArbiter({ selection: NO_SELECTION, scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: OFF, skills });
       const store = workspaceAt(0.5);
       const glance: Candidate = { region: "colliculus", layer: 0, urgency: 0.35, action: { skill: "look_at" }, reason: "glance" };
       // Jev picks go_to, and it starts.
@@ -203,7 +204,7 @@ describe("patience behaviour", () => {
 
     it("a skill just given up on is not started again by a deciding layer until its wait is over; a reflex may at once", () => {
       const persistence = createPersistence({ patience: () => 0.5, chanceOf: () => 0.5, strength: 1 });
-      const arbiter = createArbiter({ scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: OFF, persistence, skills });
+      const arbiter = createArbiter({ selection: NO_SELECTION, scorebook: createScorebook(), personality: DEFAULT_PERSONALITY, patience: OFF, persistence, skills });
       const ws = workspaceAt(0.5).viewFor("arbiter");
       persistence.observe({ skill: "go_to", type: "started", timestamp: 0 });
       const gaveUpAt = BASE_S * 1000;
@@ -274,20 +275,20 @@ describe("patience behaviour", () => {
     it("scores a risky skill lower at patience 0.9 than at 0.1", () => {
       expect(pick(0.1, DEFAULT_PATIENCE, choice)?.action).toEqual({ skill: "attack" });
       expect(pick(0.9, DEFAULT_PATIENCE, choice)).toMatchObject({ action: { skill: "go_to" } });
-      expect(pick(0.1, DEFAULT_PATIENCE, choice)?.reason).toContain("scaled ×1.14");
+      expect(pick(0.1, DEFAULT_PATIENCE, choice)?.reason).toContain("restraint ×1.14");
     });
 
     it("never touches a reflex: the defence circuit's own fight is not held back, however patient the bot", () => {
       const fight: Candidate = { region: "reflex", layer: 0, urgency: 0.6, action: { skill: "attack" }, reason: "defence_fight" };
       const picked = pick(0.9, DEFAULT_PATIENCE, [fight, candidate("go_to", 0.55)]);
       expect(picked?.action).toEqual({ skill: "attack" });
-      expect(picked?.reason).not.toContain("scaled");
+      expect(picked?.reason).not.toContain("restraint");
     });
 
     it("goes by what was learned: a skill that has cost the bot is held back though not marked risky, and a risky one that keeps paying is held back less", () => {
       const at = (scorebook: ReturnType<typeof createScorebook>, name: string) => {
-        const arbiter = createArbiter({ scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills });
-        return Number(/scaled ×([\d.]+)/.exec(arbiter.pick([candidate(name, 0.9)], workspaceAt(0.9).viewFor("arbiter"))!.reason)?.[1] ?? 1);
+        const arbiter = createArbiter({ selection: NO_SELECTION, scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills });
+        return Number(/restraint ×([\d.]+)/.exec(arbiter.pick([candidate(name, 0.9)], workspaceAt(0.9).viewFor("arbiter"))!.reason)?.[1] ?? 1);
       };
       const situation = situationOf(state(GOOD, 0));
       // Nothing learned: only the skill marked risky is held back.
@@ -314,7 +315,7 @@ describe("patience behaviour", () => {
       const choice = [candidate("attack", 0.6), candidate("go_to", 0.55)];
       for (const patience of [0.05, 0.5, 0.95]) {
         // Arbiter: same winner, and no trace of a brake.
-        expect(pick(patience, OFF, choice)).toEqual({ ...choice[0], reason: "attack; value 0.00" });
+        expect(pick(patience, OFF, choice)).toEqual({ ...choice[0], reason: "attack" });
         // Persistence: no stay bonus, no giving up early, and the same 2-minute stop as before.
         const persistence = createPersistence({ patience: () => patience, chanceOf: () => 0.5, strength: 0 });
         persistence.observe({ skill: "attack", type: "started", timestamp: 0 });

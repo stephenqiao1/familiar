@@ -1,3 +1,4 @@
+import { parseHabits, type HabitEntries } from "@familiar/basal-ganglia";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { parseLearnedSkills, type LearnedSkill } from "@familiar/core";
@@ -19,6 +20,7 @@ export const bodyFile = (bot: string) => `data/${bot}/body.json`;
 export const targetsFile = (bot: string) => `data/${bot}/targets.json`;
 export const surfacesFile = (bot: string) => `data/${bot}/surfaces.json`;
 export const threatsFile = (bot: string) => `data/${bot}/threats.json`;
+export const habitsFile = (bot: string) => `data/${bot}/habits.json`;
 export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
 
 /** What the bot has learned about how much is enough: need → how many times the usual, and when. A missing file means nothing yet; a broken entry is left out. */
@@ -195,4 +197,13 @@ function isMemory(m: unknown): boolean {
 function isFact(f: unknown): boolean {
   const o = f as Partial<Fact> | null;
   return typeof o?.id === "string" && typeof o.text === "string" && typeof o.involved === "string" && typeof o.confidence === "number" && typeof o.support === "number";
+}
+
+/** The bot's habits: situation → skill → how well-worn the choice is. A missing file means none yet; a broken entry is left out. */
+export async function loadHabits(file: string): Promise<HabitEntries> {
+  return parseHabits(await readJson(file));
+}
+
+export async function saveHabits(habits: HabitEntries, file: string): Promise<void> {
+  await writeJson(file, habits);
 }

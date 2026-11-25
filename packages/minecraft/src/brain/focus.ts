@@ -37,8 +37,8 @@ export function unfamiliarPlace(memory: MemoryStore): FocusInput {
   });
 }
 
-/** How well the bot's predictions have been holding, from dopamine's surprise at each run that ends. */
-const surprised = () =>
+/** How well the bot's predictions have been holding, from dopamine's surprise at each run that ends: above 0 failing, below 0 holding. Keeps its own state, so read it every tick. */
+export const surprised = () =>
   predictionsFailing((ws) => {
     const signal = ws.signals[SURPRISE_SIGNAL];
     return signal ? { size: signal.value, at: signal.at } : null;

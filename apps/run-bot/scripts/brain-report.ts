@@ -1,9 +1,10 @@
 // Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
-// surprises, the drives (top drive, needs, looking ahead, stress, targets learned), reflexes and the brainstem, arousal (bands, bedtimes, wakings, calls saved), the defence circuit, the medulla, balance and posture, the colliculus, memories, interrupts, warnings and region errors.
+// surprises, the drives (top drive, needs, looking ahead, stress, targets learned), reflexes and the brainstem, arousal (bands, bedtimes, wakings, calls saved), the defence circuit, the medulla, balance and posture, the colliculus, the basal ganglia (wins, near ties, habits, terms), memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { summariseDefence, type DefenceRow } from "@familiar/region-brainstem";
+import { selectionReport, type SelectionTick } from "./selection-report.ts";
 
 interface RegionLog {
   region: string;
@@ -354,6 +355,9 @@ const worthAfter = colliculus.filter((c) => c.worthAfter).length;
 console.log(`WORTH THE LOOK: ${lookEnded.filter((r) => r.worth).length} of ${lookEnded.length} looks${worthAfter ? `, and ${worthAfter} more by what followed just after` : ""}${lookEnded.some((r) => r.worth) ? `; why: ${list(count(lookEnded.filter((r) => r.worth), (r) => r.why.replace(/ \(.*\)$/, "")), 6)}` : ""}`);
 const orientings = ticks.map((t) => t.signals.orienting?.value ?? 0).filter((v) => v > 0);
 console.log(`ORIENTING SIGNAL: sent on ${orientings.length} ticks${orientings.length ? `, strongest ${Math.max(...orientings).toFixed(2)}, typical ${(middle(orientings.map((v) => Math.round(v * 100))) ?? 0) / 100}` : ""}`);
+
+// The basal ganglia: who won and why.
+for (const line of selectionReport(ticks as unknown as SelectionTick[])) console.log(line);
 
 // The thalamus: what the deciding layers were told, how big it was, what opened a channel, and blind spots.
 type ToldView = { paused?: boolean; limit?: number; size?: number; over?: number; channels?: Record<string, { open: string | false }>; items?: { id: string; form: string }[]; bursts?: string[] };

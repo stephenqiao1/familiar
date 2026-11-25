@@ -30,6 +30,8 @@ export interface TickLog {
   action: Action;
   /** A proposal acted on alongside the main action, using other body parts. */
   alongside?: Candidate;
+  /** What the arbiter weighed: every candidate, each term that moved its score, and who won. */
+  selection?: Record<string, unknown>;
   goal: Goal | null;
   signals: Record<string, Signal>;
   /** What the agent was attending to at the end of the tick, if anything. */
