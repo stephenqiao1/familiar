@@ -1,5 +1,5 @@
 import { createNoveltyRule, type NoveltyMemory, type Reward, type RewardMoment, type RewardRule } from "@familiar/neuromodulators";
-import { noticedIn } from "./cues.js";
+import { newPlace, noticedIn } from "./cues.js";
 import type { MinecraftStateData } from "../encode/state-data.js";
 import { minecraftDataOf } from "./read-state.js";
 
@@ -54,7 +54,7 @@ export const sleptThroughNight = rule("slept_through_night", "rest", (a, b, { ev
 
 /** Boredom, relieved by meeting a kind of thing (mob, useful block, player, biome, item); a thing met often relieves little. */
 export function curiosity(memory: NoveltyMemory, bonus?: number): RewardRule {
-  return createNoveltyRule({ noticed: noticedIn, memory, fresh: newLife, ...(bonus === undefined ? {} : { bonus }) });
+  return createNoveltyRule({ noticed: (state, ws) => [...noticedIn(state), ...newPlace(ws)], memory, fresh: newLife, ...(bonus === undefined ? {} : { bonus }) });
 }
 
 // Things that happen. (Being hurt is the health need rising; losing food, torches or the last tool of a kind is that need rising.)

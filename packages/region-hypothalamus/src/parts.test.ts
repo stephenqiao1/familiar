@@ -99,6 +99,8 @@ describe("stress", () => {
   it("the load is the largest of its sources, not their sum", () => {
     expect(loadOf({ alarm: 0.6, threat: 0.5, pain: 0.2, poorVitals: 0.1 })).toEqual({ value: 0.6, by: "alarm" });
     expect(loadOf({ alarm: 0, threat: 0, pain: 0, poorVitals: 0 })).toEqual({ value: 0, by: "nothing" });
+    // Fear is one more source: it loads the body before any harm has come.
+    expect(loadOf({ alarm: 0.2, threat: 0, pain: 0, poorVitals: 0, fear: 0.5 })).toEqual({ value: 0.5, by: "fear" });
   });
   it("builds over about a minute under load and takes about five to fade", () => {
     const stress = createStress();

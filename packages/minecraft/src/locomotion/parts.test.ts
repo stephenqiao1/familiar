@@ -3,7 +3,7 @@ import { Vec3 } from "vec3";
 import { doorWay } from "./door.js";
 import { createStuckSense, recoveryFor } from "./feel.js";
 import { allowSprint, canSprint, createStraightness, gaitOf } from "./gait.js";
-import { awayPoint } from "./journeys.js";
+import { awayPoint, goToJourney } from "./journeys.js";
 import { createStuckSpots } from "./spots.js";
 
 describe("gait", () => {
@@ -106,5 +106,40 @@ describe("awayPoint", () => {
     expect(leaning.z).toBeLessThan(-5);
     // Home is behind the threat: ignore it.
     expect(awayPoint(me, threat, new Vec3(0, 63, 30))).toEqual(new Vec3(0, 63, -8));
+  });
+});
+
+describe("a journey by known spots", () => {
+  const bot = (at: Vec3) => ({ entity: { position: at }, world: {} }) as never;
+  const near = (goal: unknown) => goal as { x: number; rangeSq: number };
+
+  it("heads for each spot in turn, then for the end, and has not arrived until the spots are passed", () => {
+    const me = new Vec3(0, 64, 0);
+    const journey = goToJourney(bot(me), new Vec3(40, 64, 0), { via: [new Vec3(10, 64, 0), new Vec3(20, 64, 0)] });
+    expect(near(journey.goal()).x).toBe(10);
+    expect(journey.advance!(false)).toBe(false);
+    // The walk reached its goal, but that goal was only a spot on the way.
+    me.x = 9;
+    expect(journey.arrived(true, false)).toBe(false);
+    expect(journey.advance!(false)).toBe(true);
+    expect(near(journey.goal()).x).toBe(20);
+    // Close to the end, the spots left are dropped.
+    me.x = 30;
+    expect(journey.advance!(false)).toBe(true);
+    expect(near(journey.goal()).x).toBe(40);
+    expect(journey.advance!(false)).toBe(false);
+    expect(journey.arrived(true, false)).toBe(true);
+  });
+
+  it("drops the spots and heads straight for the end when a leg has no route", () => {
+    const journey = goToJourney(bot(new Vec3(0, 64, 0)), new Vec3(40, 64, 0), { via: [new Vec3(10, 64, 0)] });
+    expect(journey.advance!(true)).toBe(true);
+    expect(near(journey.goal()).x).toBe(40);
+  });
+
+  it("with no spots is the journey it always was", () => {
+    const journey = goToJourney(bot(new Vec3(0, 64, 0)), new Vec3(40, 64, 0), {});
+    expect(journey.advance!(true)).toBe(false);
+    expect(journey.arrived(true, false)).toBe(true);
   });
 });

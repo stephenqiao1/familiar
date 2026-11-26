@@ -13,7 +13,7 @@ import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 /** Everything but instinct: reflexes, upkeep, dopamine and the echo planner (for a fixed plan). */
 // LESION=hypothalamus (or any names, comma-separated) leaves those out too.
 const LESION = (process.env.LESION ?? "").split(",").filter(Boolean);
-const NO_INSTINCT = "reflex,medulla,hypothalamus,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal"
+const NO_INSTINCT = "reflex,medulla,hypothalamus,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal"
   .split(",")
   .filter((name) => !LESION.includes(name))
   .join(",");

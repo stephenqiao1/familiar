@@ -9,7 +9,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 
 /** Everything but instinct: only the reflexes and the medulla decide, plus typed commands. */
-const UPKEEP_ONLY = "reflex,medulla,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+const UPKEEP_ONLY = "reflex,medulla,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal";
 const PLAZA_SPOT = "60.5 151 40.5 180 0";
 const BASE_SPOT = "-8 69 14";
 

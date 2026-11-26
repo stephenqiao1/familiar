@@ -39,6 +39,14 @@ export interface GoToOptions {
   urgent?: boolean;
   /** The journey is done when this says so (instead of on arriving). */
   until?: () => boolean;
+  /** Spots to pass on the way, in order (a known way to somewhere out of sight). The pathfinder takes one goal at a time, so each is a leg. */
+  via?: Vec3[];
+}
+
+/** A known way to somewhere, from a map: spots to pass, and areas worth going round. */
+export interface RouteHint {
+  via: Vec3[];
+  avoid: { name: string; centre: { x: number; y: number; z: number }; radius: number }[];
 }
 
 export interface FollowOptions {

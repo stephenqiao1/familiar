@@ -7,4 +7,4 @@ export function withJourney(result: SkillResult, journey: SkillResult): SkillRes
   return journey.changes ? { ...result, changes: { ...journey.changes, ...result.changes } } : result;
 }
 
-export type { AwayOptions, Drive, FollowOptions, Gait, GoToOptions, HeadOverride, Locomotion, LocomotionStatus, PatternName, Place } from "./types.js";
+export type { AwayOptions, Drive, FollowOptions, Gait, GoToOptions, HeadOverride, Locomotion, LocomotionStatus, PatternName, Place, RouteHint } from "./types.js";

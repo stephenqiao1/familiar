@@ -9,11 +9,15 @@ const { GoalFollow, GoalLookAtBlock, GoalNear } = pathfinderPkg.goals;
 /** How far ahead a retreat aims each time it plans, and how often it plans again. */
 const AWAY_STEP = 8;
 const AWAY_REPLAN_MS = 500;
+/** A spot on the way is passed once within this many blocks; the rest are dropped this close to the journey's end. */
+const VIA = { range: 2, passed: 4, endNear: 12 };
 
 /** A journey with the walking goal it needs. */
 export interface Planned extends Journey {
   /** The pathfinder goal for where the journey is heading right now, or null if nowhere. */
   goal(): goals.Goal | null;
+  /** Moves on to the next leg if it is time (`failed`: no route to this leg, so the spots on the way are dropped). True if the goal changed. */
+  advance?(failed: boolean): boolean;
 }
 
 const stillThere = (bot: Bot, entity: Entity) => entity.isValid && bot.entities[entity.id] === entity;
@@ -22,17 +26,28 @@ const stillThere = (bot: Bot, entity: Entity) => entity.isValid && bot.entities[
 export function goToJourney(bot: Bot, place: Place, options: GoToOptions): Planned {
   const { range = 1, see = false, urgent = false, until } = options;
   const aim = typeof place === "function" ? place : () => place;
+  let via = [...(options.via ?? [])];
   return {
     kind: "goTo",
     aim,
     goal() {
       const at = aim();
       if (!at) return null;
+      if (via[0]) return new GoalNear(via[0].x, via[0].y, via[0].z, VIA.range);
       return see ? new GoalLookAtBlock(at.floored(), bot.world) : new GoalNear(at.x, at.y, at.z, range);
+    },
+    advance(failed) {
+      if (!via[0]) return false;
+      const me = bot.entity.position;
+      const end = aim();
+      if (failed || (end && end.distanceTo(me) <= VIA.endNear)) via = [];
+      else if (via[0].distanceTo(me) <= VIA.passed) via.shift();
+      else return false;
+      return true;
     },
     arrived(walked, steering) {
       if (until) return until();
-      if (walked) return true;
+      if (walked && !via[0]) return true;
       // Steering has no pathfinder to say so: close enough across the ground, and level with it.
       const at = aim();
       const me = bot.entity.position;

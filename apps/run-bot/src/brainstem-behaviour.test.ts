@@ -20,6 +20,7 @@ import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type ArousalSet
 import { DEFAULT_DRIVES, DRIVES_OFF, type DriveSettings } from "@familiar/region-hypothalamus";
 import type { FiredReflex } from "@familiar/region-reflex";
 import { THALAMUS_OFF, type ThalamusSettings } from "@familiar/region-thalamus";
+import { createAssociations, DEFAULT_AMYGDALA, NO_READERS, type AmygdalaOptions, type AmygdalaReaders } from "@familiar/region-amygdala";
 import { describe, expect, it } from "vitest";
 import { createArbiter, createBrain } from "./brain.js";
 
@@ -101,7 +102,7 @@ const SKILLS = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[] } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[]; amygdala?: AmygdalaOptions } = {}) {
   const skills = options.skills ?? SKILLS;
   const store = createWorkspace();
   const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
@@ -145,6 +146,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       defence: { ...DEFAULT_DEFENCE, ...options.defence },
       arousal: { ...DEFAULT_AROUSAL, ...options.arousal },
       ...(options.drives ? { drives: options.drives } : {}),
+      ...(options.amygdala ? { amygdala: options.amygdala } : {}),
       sameTime: options.sameTime ?? false,
       // These tests are about the layers below the choice: the basal ganglia's own parts have their tests in selection-parts.test.ts.
       selection: options.selection ?? NO_SELECTION,
@@ -183,6 +185,50 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
   const value = (name: string) => store.signals()[name]?.value;
   return { store, calls, tick, value };
 }
+
+describe("the amygdala's readers through the real brain", () => {
+  /** An amygdala that has learned to fear cows (which the game does not flag hostile), offered one whenever a mob is near. */
+  const fearingCows = (readers: AmygdalaReaders): AmygdalaOptions => ({
+    store: createAssociations({ "kind:cow": { harm: 0.9, good: 0, sure: 1, at: 0 } }),
+    settings: { ...DEFAULT_AMYGDALA, readers },
+    cues: (ws) => ((ws.state.data as unknown as MinecraftStateData).nearby.mobs.length ? [{ key: "kind:cow", salience: 1 }] : []),
+    outcomes: () => [],
+  });
+  const cow: Mob = { ...mob("cow", 8), hostile: false };
+  const OWN = new Set(["fear", "appeal", "matters"]);
+  const others = (signals: Record<string, { value: number }>) => Object.fromEntries(Object.entries(signals).filter(([name]) => !OWN.has(name)).map(([name, s]) => [name, s.value]));
+
+  it("with every reader at 0 the brain does what it did with no amygdala: the same signals and the same winners, tick for tick", async () => {
+    const [plain, watching] = [bot(), bot({ amygdala: fearingCows(NO_READERS) })];
+    for (const patch of [{}, { mobs: [cow] }, { mobs: [cow, mob("zombie", 6, 2)] }, { mobs: [cow] }, {}, {}]) {
+      const [a, b] = [await plain.tick(patch), await watching.tick(patch)];
+      expect(b.won).toBe(a.won);
+      expect(others(watching.store.signals())).toEqual(others(plain.store.signals()));
+    }
+    expect(watching.value("fear")).toBe(0);
+    await watching.tick({ mobs: [cow] });
+    expect(watching.value("fear")).toBeCloseTo(0.9, 1);
+  });
+
+  it("fear raises alarm before any harm has come, and loads the body while it lasts; with those readers at 0 it does neither", async () => {
+    const feels = async (readers: AmygdalaReaders) => {
+      const b = bot({ amygdala: fearingCows(readers), drives: DEFAULT_DRIVES });
+      await b.tick();
+      for (let i = 0; i < 6; i++) await b.tick({ mobs: [cow] });
+      const last = await b.tick({ mobs: [cow] });
+      return { fear: b.value("fear")!, alarm: b.value("alarm")!, loadBy: (last.traces.hypothalamus as { loadBy?: string }).loadBy };
+    };
+    const on = await feels(DEFAULT_AMYGDALA.readers);
+    expect(on.fear).toBeCloseTo(0.9, 1);
+    expect(on.alarm).toBeGreaterThan(0.4);
+    expect(on.alarm).toBeLessThan(0.8);
+    expect(on.loadBy).toBe("fear");
+    const off = await feels({ ...DEFAULT_AMYGDALA.readers, alarm: 0, stress: 0 });
+    expect(off.fear).toBeCloseTo(0.9, 1);
+    expect(off.alarm).toBeLessThan(0.05);
+    expect(off.loadBy).not.toBe("fear");
+  });
+});
 
 describe("reflex gains through the real brain", () => {
   it("a new threat's first tick is not damped: the gain uses this tick's threat, then alarm once it has risen", async () => {

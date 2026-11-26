@@ -27,6 +27,9 @@
       "path": "packages/region-hypothalamus"
     },
     {
+      "path": "packages/region-amygdala"
+    },
+    {
       "path": "packages/region-instinct"
     },
     {

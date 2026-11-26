@@ -72,16 +72,23 @@ const NEVER = new Set(["air", "cave_air", "void_air", "water"]);
 /** Kinds of damage that name where the harm is, instead of the block itself. */
 const KIND_POINTS_AT: Record<string, (t: Touching) => string[]> = { hot_floor: (t) => [t.below] };
 
+/** The blocks being touched, each once. */
+const touched = (t: Touching) => [...new Set([t.feet, t.head, t.below, ...t.sides])];
+
+/** The block types the hurt itself points at: the block the game names, if it is one of those being touched. None if it names none. */
+export function namedCauses(hurt: Pick<Hurt, "kind" | "touching">): string[] {
+  const kind = hurt.kind ?? "";
+  if (touched(hurt.touching).includes(kind)) return [kind];
+  return KIND_POINTS_AT[kind]?.(hurt.touching) ?? [];
+}
+
 /**
  * Works out which block types a hurt was probably caused by: the block the game names if it
  * names one of those being touched, else every block being touched.
  */
 export function likelyCauses(hurt: Pick<Hurt, "kind" | "touching">): string[] {
-  const t = hurt.touching;
-  const all = [...new Set([t.feet, t.head, t.below, ...t.sides])];
-  const kind = hurt.kind ?? "";
-  if (all.includes(kind)) return [kind];
-  return KIND_POINTS_AT[kind]?.(t) ?? all;
+  const named = namedCauses(hurt);
+  return named.length ? named : touched(hurt.touching);
 }
 
 export function createPain(options: PainOptions): Pain {

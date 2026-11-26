@@ -1,9 +1,10 @@
 import { parseHabits, type HabitEntries } from "@familiar/basal-ganglia";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { parseLearnedSkills, type LearnedSkill } from "@familiar/core";
-import { createMemory, type Fact, type KnownPlace, type Memory, type MemoryOptions, type MemoryStore } from "@familiar/memory";
+import { createMap, createMemory, type Fact, type KnownPlace, type MapOptions, type MapStore, type Memory, type MemoryOptions, type MemoryStore, type SavedMap } from "@familiar/memory";
 import { createChestMemory, type ChestMemory, type ChestRecord, type SurfaceCounts, type ThreatEntries } from "@familiar/minecraft";
+import { createAssociations, isAssociation, type Associations, type AssociationStore } from "@familiar/region-amygdala";
 import { createTargetMemory, type TargetMemory } from "@familiar/region-hypothalamus";
 import { createNoveltyMemory, createScorebook, type NoveltyMemory, type SavedScore, type Scorebook } from "@familiar/neuromodulators";
 
@@ -20,6 +21,8 @@ export const bodyFile = (bot: string) => `data/${bot}/body.json`;
 export const targetsFile = (bot: string) => `data/${bot}/targets.json`;
 export const surfacesFile = (bot: string) => `data/${bot}/surfaces.json`;
 export const threatsFile = (bot: string) => `data/${bot}/threats.json`;
+export const associationsFile = (bot: string) => `data/${bot}/associations.json`;
+export const mapFile = (bot: string) => `data/${bot}/map.json`;
 export const habitsFile = (bot: string) => `data/${bot}/habits.json`;
 export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
 
@@ -130,6 +133,60 @@ export async function loadMemories(file: string, options: Omit<MemoryOptions, "s
   const places = Array.isArray(raw?.places) ? (raw.places.filter((p) => isPlace((p as KnownPlace | null)?.place)) as KnownPlace[]) : [];
   const facts = Array.isArray(raw?.facts) ? (raw.facts.filter(isFact) as Fact[]) : [];
   return createMemory({ ...options, saved: { memories, places, facts } });
+}
+
+/** The hippocampus's map. A missing or unreadable file means an empty map. */
+export async function loadMap(file: string, options: Omit<MapOptions, "saved"> = {}): Promise<MapStore> {
+  const raw = (await readJson(file)) as Partial<SavedMap> | null;
+  const cells = Array.isArray(raw?.cells) ? raw.cells.filter((c) => typeof c?.key === "string" && typeof c.area === "string" && Number.isFinite(c.spot?.x) && c.seen !== null && typeof c.seen === "object") : [];
+  const keys = new Set(cells.map((c) => c.key));
+  const links = Array.isArray(raw?.links) ? raw.links.filter((l) => keys.has(l?.a) && keys.has(l?.b) && Number.isFinite(l.ms)) : [];
+  return createMap({ ...options, saved: { cells, links, nextArea: Number.isInteger(raw?.nextArea) ? raw!.nextArea! : cells.length + 1 } });
+}
+
+export async function saveMap(map: MapStore, file: string): Promise<void> {
+  await writeJson(file, map.entries());
+}
+
+/** What the amygdala has learned: cue → association. A missing file means nothing yet; a broken entry is left out. */
+export async function loadAssociations(file: string): Promise<AssociationStore> {
+  const raw = await readJson(file);
+  const entries = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? Object.entries(raw) : [];
+  return createAssociations(Object.fromEntries(entries.filter(([, a]) => isAssociation(a))));
+}
+
+/** Where the older rules' files are copied before they are moved over to the amygdala. Its being there marks the move as done. */
+export const beforeAmygdalaFolder = (bot: string) => `data/${bot}/before-amygdala`;
+
+/**
+ * Moves what the older rules learned (threats.json, hurts.json, bad-foods.json) into the
+ * amygdala's store, once. The files are first copied to a backup folder; they are left where
+ * they are, since the older rules still read them with a reader's strength at 0.
+ * `from`: turns the old learning into associations. Returns how many cues were moved, or null if it was done before.
+ */
+export async function moveOldLearning(bot: string, store: AssociationStore, from: MoveFrom, root = "data"): Promise<number | null> {
+  const at = (file: string) => file.replace(/^data\//, `${root}/`);
+  const folder = at(beforeAmygdalaFolder(bot));
+  const exists = (file: string) => access(file).then(() => true, () => false);
+  if (await exists(folder)) return null;
+  const files = [threatsFile(bot), hurtsFile(bot), badFoodsFile(bot), associationsFile(bot)].map(at);
+  await mkdir(folder, { recursive: true });
+  for (const file of files) if (await exists(file)) await copyFile(file, `${folder}/${file.split("/").at(-1)}`);
+  const held = store.entries();
+  const moved = from({ threats: await loadThreats(files[0]!), hurts: await loadHurts(files[1]!), badFoods: await loadHurts(files[2]!) }, held);
+  let changed = 0;
+  for (const [cue, a] of Object.entries(moved)) {
+    if (JSON.stringify(held[cue]) === JSON.stringify(a)) continue;
+    store.set(cue, a);
+    changed++;
+  }
+  return changed;
+}
+
+type MoveFrom = (old: { threats: Awaited<ReturnType<typeof loadThreats>>; hurts: Record<string, number>; badFoods: Record<string, number> }, held: Associations) => Associations;
+
+export async function saveAssociations(store: AssociationStore, file: string): Promise<void> {
+  await writeJson(file, store.entries());
 }
 
 export async function saveMemories(memory: MemoryStore, file: string): Promise<void> {

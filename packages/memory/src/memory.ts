@@ -5,6 +5,8 @@
 // Left for later, on purpose (hook only):
 // TODO(memory): sharing memories between bots.
 
+import { buildLeadsTo, signOf } from "./leads-to.js";
+
 export type MemoryKind = "danger" | "death" | "reward" | "discovery" | "social" | "failure" | "goal_done";
 
 /** A rounded position and the dimension it is in. */
@@ -49,10 +51,12 @@ export interface Fact {
   support: number;
   /** 0 to 1: grows with support, falls each time a new memory contradicts it. */
   confidence: number;
+  /** For a "leads to" fact (one kind of event following another): the pair it counts. Left out for a plain fact. */
+  after?: string;
 }
 
 /** One part of a consolidation pass. */
-export type ConsolidationPhase = "prune" | "merge" | "generalise";
+export type ConsolidationPhase = "prune" | "merge" | "generalise" | "sequence";
 
 export interface Memory extends Omit<MemoryEvent, "once"> {
   id: string;
@@ -61,6 +65,8 @@ export interface Memory extends Omit<MemoryEvent, "once"> {
   /** 0 to 1, as of `strengthAt`; it fades from there. */
   strength: number;
   strengthAt: number;
+  /** The memory recorded just before this one, when that was less than two minutes earlier. */
+  previous?: string;
 }
 
 /** A named spot: a fixed one (base, bed, a chest) or one with a strong memory. */
@@ -88,6 +94,11 @@ export interface MemoryOptions {
   /** How long a weak memory takes to lose half its strength, in ms. Default: 40 minutes (2 in-game days). */
   halfLifeMs?: number;
   saved?: { memories?: Memory[]; places?: KnownPlace[]; facts?: Fact[] };
+  /**
+   * Above 0, the order of events is kept: each memory links to the one before it, and two memories
+   * are one only when they also had the same sign of outcome. 0: as before. Default: 0.
+   */
+  order?: number;
 }
 
 export interface MemoryStore {
@@ -111,12 +122,18 @@ export interface MemoryStore {
    * One part of sorting memories at rest; returns how many memories or facts it changed.
    * prune: drop memories that have faded to almost nothing. merge: fold near-duplicates into one.
    * generalise: write or update a fact for every group of `support` or more memories that share a
-   * kind, a thing and an outcome.
+   * kind, a thing and an outcome. sequence: write a "leads to" fact for every kind of event that
+   * followed another `support` times or more (only when the order of events is kept).
    */
   consolidate(phase: ConsolidationPhase, now: number, support?: number): number;
+  /** Signs: events of the last few seconds that have been found to lead to something ("leads to" facts), by label. */
+  signs(now: number): string[];
   /** Everything, for saving. */
   entries(): { memories: Memory[]; places: KnownPlace[]; facts: Fact[] };
 }
+
+/** An event counts as a sign for this long after it happened. */
+const SIGN_MS = 5000;
 
 export const STARTING_STRENGTH = 0.3;
 /** A memory this strong marks its spot as a known place. */
@@ -136,6 +153,8 @@ export const FACT_SUPPORT = 3;
 /** What one contradicting memory costs a fact, and the confidence below which it is deleted. */
 const CONTRADICTION = 0.2;
 const FACT_FLOOR = 0.2;
+/** A memory links to the one before it when they are less than this far apart. */
+const LINKED_WITHIN_MS = 120_000;
 
 /** Confidence from support: half at exactly the support needed, growing toward 0.95. */
 function confidenceFor(count: number, needed: number): number {
@@ -156,17 +175,23 @@ export function distance(a: Place, b: Place): number {
 }
 
 export function createMemory(options: MemoryOptions = {}): MemoryStore {
-  const { capacity = 500, halfLifeMs = 2_400_000, saved = {} } = options;
+  const { capacity = 500, halfLifeMs = 2_400_000, saved = {}, order = 0 } = options;
   let memories: Memory[] = (saved.memories ?? []).map((m) => ({ ...m }));
   const named = new Map((saved.places ?? []).map((p) => [p.name, p.place]));
   let facts: Fact[] = (saved.facts ?? []).map((f) => ({ ...f }));
   let nextId = memories.reduce((max, m) => Math.max(max, Number(m.id) || 0), 0) + 1;
+  let latest: { id: string; time: number } | null = null;
+  /** Events kept apart: with the order kept, a good and a bad outcome are never one memory. */
+  const sameSign = (a: Outcome, b: Outcome) => order <= 0 || Math.sign(a.value) === Math.sign(b.value);
 
   /** Strength now: it halves every half-life, and strong memories have a much longer one. */
   function strengthNow(m: Memory, now: number): number {
     const halfLife = halfLifeMs * Math.max(1, m.strength / STARTING_STRENGTH) ** 3;
     return m.strength * 0.5 ** (Math.max(0, now - m.strengthAt) / halfLife);
   }
+
+  /** The event recorded last (for signs). */
+  let justNow: { kind: MemoryKind; involved: string[]; time: number } | null = null;
 
   function setStrength(m: Memory, strength: number, now: number): void {
     m.strength = Math.min(1, strength);
@@ -176,6 +201,7 @@ export function createMemory(options: MemoryOptions = {}): MemoryStore {
   return {
     record(event, now, startingStrength = STARTING_STRENGTH) {
       const { once, ...fields } = event;
+      justNow = { kind: event.kind, involved: event.involved, time: now };
       const same = (m: Memory) => m.kind === event.kind && event.involved.every((i) => m.involved.includes(i));
       if (once && memories.some(same)) return null;
       // Guardrail against wrong facts: a memory with the opposite outcome weakens a fact about the same thing.
@@ -184,7 +210,7 @@ export function createMemory(options: MemoryOptions = {}): MemoryStore {
         facts = facts.filter((f) => f.confidence >= FACT_FLOOR);
       }
       const repeat = memories.find(
-        (m) => m.kind === event.kind && m.involved.join() === event.involved.join() && now - m.time <= MERGE_MS && distance(m.place, event.place) <= SAME_PLACE_BLOCKS,
+        (m) => m.kind === event.kind && m.involved.join() === event.involved.join() && sameSign(m.outcome, event.outcome) && now - m.time <= MERGE_MS && distance(m.place, event.place) <= SAME_PLACE_BLOCKS,
       );
       if (repeat) {
         setStrength(repeat, strengthNow(repeat, now) + MERGE_BOOST, now);
@@ -192,6 +218,8 @@ export function createMemory(options: MemoryOptions = {}): MemoryStore {
         return { memory: { ...repeat }, merged: true };
       }
       const memory: Memory = { ...fields, involved: [...event.involved], id: String(nextId++), time: now, strength: startingStrength, strengthAt: now };
+      if (order > 0 && latest && now - latest.time < LINKED_WITHIN_MS) memory.previous = latest.id;
+      latest = { id: memory.id, time: now };
       memories.push(memory);
       if (memories.length > capacity) {
         const weakest = memories.reduce((a, b) => (strengthNow(b, now) < strengthNow(a, now) ? b : a));
@@ -248,7 +276,7 @@ export function createMemory(options: MemoryOptions = {}): MemoryStore {
       if (phase === "merge") {
         const kept: Memory[] = [];
         for (const m of [...memories].sort((a, b) => strengthNow(b, now) - strengthNow(a, now))) {
-          const twin = kept.find((k) => k.kind === m.kind && k.involved.join() === m.involved.join() && distance(k.place, m.place) <= SAME_PLACE_BLOCKS);
+          const twin = kept.find((k) => k.kind === m.kind && k.involved.join() === m.involved.join() && sameSign(k.outcome, m.outcome) && distance(k.place, m.place) <= SAME_PLACE_BLOCKS);
           if (!twin) {
             kept.push(m);
             continue;
@@ -260,6 +288,7 @@ export function createMemory(options: MemoryOptions = {}): MemoryStore {
         memories = kept;
         return merged;
       }
+      if (phase === "sequence") return order > 0 ? buildLeadsTo(memories, facts, support, confidenceFor) : 0;
       // generalise
       const groups = new Map<string, Memory[]>();
       for (const m of memories) {
@@ -272,7 +301,7 @@ export function createMemory(options: MemoryOptions = {}): MemoryStore {
         if (group.length < support) continue;
         const [kind, involved, feeling] = key.split("|") as [MemoryKind, string, "good" | "bad"];
         const context = (group[0]!.context ?? []).filter((c) => group.every((m) => m.context?.includes(c)));
-        const existing = facts.find((f) => f.kind === kind && f.involved === involved && f.feeling === feeling);
+        const existing = facts.find((f) => f.after === undefined && f.kind === kind && f.involved === involved && f.feeling === feeling);
         if (!existing) {
           facts.push({ id: `f${facts.length + 1}-${involved}`, text: factText(kind, involved, feeling, context), kind, involved, feeling, context, support: group.length, confidence: confidenceFor(group.length, support) });
           written++;
@@ -284,6 +313,11 @@ export function createMemory(options: MemoryOptions = {}): MemoryStore {
         }
       }
       return written;
+    },
+
+    signs(now) {
+      const sign = justNow && now - justNow.time <= SIGN_MS ? signOf(justNow, facts) : null;
+      return sign ? [sign] : [];
     },
 
     entries: () => ({
@@ -309,14 +343,19 @@ export function feelingNear(memory: MemoryStore, place: Place, now: number): { n
 }
 
 /** For a planner: the most relevant memories as short sentences, the top general facts, and the known places. Counts as recalling. */
-export function memoryNotes(memory: MemoryStore, place: Place | null, now: number, limit = 5): string[] {
+export function memoryNotes(memory: MemoryStore, place: Place | null, now: number, limit = 5, wayTo?: (to: Place) => string | null): string[] {
   const at = (p: Place) => `${p.x},${p.y},${p.z}${place && p.dimension !== place.dimension ? ` in ${p.dimension}` : ""}`;
   const memories = memory.recall({ ...(place ? { place } : {}), limit }, now);
   const places = memory.knownPlaces(now);
   const learned = memory.facts({ limit: TOP_FACTS });
+  // Played forward on the map before any journey: what lies on the known way to each place.
+  const way = (to: Place) => {
+    const line = place && to.dimension === place.dimension ? wayTo?.(to) : null;
+    return line ? ` (${line})` : "";
+  };
   return [
     ...(memories.length ? ["Memories:", ...memories.map((m) => `- ${m.summary} (at ${at(m.place)})`)] : []),
     ...(learned.length ? ["Learned from experience:", ...learned.map((f) => `- ${f.text}`)] : []),
-    ...(places.length ? ["Known places:", ...places.map((p) => `- ${p.name} at ${at(p.place)}`)] : []),
+    ...(places.length ? ["Known places:", ...places.map((p) => `- ${p.name} at ${at(p.place)}${way(p.place)}`)] : []),
   ];
 }

@@ -33,6 +33,7 @@ import {
 import { DEFAULT_SELECTION, selectionProblem, type SelectionSettings } from "@familiar/basal-ganglia";
 import { DEFAULT_DRIVES, drivesProblem, type DriveSettings } from "@familiar/region-hypothalamus";
 import { DEFAULT_THALAMUS, thalamusProblem, type ThalamusSettings } from "@familiar/region-thalamus";
+import { amygdalaProblem, DEFAULT_AMYGDALA, type AmygdalaReaders, type AmygdalaSettings } from "@familiar/region-amygdala";
 import { arousalProblem, brainstemProblem, colliculusProblem, DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type ArousalSettings, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
 
 // Every bot's settings live in one file, keyed by bot name. A bot with no entry, or a setting
@@ -73,19 +74,40 @@ export interface BotConfig {
   /** The basal ganglia: how strongly the body's requests hold back the deciders, waiting on a near tie, channels, and habits. */
   selection: SelectionSettings;
   memory: MemorySettings;
+  /** The amygdala: how it learns what predicts harm and good, and how far each reader takes its word. */
+  amygdala: AmygdalaSettings;
 }
 
 export interface MemorySettings {
   /** How long a weak memory takes to lose half its strength, in in-game days (20 minutes each). */
   halfLifeDays: number;
+  /** The hippocampus's map: how fast a place becomes familiar, 0 to 1. 0: no map is kept. */
+  map: number;
+  /** The order of events: memories link to the one before, good and bad are kept apart, "leads to" facts are built. 0: off. */
+  order: number;
+  /** Replay on the map: how strongly "led to good" and "led to harm" are marked, 0 to 1. 0: no replay. */
+  replay: number;
+  /** Locomotion is given known spots to pass on the way to somewhere out of sight. 0: off. */
+  waypoints: number;
 }
 
-export const DEFAULT_MEMORY: MemorySettings = { halfLifeDays: 2 };
+export const DEFAULT_MEMORY: MemorySettings = { halfLifeDays: 2, map: 1, order: 1, replay: 1, waypoints: 1 };
+/** Every hippocampus addition off: memory as it was before the map. */
+export const NO_MAP = { map: 0, order: 0, replay: 0, waypoints: 0 };
+
+function memoryProblem(memory: MemorySettings): string | null {
+  if (!(memory.halfLifeDays > 0)) return `memory.halfLifeDays must be above 0, got ${memory.halfLifeDays}`;
+  for (const key of ["map", "order", "replay", "waypoints"] as const) {
+    const n = memory[key];
+    if (typeof n !== "number" || !(n >= 0 && n <= 1)) return `memory.${key} must be between 0 and 1, got ${n}`;
+  }
+  return null;
+}
 
 export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Promise<BotConfig> {
   const bots = await readBots(file);
   const entry = bots[name] as
-    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings> & { arousalGate?: number }; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings> & { fieldOfView?: number }; thalamus?: Partial<ThalamusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: Partial<DriveSettings>; selection?: Partial<SelectionSettings>; memory?: Partial<MemorySettings> }
+    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings> & { arousalGate?: number }; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings> & { fieldOfView?: number }; thalamus?: Partial<ThalamusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: Partial<DriveSettings>; selection?: Partial<SelectionSettings>; memory?: Partial<MemorySettings>; amygdala?: Partial<Omit<AmygdalaSettings, "readers">> & { readers?: Partial<AmygdalaReaders> } }
     | undefined;
   const personality = { ...DEFAULT_PERSONALITY, ...entry?.personality };
   const patience = { ...DEFAULT_PATIENCE, ...entry?.patience };
@@ -111,10 +133,12 @@ export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Pro
   const drives = { ...DEFAULT_DRIVES, ...entry?.drives, weights: { ...DEFAULT_DRIVES.weights, ...entry?.drives?.weights } };
   const selection = { ...DEFAULT_SELECTION, ...entry?.selection, habit: { ...DEFAULT_SELECTION.habit, ...entry?.selection?.habit } };
   const memory = { ...DEFAULT_MEMORY, ...entry?.memory };
-  const memoryProblem = memory.halfLifeDays > 0 ? null : `memory.halfLifeDays must be above 0, got ${memory.halfLifeDays}`;
-  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? arousalProblem(arousal) ?? drivesProblem(drives) ?? thalamusProblem(thalamus) ?? selectionProblem(selection) ?? memoryProblem;
+  const memoryIssue = memoryProblem(memory);
+  // A bot may give only some of the readers; the rest keep their defaults.
+  const amygdala = { ...DEFAULT_AMYGDALA, ...entry?.amygdala, readers: { ...DEFAULT_AMYGDALA.readers, ...entry?.amygdala?.readers } };
+  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? arousalProblem(arousal) ?? drivesProblem(drives) ?? thalamusProblem(thalamus) ?? selectionProblem(selection) ?? memoryIssue ?? amygdalaProblem(amygdala);
   if (problem) throw new Error(`${file}: bot "${name}": ${problem}`);
-  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, arousal, drives, thalamus, selection, memory };
+  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, arousal, drives, thalamus, selection, memory, amygdala };
 }
 
 /** The file's bots by name; none if the file is missing. Throws if it exists but is not valid. */

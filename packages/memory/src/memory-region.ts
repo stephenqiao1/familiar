@@ -1,5 +1,6 @@
 import type { Region, SkillEvent, State, Workspace } from "@familiar/contracts";
 import { STARTING_STRENGTH, type ConsolidationPhase, type MemoryEvent, type MemoryStore, type Place } from "./memory.js";
+import type { PlaceKeeper } from "./place.js";
 
 /** What a memory trigger looks at: the last tick's state, this tick's, the skill events in between, and the workspace. */
 export interface MemoryMoment {
@@ -35,6 +36,10 @@ export interface MemoryRegionOptions {
   resting?(ws: Workspace): boolean;
   /** How many agreeing memories a general fact needs. Default: 3. */
   factSupport?: number;
+  /** The map and the sense of place. Default: none (no map is kept and `ws.place` stays empty). */
+  place?: PlaceKeeper;
+  /** Above 0, consolidation also builds "leads to" facts from the order of events. Default: 0. */
+  order?: number;
   /** Default: "hippocampus". */
   name?: string;
   /** Default: 0 (runs inside every tick). */
@@ -50,6 +55,8 @@ const LOW_FOCUS = 0.2;
 const IMPORTANT = 0.5;
 /** Consolidation runs one phase per tick (a millisecond or so each), then waits this long before the next round. */
 const PHASES: ConsolidationPhase[] = ["prune", "merge", "generalise"];
+/** An outcome at least this good or bad is replayed backward on the map. */
+const REPLAYED = 0.2;
 const ROUND_GAP_MS = 60_000;
 /** Guardrail: warn when more than this share of known places carry a strong danger memory. */
 const FEARFUL_SHARE = 1 / 3;
@@ -63,7 +70,9 @@ const FEARFUL_SHARE = 1 / 3;
  * It never proposes an action. A trigger that throws is skipped and named in the trace.
  */
 export function createMemoryRegion(options: MemoryRegionOptions): Region {
-  const { memory, triggers, placeOf, alarmOf = () => 0, focusOf = () => 0.5, resting = () => false, factSupport, name = "hippocampus", layer = 0 } = options;
+  const { memory, triggers, placeOf, alarmOf = () => 0, focusOf = () => 0.5, resting = () => false, factSupport, name = "hippocampus", layer = 0, place: keeper, order = 0 } = options;
+  // One step of consolidation per tick: the memory's own phases, then (if on) the order of events and replay at rest.
+  const steps: (ConsolidationPhase | "replay")[] = [...PHASES, ...(order > 0 ? (["sequence"] as const) : []), ...(keeper ? (["replay"] as const) : [])];
   let before: State | null = null;
   const seen = new WeakSet<SkillEvent>();
   let tagging: { id: string; start: number; until: number; peak: number }[] = [];
@@ -81,6 +90,9 @@ export function createMemoryRegion(options: MemoryRegionOptions): Region {
       for (const e of events) seen.add(e);
       const moment = before && { before, after, events, ws };
       before = after;
+
+      const where = keeper?.tick(ws, now) ?? {};
+      const replays: { sign: string; cells: { cell: string; amount: number }[] }[] = [];
 
       const alarm = alarmOf(ws);
       tagging = tagging.filter((t) => now <= t.until);
@@ -108,6 +120,12 @@ export function createMemoryRegion(options: MemoryRegionOptions): Region {
             memory.tag(result.memory.id, strength, now);
             if (!tagging.some((t) => t.id === result.memory.id)) tagging.push({ id: result.memory.id, start: result.memory.strength, until: now + TAG_WINDOW_MS, peak: alarm });
             recorded.push({ trigger: trigger.name, summary: result.memory.summary, strength, merged: result.merged });
+            // A notable outcome: the way here is played backward on the map (it pays nothing).
+            if (keeper && !result.merged && event.outcome.feeling !== "neutral" && Math.abs(event.outcome.value) >= REPLAYED) {
+              const sign = event.outcome.feeling === "good" ? "good" : "harm";
+              const cells = keeper.outcome(sign, Math.abs(event.outcome.value), now, atPlaceBefore === true);
+              if (cells.length) replays.push({ sign, cells });
+            }
           } catch (error) {
             errors[trigger.name] = error instanceof Error ? error.message : String(error);
           }
@@ -118,9 +136,9 @@ export function createMemoryRegion(options: MemoryRegionOptions): Region {
       let consolidated: Record<string, unknown> | null = null;
       if (!resting(ws)) phase = 0;
       else if (now >= nextRoundAt) {
-        const name = PHASES[phase]!;
-        consolidated = { phase: name, changed: memory.consolidate(name, now, factSupport) };
-        phase = (phase + 1) % PHASES.length;
+        const name = steps[phase]!;
+        consolidated = { phase: name, changed: name === "replay" ? keeper!.rest() : memory.consolidate(name, now, factSupport) };
+        phase = (phase + 1) % steps.length;
         if (phase === 0) nextRoundAt = now + ROUND_GAP_MS;
       }
 
@@ -130,6 +148,8 @@ export function createMemoryRegion(options: MemoryRegionOptions): Region {
       return {
         proposals: [],
         trace: {
+          ...where,
+          ...(replays.length ? { replays } : {}),
           ...(recorded.length ? { recorded } : {}),
           ...(consolidated ? { consolidation: consolidated } : {}),
           ...(overRemembering ? { warning: `${fearful} of ${places.length} remembered places are marked dangerous: the bot may be over-remembering threats` } : {}),

@@ -10,7 +10,7 @@ import { createReachMemory } from "./reach-memory.js";
 import { MAX_THREATS, type RouteChecks } from "./routes.js";
 import type { DefenceSettings } from "./settings.js";
 import { couldHarm, FAR_DISTANCE, type ThreatFacts } from "./size-up.js";
-import type { ThreatRecord } from "./threat-record.js";
+import { bornThreat, KNOWN_HARM, type ThreatRecord } from "./threat-record.js";
 
 // The threat sense: each tick it sizes up everything near that might be a threat, using what
 // the bot has learned about each kind and (for the nearest two) real route checks, and it feeds
@@ -37,6 +37,14 @@ export interface ThreatSenseOptions {
   /** How far a desperate need shortens the flight distance right now (1: not at all). The hard reflexes do not use the flight distance. Default: never. */
   flightScale?(): number;
   record: ThreatRecord;
+  /**
+   * The amygdala's word: how much harm a kind predicts here and now, and how far the defence takes
+   * a kind's danger (and whether it is a threat at all) from that. The record still says what is
+   * known about fighting it. Default: the record alone.
+   */
+  fear?: { harmOf(kind: string, now: number): number; strength: number };
+  /** What the amygdala fears with nothing in view, in words, or null. Default: the bad memory near is used. */
+  dread?(now: number): string | null;
   /** The route checks. Default: none (the cheap guess at reach, and never cornered). */
   routes?: RouteChecks;
   /** For routing round a threat that has not noticed, and for knowing a journey is being planned. Default: neither. */
@@ -105,7 +113,13 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
   });
 
   const flightScale = () => Math.min(1, Math.max(0, options.flightScale?.() ?? 1));
-  const flight = (kind: string) => flightScale() * flightDistance(record.danger(kind), bravery, settings.flightDistance);
+  // Danger by kind: the record's, moved toward the harm the amygdala predicts by the reader's strength.
+  const trust = Math.min(1, Math.max(0, options.fear?.strength ?? 0));
+  const harmOf = (kind: string, now: number) => Math.min(1, Math.max(0, options.fear?.harmOf(kind, now) ?? 0));
+  const dangerOf = (kind: string, now: number) => (trust > 0 ? record.danger(kind) + trust * (harmOf(kind, now) - record.danger(kind)) : record.danger(kind));
+  // A threat: born one, or (with the amygdala read) anything that has come to predict harm.
+  const isThreat = (kind: string, gameHostile: boolean, now: number) => (trust > 0 ? bornThreat(settings, kind, gameHostile) || trust * harmOf(kind, now) >= KNOWN_HARM : record.isThreat(kind, gameHostile));
+  const flight = (kind: string, now: number) => flightScale() * flightDistance(dangerOf(kind, now), bravery, settings.flightDistance);
 
   /** Whether the creature is turned toward the bot. */
   function facing(e: Entity): boolean {
@@ -155,7 +169,7 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
     const looming = new Set(data.nearby.sudden.filter((s) => s.what === "looming").map((s) => s.id));
     const near = [...data.nearby.mobs.map((m) => ({ ...m, hostile: m.hostile })), ...data.nearby.players.map((p) => ({ ...p, hostile: false, reachable: true }))]
       .map((thing) => ({ thing, entity: bot.entities[idOf(thing.id)] }))
-      .filter((n): n is { thing: (typeof n)["thing"]; entity: Entity } => n.entity !== undefined && record.isThreat(kindOf(n.entity), n.thing.hostile))
+      .filter((n): n is { thing: (typeof n)["thing"]; entity: Entity } => n.entity !== undefined && isThreat(kindOf(n.entity), n.thing.hostile, now))
       .sort((a, b) => a.thing.dist - b.thing.dist);
 
     // The route checks, for the nearest two only, unless a journey is being planned right now.
@@ -208,7 +222,8 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
         clearLine: shoots ? hasLineOfSight(bot, entity) : thing.reachable,
         shoots,
         escapable: settings.cornered <= 0 || (noWayOutAt === undefined && ((asked ? routes.escapable(entity.id) : null) ?? true)),
-        danger: record.danger(kind),
+        danger: dangerOf(kind, now),
+        ...(options.fear ? { harm: options.fear.harmOf(kind, now) } : {}),
         beatable: record.beatable(kind),
       };
     });
@@ -223,7 +238,7 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
       hostileFlags.delete(id);
     }
 
-    const view = assessDefence(data, withLooming(facts, looming), { bravery, strengths: settings, flightScale: flightScale() });
+    const view = assessDefence(data, withLooming(facts, looming), { bravery, strengths: settings, flightScale: flightScale(), ...(options.dread ? { dread: options.dread(now) } : {}) });
     // Having noticed the bot is remembered for a few seconds: it does not lapse the moment the creature pauses.
     // One that was on the bot or coming at it counts the same: having just got clear of it, the bot
     // does not take it for unaware (and turn back past it) the moment it is out of arm's reach.
@@ -246,7 +261,7 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
   return {
     assess,
     latest: () => latest,
-    safeDistance: (entity) => SAFE_FLIGHTS * flight(kindOf(entity)),
+    safeDistance: (entity) => SAFE_FLIGHTS * flight(kindOf(entity), Date.now()),
     worstMs: () => worst,
   };
 }

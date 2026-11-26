@@ -1,3 +1,4 @@
+import { DEFAULT_AMYGDALA } from "@familiar/region-amygdala";
 import { DEFAULT_SELECTION } from "@familiar/basal-ganglia";
 import { DEFAULT_THALAMUS } from "@familiar/region-thalamus";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -10,7 +11,7 @@ import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS } from "@familia
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, thalamus: DEFAULT_THALAMUS, selection: DEFAULT_SELECTION, memory: DEFAULT_MEMORY };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, thalamus: DEFAULT_THALAMUS, selection: DEFAULT_SELECTION, memory: DEFAULT_MEMORY, amygdala: DEFAULT_AMYGDALA };
 
 let dir: string;
 let file: string;
@@ -41,11 +42,24 @@ describe("loadBotConfig", () => {
     await expect(loadBotConfig("Calm", file)).rejects.toThrow(/bot "Calm": patience.resting/);
   });
 
+  it("reads the amygdala block: a reader left out keeps its default, and a bad strength stops the bot", async () => {
+    await writeFile(file, JSON.stringify({ Calm: { amygdala: { learn: 0.5, readers: { alarm: 0 } } } }));
+    expect((await loadBotConfig("Calm", file)).amygdala).toEqual({ ...DEFAULT_AMYGDALA, learn: 0.5, readers: { ...DEFAULT_AMYGDALA.readers, alarm: 0 } });
+    await writeFile(file, JSON.stringify({ Calm: { amygdala: { readers: { defence: 2 } } } }));
+    await expect(loadBotConfig("Calm", file)).rejects.toThrow(/amygdala.readers.defence must be a number from 0 to 1/);
+    await writeFile(file, JSON.stringify({ Calm: { amygdala: { spread: -1 } } }));
+    await expect(loadBotConfig("Calm", file)).rejects.toThrow(/amygdala.spread/);
+  });
+
   it("reads alarm, search and memory settings", async () => {
     await writeFile(file, JSON.stringify({ Jumpy: { noradrenaline: { alarmGain: 2, interrupt: 0 }, memory: { halfLifeDays: 5 } } }));
     const config = await loadBotConfig("Jumpy", file);
     expect(config.noradrenaline).toEqual({ ...DEFAULT_NORADRENALINE, alarmGain: 2, interrupt: 0 });
-    expect(config.memory).toEqual({ halfLifeDays: 5 });
+    expect(config.memory).toEqual({ ...DEFAULT_MEMORY, halfLifeDays: 5 });
+    await writeFile(file, JSON.stringify({ Jumpy: { memory: { map: 0, replay: 0.5 } } }));
+    expect((await loadBotConfig("Jumpy", file)).memory).toEqual({ ...DEFAULT_MEMORY, map: 0, replay: 0.5 });
+    await writeFile(file, JSON.stringify({ Jumpy: { memory: { waypoints: 2 } } }));
+    await expect(loadBotConfig("Jumpy", file)).rejects.toThrow(/memory.waypoints must be between 0 and 1/);
     await writeFile(file, JSON.stringify({ Jumpy: { noradrenaline: { searchResting: 2 } } }));
     await expect(loadBotConfig("Jumpy", file)).rejects.toThrow(/noradrenaline.searchResting/);
     await writeFile(file, JSON.stringify({ Jumpy: { memory: { halfLifeDays: 0 } } }));

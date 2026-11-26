@@ -33,6 +33,9 @@
       "path": "../region-hypothalamus"
     },
     {
+      "path": "../region-amygdala"
+    },
+    {
       "path": "../region-thalamus"
     }
   ]

@@ -2,6 +2,7 @@
 // surprises, the drives (top drive, needs, looking ahead, stress, targets learned), reflexes and the brainstem, arousal (bands, bedtimes, wakings, calls saved), the defence circuit, the medulla, balance and posture, the colliculus, the basal ganglia (wins, near ties, habits, terms), memories, interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readdirSync, readFileSync } from "node:fs";
+import { amygdalaReport } from "./amygdala-report.ts";
 import { join } from "node:path";
 import { summariseDefence, type DefenceRow } from "@familiar/region-brainstem";
 import { selectionReport, type SelectionTick } from "./selection-report.ts";
@@ -468,6 +469,9 @@ console.log(`\nMEMORIES RECORDED: ${recorded.length} (${list(count(recorded, (r)
 for (const r of recorded.slice(0, 8)) console.log(`  - ${r.summary} [${r.strength.toFixed(2)}${r.merged ? ", merged" : ""}]`);
 const passes = ticks.flatMap((t) => (trace(t, "hippocampus").consolidation ? [trace(t, "hippocampus").consolidation as { phase: string; changed: number }] : []));
 console.log(`CONSOLIDATION: ${passes.length} phases, ${passes.reduce((a, p) => a + p.changed, 0)} changes`);
+
+// The amygdala, and the hippocampus's map.
+console.log(`\n${amygdalaReport(ticks).join("\n")}`);
 
 // Planner.
 const plans = ticks.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && r.trace?.plan).map((r) => r.trace!.plan as { goal: string }));

@@ -22,15 +22,17 @@ export interface AssessOptions {
   strengths: DefenceStrengths & { flightDistance: number };
   /** The flight distance is this share of the usual right now (a desperate need lets a threat closer). Default: 1. */
   flightScale?: number;
+  /** What the amygdala fears with nothing in view (a place, a sign), in words, or null for nothing. Left out: the bad memory near is used instead. */
+  dread?: string | null;
 }
 
 export const USUAL: AssessOptions = { bravery: 0.5, strengths: { freeze: 1, cornered: 1, flightDistance: 1 } };
 
 /** Why danger is possible although nothing threatening is in view, or null. */
-export function possibleDanger(data: MinecraftStateData, unseen: boolean): string | null {
+export function possibleDanger(data: MinecraftStateData, unseen: boolean, dread?: string | null): string | null {
   if (unseen) return "something unseen is close";
   if (data.nearby.heard.some((h) => WORRYING.has(h.type))) return "something was heard";
-  if (data.memory?.nearby === "bad") return `a bad memory here (${data.memory.kind})`;
+  if (dread !== undefined ? dread !== null : data.memory?.nearby === "bad") return dread ?? `a bad memory here (${data.memory?.kind})`;
   return data.time.lightLevel <= DARK ? "it is dark" : null;
 }
 
@@ -46,10 +48,10 @@ export function withLooming(facts: ThreatFacts[], looming: ReadonlySet<string>):
 }
 
 /** Sizes up every threat and chooses the defence. */
-export function assessDefence(data: MinecraftStateData, facts: readonly ThreatFacts[], { bravery, strengths, flightScale = 1 }: AssessOptions = USUAL): Defence {
+export function assessDefence(data: MinecraftStateData, facts: readonly ThreatFacts[], { bravery, strengths, flightScale = 1, dread }: AssessOptions = USUAL): Defence {
   const threats = facts.map((f) => sizeUp(f, bravery, strengths.flightDistance, flightScale)).sort((a, b) => a.dist - b.dist);
   const inSight = threats.filter((t) => t.stage !== "possible");
-  const possible = inSight.length ? null : possibleDanger(data, threats.length > 0);
+  const possible = inSight.length ? null : possibleDanger(data, threats.length > 0, dread);
   const { self, current } = data;
   const travelling = self.locomotion.moving && !DEFENCE_SKILLS.has(current?.skill ?? "");
   const choice = chooseDefence({ threats, possible, health: self.health / MAX_HEALTH, armed: self.bestWeapon !== null, travelling }, strengths);

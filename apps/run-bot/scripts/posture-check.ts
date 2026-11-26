@@ -10,7 +10,7 @@ import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 /** A bot with the default posture (born knowing sand and gravel are loose), and one born knowing nothing loose. */
 const BORN = "Poser";
 const BLANK = "Naive";
-const REGIONS = "reflex,medulla,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+const REGIONS = "reflex,medulla,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal";
 
 interface Posture {
   balance?: number;

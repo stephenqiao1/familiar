@@ -15,6 +15,7 @@
     "@familiar/minecraft": "workspace:*",
     "@familiar/neuromodulators": "workspace:*",
     "@familiar/region-brainstem": "workspace:*",
+    "@familiar/region-amygdala": "workspace:*",
     "@familiar/region-hypothalamus": "workspace:*",
     "@familiar/region-instinct": "workspace:*",
     "@familiar/region-prefrontal": "workspace:*",

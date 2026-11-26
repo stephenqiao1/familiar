@@ -43,6 +43,8 @@ export interface EncodableItem {
 export interface EncodableBlock {
   name: string;
   boundingBox: string;
+  /** The block's solid parts in its present state, each [x0, y0, z0, x1, y1, z1] within the block (an open door is a thin slab at one side). */
+  shapes?: number[][];
   light: number;
   skyLight: number;
   biome?: { id: number; name: string };

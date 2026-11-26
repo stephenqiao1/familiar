@@ -13,7 +13,7 @@ type Mob = MinecraftStateData["nearby"]["mobs"][number];
 interface Creature { id: number; name: string; type: string; position: Vec3; yaw: number; height: number; isValid: boolean; username?: string }
 
 /** A bot at the origin with some creatures around it; `tick` makes a state of them and sizes it up. */
-function world(options: { settings?: Partial<DefenceSettings>; reach?: "yes" | "no"; escape?: "yes" | "no"; moving?: boolean } = {}) {
+function world(options: { settings?: Partial<DefenceSettings>; reach?: "yes" | "no"; escape?: "yes" | "no"; moving?: boolean; fear?: { harm: Record<string, number>; strength: number }; dread?: string | null } = {}) {
   const events = new EventEmitter();
   const entities: Record<number, Creature> = {};
   const attacked: number[] = [];
@@ -38,6 +38,8 @@ function world(options: { settings?: Partial<DefenceSettings>; reach?: "yes" | "
     bravery: 0.5,
     record,
     routes,
+    ...(options.fear ? { fear: { harmOf: (kind: string) => options.fear!.harm[kind] ?? 0, strength: options.fear.strength } } : {}),
+    ...(options.dread !== undefined ? { dread: () => options.dread! } : {}),
     locomotion: { avoidArea: (name, _centre, radius) => void avoided.push({ name, radius }), status: () => ({ moving: options.moving ?? false, pattern: null, gait: "walk", stuck: false, progress: 0, recoveries: 0 }) },
     log: (msg) => logged.push(msg),
   });
@@ -54,6 +56,47 @@ function world(options: { settings?: Partial<DefenceSettings>; reach?: "yes" | "
   const hurtBy = (id: number, kind = "mob_attack") => ({ msAgo: 0, by: `entity:${id}`, kind, at: { x: 0, y: 64, z: 0 } });
   return { bot, events, entities, record, sense, tick, add, hurtBy, attacked, avoided, asked, logged };
 }
+
+describe("the threat sense reading the amygdala", () => {
+  it("takes a kind's danger from the harm the amygdala predicts, by the reader's strength; at 0 from the record", () => {
+    const sized = (strength: number) => {
+      const w = world({ fear: { harm: { zombie: 0.9 }, strength } });
+      w.add(1, "zombie", 7);
+      w.tick();
+      return w.tick().threats[0]!;
+    };
+    expect(sized(0)).toMatchObject({ danger: 0.5, flightDistance: 8, harm: 0.9 });
+    expect(sized(1)).toMatchObject({ danger: 0.9, harm: 0.9 });
+    expect(sized(1).flightDistance).toBeGreaterThan(8);
+    expect(sized(0.5).danger).toBeCloseTo(0.7);
+  });
+
+  it("a kind not born a threat is one once it predicts harm, and no longer when it does not; one born a threat always is", () => {
+    const harm: Record<string, number> = { wolf: 0.3 };
+    const w = world({ fear: { harm, strength: 1 } });
+    w.add(2, "wolf", 5, 0, "animal");
+    w.add(3, "zombie", 9);
+    w.tick();
+    expect(w.tick().threats.map((t) => t.kind)).toEqual(["wolf", "zombie"]);
+    harm.wolf = 0.05;
+    harm.zombie = 0;
+    expect(w.tick().threats).toMatchObject([{ kind: "zombie", danger: 0 }]);
+  });
+
+  it("what is known about fighting a kind stays the record's: one born never-to-fight is not fought however little it is feared", () => {
+    const w = world({ fear: { harm: { creeper: 0 }, strength: 1 } });
+    w.add(4, "creeper", 2);
+    w.tick();
+    const view = w.tick();
+    expect(view.threats[0]).toMatchObject({ kind: "creeper", beatable: false });
+    expect(view.choice.mode).not.toBe("fight");
+  });
+
+  it("a feared place or sign with nothing in view makes danger possible; with none, nothing is", () => {
+    expect(world({ dread: "a place it has come to fear" }).tick()).toMatchObject({ possible: "a place it has come to fear", choice: { mode: "wary" } });
+    expect(world({ dread: null }).tick()).toMatchObject({ possible: null, choice: { mode: "none" } });
+  });
+});
 
 describe("createThreatSense", () => {
   it("sizes up a threat that is not moving as seen and unaware, and one walking at the bot as coming", () => {

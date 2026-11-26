@@ -8,7 +8,8 @@ import { createWantsInView } from "./wants.js";
 import { COMPETE, createHypothalamusRegion, DEFAULT_DRIVES, describeDrives, DESPERATE_SIGNAL, pressing, STRESS_SIGNAL, UNMET_SIGNAL, type DriveSettings, type Need, type TargetMemory } from "@familiar/region-hypothalamus";
 import { createDriveWatch, createReliefIndex, stressOnOutlook } from "./drives.js";
 import type { Arbiter, Candidate, DecisionEngine, NeedReading, Planner, Region, Skill, State, Workspace } from "@familiar/contracts";
-import { createMemoryRegion, memoryNotes, type MemoryStore } from "@familiar/memory";
+import { APPEAL_SIGNAL, createAmygdalaRegion, FEAR_SIGNAL, MATTERS_SIGNAL, NO_READERS, type AmygdalaOptions } from "@familiar/region-amygdala";
+import { createMemoryRegion, memoryNotes, type MemoryStore, type Place, type PlaceKeeper } from "@familiar/memory";
 import {
   approachableThings,
   rememberedThings,
@@ -143,6 +144,8 @@ const NEUTRAL_ALARM = 0.5;
 const USUAL_MS = { instinct: 500, planner: 15_000 };
 /** The line the planner is given while the bot is over-aroused. */
 const FRAZZLED_NOTE = "You are badly rattled right now: keep the plan short and simple, and put safety first.";
+/** Fear at its strongest raises alarm to this, before any harm has come. */
+const FEAR_ALARM = 0.5;
 /** Above this search level, more of the engine's options are offered. */
 const WIDER_OPTIONS_ABOVE = 0.6;
 
@@ -194,6 +197,16 @@ export interface BrainParts<Ctx> {
   sore?: () => number;
   /** The block types the bot has just learned hurt, for remembering. Default: it learns none. */
   justLearnedHurts?: () => string[];
+  /** The hippocampus's map and sense of place. Default: none. */
+  place?: PlaceKeeper;
+  /** Above 0, the hippocampus keeps the order of events and builds "leads to" facts. Default: 0. */
+  order?: number;
+  /** The amygdala: what it is offered and what it has learned; its settings say how far each reader takes its word. Default: none. */
+  amygdala?: AmygdalaOptions;
+  /** How feared a thing in the state is, 0 to 1, as the amygdala has learned (for the thalamus). Default: nothing is. */
+  fearOfThing?: (kind: string, id: string) => number;
+  /** For the planner: what lies on the known way from here to a place, in a few words. Default: nothing said. */
+  wayTo?: (to: Place) => string | null;
   /** Offer the primitives (look_at, step_toward, ...) on the decision menu. Default: false. */
   showPrimitives?: boolean;
   /** A look may run alongside a skill that leaves the head free. Default: false. */
@@ -238,6 +251,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const drives = parts.drives ?? DEFAULT_DRIVES;
   const thalamus = parts.thalamus ?? DEFAULT_THALAMUS;
   const selection = parts.selection ?? DEFAULT_SELECTION;
+  // How far each reader takes the amygdala's word (all 0 with no amygdala: every reader on its old source).
+  const fears = parts.amygdala?.settings?.readers ?? NO_READERS;
   // With channels the basal ganglia let a look run beside whatever leaves the head free, so a look need not take over.
   const channels = selection.channels > 0;
   // The needs as the hypothalamus read them; with it left out, the plain reading from the state.
@@ -280,7 +295,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       inner: [bored],
       settings: drives,
       // What wears the body down besides its needs. Alarm is last tick's (noradrenaline runs later).
-      load: (ws) => ({ alarm: alarmOf(ws), pain: level(ws, PAIN_SIGNAL), poorVitals: 1 - level(ws, VITALS_SIGNAL, 1) }),
+      // Fear (the amygdala's, last tick's too) wears it down while it lasts, harm or no harm.
+      load: (ws) => ({ alarm: alarmOf(ws), pain: level(ws, PAIN_SIGNAL), poorVitals: 1 - level(ws, VITALS_SIGNAL, 1), fear: fears.stress * level(ws, FEAR_SIGNAL) }),
       dayTime: playerDayTime,
       adjustments: TARGET_ADJUSTMENTS,
       ...(parts.targets ? { targets: parts.targets } : {}),
@@ -327,7 +343,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createFocusRegion({
       // A thing that stood out strongly raises focus for a moment.
       // So does a near tie the basal ganglia are waiting on: look closely while the choice hangs.
-      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []), ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : [])],
+      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []), ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : []), ...(fears.focus > 0 ? [{ name: "promising", read: (ws: Workspace) => fears.focus * level(ws, APPEAL_SIGNAL) }] : [])],
       settings: focus,
       asleep,
       moved,
@@ -351,7 +367,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     }), //                                                                                  layer 0, every tick
     createNoradrenalineRegion({
       // Alarm is read from the same needs; search from whether a pressing one is being answered.
-      needs,
+      // Fear counts beside the vital needs: what is around predicts harm, so alarm rises before any has come.
+      needs: (ws) => [...needs(ws), ...(fears.alarm > 0 ? [{ name: "fear", level: fears.alarm * FEAR_ALARM * level(ws, FEAR_SIGNAL), rank: 1, weight: 1 }] : [])],
       startle: startleOf,
       // Search rises while a pressing need is not being answered, and while the top need has not eased for minutes whatever the skill reports.
       searchInputs: [gettingNowhere((ws) => unanswered(needs(ws)), (_ws, now) => persistence.status(now)?.progress ?? 0), { name: "unmet", read: (ws) => level(ws, UNMET_SIGNAL) }],
@@ -364,11 +381,19 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       triggers: playerMemories(parts.justLearnedHurts, parts.justLearnedBadFoods),
       placeOf,
       factSupport: focus.factSupport,
-      ...(noradrenaline.memoryTag > 0 ? { alarmOf: (ws: Workspace) => level(ws, ALARM_SIGNAL) } : {}),
+      // The map: where the bot is (`ws.place`), how unfamiliar that is, and replay.
+      ...(parts.place ? { place: parts.place } : {}),
+      order: parts.order ?? 0,
+      // A fresh memory is stamped by alarm, and by how much the moment matters to the amygdala (good or bad).
+      ...(noradrenaline.memoryTag > 0 || fears.memory > 0 ? { alarmOf: (ws: Workspace) => Math.max(noradrenaline.memoryTag > 0 ? level(ws, ALARM_SIGNAL) : 0, fears.memory * level(ws, MATTERS_SIGNAL)) } : {}),
       ...(focus.memoryWrite > 0 ? { focusOf: (ws: Workspace) => level(ws, FOCUS_SIGNAL, focus.resting) } : {}),
       // Consolidate only while resting safely: focus and alarm both very low (in practice, asleep), or a long quiet spell awake.
       ...(focus.consolidation > 0 ? { resting: (ws: Workspace) => level(ws, ALARM_SIGNAL) < CALM_ALARM && (level(ws, FOCUS_SIGNAL, focus.resting) < LOW_FOCUS || up(ws, QUIET_SIGNAL)) } : {}),
     }), //                                                                                  layer 0, every tick
+    // The amygdala: learns what predicts harm and good. After the hippocampus, so it knows where the bot is.
+    // It shares `fear`, `appeal` and `matters`; each reader takes them by its own strength (amygdala.readers).
+    // Left out (--regions), fear reads as 0 and the readers outside this list keep the last thing it learned.
+    ...(parts.amygdala ? [createAmygdalaRegion(parts.amygdala)] : []), //                  layer 0, every tick
     // The thalamus: the gateway to the deciding layers. It builds what instinct and the planner are told from
     // the full state: the nearest few of each kind (the attention budget), and only what is in view if that is on.
     // Listed just before instinct, so that instinct reads this tick's view. Left out (--regions), they read the full state.
@@ -383,6 +408,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       focusOf: (ws) => level(ws, FOCUS_SIGNAL, focus.resting),
       arousalOf: (ws) => level(ws, AROUSAL_SIGNAL, 0.5),
       orientingOf: (ws) => level(ws, ORIENTING_SIGNAL),
+      // What the amygdala has learned to fear is passed on in full.
+      ...(parts.fearOfThing ? { fearOf: (item) => parts.fearOfThing!(item.kind, item.id) } : {}),
       // Asleep (or the planner offline), nobody reads a view: none is built.
       paused: (reader, ws) => up(ws, UPPER_PAUSED_SIGNAL) || (reader === PLANNER && up(ws, PLANNER_OFFLINE_SIGNAL)),
       lookSkill: LOOK_SKILL,
@@ -409,7 +436,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       planner,
       describe: (ws) =>
         describeSituation(ws, menu, storage, [
-          ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, (parts.attentionBudget?.() ?? NEUTRAL_BUDGET).remembered),
+          ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, (parts.attentionBudget?.() ?? NEUTRAL_BUDGET).remembered, parts.wayTo),
           ...(hasBrainstem && brainstem.holdBack > 0 ? [REFLEX_NOTE] : []),
           ...(drives.tellPlanner > 0 ? [describeDrives(ws.needs)].filter((line) => line !== null) : []),
         ]),

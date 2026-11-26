@@ -61,6 +61,9 @@ const SICKNESS: Record<string, number> = { poison: 1, wither: 1, hunger: 0.5, na
  */
 const CURES: Record<string, string[]> = { milk_bucket: ["poison", "wither", "hunger", "nausea", "blindness", "weakness", "mining_fatigue", "slowness"] };
 
+/** How sick one effect makes the body, 0 to 1 (0: it does no harm). */
+export const sicknessOf = (effect: string) => SICKNESS[effect] ?? 0;
+
 /** Whether an effect is one that harms the body. */
 export function isHarmful(effect: string): boolean {
   return effect in SICKNESS;

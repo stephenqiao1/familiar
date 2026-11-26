@@ -18,6 +18,8 @@ export interface Load {
   pain: number;
   /** How poor the vital signs are (1 − the medulla's overall number). */
   poorVitals: number;
+  /** Fear: harm predicted by what is around, before any has come (the amygdala's). Default: none. */
+  fear?: number;
 }
 
 /**

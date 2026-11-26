@@ -13,7 +13,7 @@ import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 const BOT = "Gazer";
 /** The same bot with the field of view switched on (bots.json). */
 const WARY = "Wary";
-const REGIONS = "reflex,medulla,hypothalamus,brainstem,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+const REGIONS = "reflex,medulla,hypothalamus,brainstem,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal";
 /** Facing north (toward z=36); behind it is south. */
 const START = "60.5 151 40.5 180 0";
 

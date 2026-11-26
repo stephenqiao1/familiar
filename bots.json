@@ -96,7 +96,11 @@
       "vitals": 1
     },
     "memory": {
-      "halfLifeDays": 2
+      "halfLifeDays": 2,
+      "map": 1,
+      "order": 1,
+      "replay": 1,
+      "waypoints": 1
     },
     "posture": {
       "innateLoose": [
@@ -219,6 +223,24 @@
       "limits": {
         "instinct": 1500,
         "prefrontal": 4000
+      }
+    },
+    "amygdala": {
+      "learn": 1,
+      "surprise": 1,
+      "safeHere": 1,
+      "spread": 1,
+      "signs": 1,
+      "readers": {
+        "defence": 1,
+        "wary": 1,
+        "alarm": 1,
+        "memory": 1,
+        "thalamus": 1,
+        "stress": 1,
+        "focus": 1,
+        "blocks": 1,
+        "foods": 1
       }
     }
   },

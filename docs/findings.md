@@ -80,7 +80,16 @@ entries named in brackets hold the evidence.*
    or nothing"; medulla limits: "blame for a bad meal is by timing alone"; defence: "kills are
    credited by timing", "fleeing a player by reflex may not be wanted"; dopamine: "a trip cut
    off by a mob appearing".)*
-   **Would fix:** graded confidence that fades without fresh evidence.
+   **Mostly closed by the amygdala (2026-11-26).** Harm by kind, hurtful blocks, bad foods
+   and feared places are now learned in one place, by surprise: what a hurt points at takes the
+   blame, a bystander takes little, and what was already predicted is not learned again. Every
+   association is graded, fades as its sureness fades, and is let go where the thing proves
+   harmless ("safe here"). A player who hit twice is trusted again after enough harmless
+   meetings. **Still open:** the inborn hurtful blocks are a fixed list for the safety checks
+   (the hard reflexes stand on them); kills are still credited by timing (the threat record's
+   business); the scorebook still learns a mob appearing during a trip as that target's cost;
+   and a hurt that points at nothing is still shared by what is around, by how new each thing
+   is. See "The amygdala, switched on".
 
 8. **The protections live in different places, and a journey slips past most of them.** Stance
    and self-caused are known only through the primitive wrapper, so skills that move the body
@@ -145,6 +154,307 @@ entries named in brackets hold the evidence.*
     **Would fix:** add the other dangers as vital needs, and put a time on every memory.
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
+
+## The map, corrected by its last live scenes (2026-11-26)
+
+*Three flaws in stage one's journeys on the map, found by the two scenes stage one had left
+unrun (going round where the bot died, and "led to good"). All fixed at the source.*
+
+- **A death was marked on the cell where the bot woke up.** The memory was filed where it
+  died, but the backward replay ran on a trail that already ended at the respawn point. The
+  replay now leaves out a cell entered on the very tick of a death (`outcome(…, before)`).
+- **A journey over open ground was sent the long way round.** Having once walked three sides
+  of a field, the bot was given those known spots to cross the fourth. Known spots are now
+  given only when the way by them is at most one and a half times the straight line.
+- **The circle round a feared cell could shut in the journey's own end, or a spot it was told
+  to pass**, and the pathfinder then said there was no path. Such a cell is not ringed.
+- **Still so:** the map pulls the bot onto a way it knows whenever that way is within one and a
+  half times the straight line, so a second, slightly longer way beside a known one is hardly
+  ever learned by itself. The live scene teaches its two ways far apart for that reason.
+- **Still so:** a teleport of under 24 blocks is taken for a walk, and can join two areas.
+- **On this server the sky's light under a roof made by a fill command stays at 15** for the
+  client, so the map took a new cave for open ground. A cell is now "covered" also when the
+  body has a roof and walls close round it (`enclosed`), which needs walls within 6 blocks on
+  three sides: the middle of a wide hall built that way still reads as open.
+
+## The amygdala, switched on (stage three of the amygdala work)
+
+*Built and run live 2026-11-26. The amygdala now shares `fear`, `appeal` and `matters`, and nine
+readers take its word, each by its own strength in `amygdala.readers` (0: the old source). How
+it works, and who reads what: "The amygdala" in `docs/brain.md`.*
+
+**Live.** `pnpm amygdala-check`, six scenes, three rounds on the final code: 18 of 18 passed, and
+the numbers barely moved between rounds. No Jev; the scenes stage what happens and the bot's own
+brain learns. The bot in them has "been about a while" (the time of day is long familiar).
+
+| Scene | What was learned or unlearned | Fear over time | Outcome |
+|---|---|---|---|
+| 1. A place: 14 health lost twice, to nothing it could see, in one cave | The cave's area 0.68 to 0.79; the other cave 0; the stone floor 0 | In the field 0.04 to 0.07; back in the cave 0.65 to 0.76; in the other cave 0.04 to 0.07 | Wary ("a place it has come to fear") on every tick back in the cave, on none in the other cave or the field |
+| 2. A sign: thunder a way off, then 9 health lost, twice | The sound of thunder 0.44 | At the first thunder 0; at the third, with no hurt after it, 0.43 (0.19 just before: the field itself took some blame) | Fear rose at the warning alone; alarm 0.40 |
+| 3. Unlearning: a husk met ten times with no harm, in one area | The husk is still held at 0.50; "safe here" 0.64 for that area | With the husk in view: 0.50, 0.39, 0.30, 0.23, 0.18, 0.16 (meetings 1, 3, 5, 7, 9, 10); in another area 0.37 | Logged as a fear that came back: 0.20 to 0.39, "another place" |
+| 4. Tag-along: a cow stands by while a husk takes 12 health, three times | Husk 0.58; cow 0.007 | Peak 0.58 | The cow was never sized up as a threat; 21 cues around were spared blame |
+| 5. Safety: ten harmless meetings with a husk, seen from inside a hut | The hut's area -0.03 (a slight sign of safety); husk "safe here" 0.64 in the hut | With a husk in view: 0.50 at first; 0.13 in the hut at the end; 0.36 out in the open | Fear lower inside the shelter |
+| 6. Similar: a bot born fearing nothing loses 12 health to a husk, three times | Husk 0.54 | Zombie in view 0.19; chicken in view 0.02 | A zombie, never met, began at 0.19 ("like husk") and was sized up as a threat; a chicken began at 0.017 and was not |
+
+`pnpm map-check --minutes 5`, three scenes, three rounds: 9 of 9 passed.
+
+| Scene | Seen |
+|---|---|
+| 7. Wander, then to a chest out of sight | 35 to 38 cells, 4 or 5 areas (covered ones among them), a route of 8 to 10 cells, the last journey by known spots, arrived. The planner's text lists "bed at ..." under Known places |
+| 8. The way avoids where it died | The death cell marked 1.00, the cell before it 0.70. The shortest known way runs through it; the way given goes round by the other side (13 cells). The bot arrived without setting foot in the death cell (3.6 to 4.1 blocks at its nearest) |
+| 9. A reward at the end of a trip | Fed on arrival: reward 0.72, paid once. Played backward over 8 cells: 0.72, 0.51, 0.35, 0.25, 0.17, 0.12, 0.09, 0.06 |
+
+Scene 10, the older checks with `amygdala` added to their region lists (so that every reader
+takes its word): `medulla-check` 7 of 7, `reflex-check` 7 of 7, the memory scenes of
+`neuro-check` (`calm`, `ambush`, `remembered`) all passed, `defence-check` 9 of 11. Its two
+failures are the scenes already known to be unsteady. `around` fails the same way with the old
+sources. `shooter` (the bot must be shot twice from afar inside the scene's time) passed 3 of
+7 runs with the amygdala and 5 of 6 with the old sources: too few runs to say, but fear now
+raises alarm at the sight of the skeleton, which may make the bot leave sooner.
+
+A last whole-brain run with every reader on (`pnpm shadow-check 20`: 2,432 ticks by the base,
+dusk into night) was quiet: nothing hurt the bot, fear peaked at 0.5 at the one hostile kind
+it saw, no region failed, and the amygdala's slowest tick was 1.47 ms (2 ticks over 1 ms).
+
+In those scenes the amygdala's own learning kept pace with the older rules: cactus, magma and
+a berry bush each went 0 to 0.10 to 0.15 over two pricks of 1 health (the line is 0.12), and a
+spider eye went 0 to 0.16 on the first poisoning.
+
+**What was only seen live.**
+
+- **The stone floor came to be feared, and the bot could not walk.** A staged death with no
+  cause was shared by everything around; the floor block passed the line, and pathing then
+  refused every stone block ("No path"). Fixed at the source: a block harms by contact, so it
+  is blamed only when the hurt points at it (`direct`).
+- **The meal before took the blame too.** Bread eaten eight seconds before a spider eye got
+  nearly as much of the poisoning (0.12 against 0.13). The gut now holds one meal at a time:
+  a new meal ends the stay of the one before, as a harmless meeting.
+- **A feared thing seen only from a distance was being found safe.** Lava a few blocks off, on
+  the list of hazards near, was gathering "safe here". A hazard only seen close by is `apart`.
+- **A kind not yet met read as harmless to the threat sense**, which asks before the amygdala
+  has made the cue. A cue not met is now rated as it would begin (born with, or like a similar
+  kind).
+- **With the amygdala left out of a check's region list, the bot was fearless**: nothing had
+  made the inborn fears. Every reader now goes back to its old source when the region is left
+  out, and every check's list names `amygdala`.
+- **Fear lingered five seconds after the thing had gone**, because cues linger for blame. The
+  signals now go by what is here this tick.
+- **The test caves read as open ground** (see the map entry above), and a wide cave read as
+  open once the pain reflex had pulled the bot to its middle. The check's caves are short.
+
+**Old learning rules that could not be fully replaced, and why.**
+
+- **The threat record stays for what it knows about fighting** (beatable, shoots, kills), as
+  asked. It also still works out its own danger, which nothing reads with `readers.defence` at 1
+  but which is the fallback at 0; its notes ("zombie became dangerous") are still logged from
+  that old number.
+- **The inborn hurtful blocks stay a fixed list for the safety checks.** The about-to-touch
+  reflex is a hard reflex built on the same check as pathing, and the hard reflexes must not
+  read the amygdala. So lava, fire, magma and cactus cannot be unlearned as blocks to keep off;
+  only blocks learned by being hurt can.
+- **`hurts.json` and `bad-foods.json` are still written.** The old counters still run (they
+  feed the withdrawal's blame, the "learned what hurts" and "learned a bad food" memories, and
+  the fallback at strength 0). So a memory "learned that X hurts" still comes from the old
+  two-incident count, not from the amygdala crossing its line.
+- **A kind born a threat is always sized up.** Its danger can fall to 0 where it has proved
+  harmless (a flight distance of 4 blocks at middling bravery), but it never drops off the list
+  of threats, and `last_stand` goes by the game's flag.
+- **The feeling of a place from memory** (`feelingNear`) is still put in the state. Only "is
+  danger possible here" reads the amygdala instead.
+- **The scorebook's cost for a target** was not part of this change.
+
+**Limits and departures from the spec.**
+
+- **A hurt is sized by its square root** (`feltSize`): 1 health of 20 is felt as 0.22, 5 as 0.5.
+  Stage two left this open. Kept as a plain share, a block that only pricks (1 health) could
+  never come to predict enough harm to be told from the ground the bot stood on when a creeper
+  went off. With the root, a named cause passes the line in two pricks and bystanders do not.
+- **One line for "known to bring harm": 0.12** (`KNOWN_HARM`), for a learned threat, a hurtful
+  block, a bad food and a feared place. A first guess.
+- **The readers outside the brain's list read a tick behind.** The threat sense, the safety
+  checks and the food helpers are asked while the state is made. The hippocampus, the
+  hypothalamus and noradrenaline are listed before the amygdala, so they too read last tick's
+  `fear` and `matters`.
+- **`appeal` had no reader in the spec.** It is a focus input ("promising"), so that the signal
+  is not built for nothing. `readers.focus: 0` removes it.
+- **Fear raises alarm at half its size** (`FEAR_ALARM`). So a feared creature shut in a cage,
+  which the defence rightly ignores, still holds alarm at about 0.25 until it has been found
+  safe there. That is a step back from "a threat that cannot get to the bot is no threat", for
+  alarm only.
+- **A sign of safety lowers the `fear` signal, not a kind's danger.** The defence still sizes
+  up a husk by what husks predict, shelter or no shelter.
+- **A block is blamed only when the game names it** (`direct`). A hurt that points at nothing
+  is shared by the place, the time, the sounds and the creatures in view, never by the blocks
+  underfoot. Damage kinds that do not name their block (a dripstone, powder snow) therefore
+  teach nothing about it until `KIND_POINTS_AT` in `pain.ts` gives them a pointer, as
+  `hot_floor` has. The older rule blamed every block touched, after two incidents.
+- **A newborn bot blames what is around more readily.** Slow blame for what is familiar needs
+  harmless meetings first (one a minute). In its first minutes a hurt that points at nothing
+  falls on the place, the time of day and any bystander alike.
+- **Falls, hunger and drowning teach the amygdala nothing** (`OWN_DOING`). A place where the
+  bot fell to its death is remembered by the hippocampus and marked on the map, but it is not
+  feared.
+- **A "sign" cue needs a "leads to" fact**, which needs three repeats and a rest. The live
+  warning scene used a sound (thunder), which is a cue in its own right.
+- **Dread is a place or a sign only.** A feared time of day or sound with nothing in view does
+  not make danger possible by itself (a worrying sound already does, by the older rule).
+- **One illness now teaches a bad food** (the old rule wanted two). It is let go if the food
+  is eaten again without harm, or after about fifteen game days.
+- **A reader's strength between 0 and 1** scales the harm before the yes-or-no line (blocks,
+  foods, learned threats, dread) and blends the danger (defence).
+- **With the amygdala left out** (`--regions`), every reader goes back to its old source, as
+  nothing would be learning.
+- **Moving the old files over is one way, once.** A learned block or food becomes 0.5; a count
+  of one becomes 0.05. Deleting `data/<bot>/before-amygdala` would move them again.
+- **Cues only seen from a distance** (a hazard a few steps off) are never found safe, but
+  standing right beside lava counts as touching it for this purpose.
+
+## The amygdala, learning in shadow (stage two of the amygdala work)
+
+*Built and run live 2026-11-25. Stage two of three: the amygdala learns and saves, shares
+nothing, and nothing reads it. The switch is stage three.*
+
+A new game-free region, `amygdala`, learns what predicts harm and what predicts good: by
+surprise, by place ("safe here") and by likeness. How it works: "The amygdala" in
+`docs/brain.md`. Each tick its trace sets today's rules beside its own reading.
+
+**Live** (`pnpm shadow-check`, 30 minutes of the whole brain by the base, nothing scripted, an
+afternoon, a night and a morning; 3,878 ticks, 8 hurts, no death, 42 good outcomes):
+
+| What | Today's rule | Cues | Ticks compared | Agree |
+|---|---|---|---|---|
+| Danger by kind | threat record | 7 | 966 | 96% |
+| Hurtful blocks | `hurts.json` | 13 | 10,660 | 100% |
+| Bad foods | `bad-foods.json` | 3 | 10,344 | 100% |
+| Bad places | feeling from memory | 8 | 3,878 | 58% |
+
+- **Today's rule learned, the amygdala did not.** Zombie (0.28 to 0.43 by four hits of 3
+  health) and skeleton (0.5 to 0.54 by three hits): the amygdala stayed at its inborn 0.5,
+  because a hit of 3 to 5 health is less harm than 0.5 already predicts. Five areas became
+  "bad places" from one memory of heavy damage within 24 blocks; the amygdala gave the area
+  0.01 of that hurt (the creeper and the bang took the blame).
+- **The amygdala learned, today's rule did not.** A creeper's blast (14 health, no attacker
+  named by the game): the amygdala raised creeper 0.5 to 0.53 and the sound of an explosion to
+  0.04. The threat record took creeper *down* (0.46 to 0.39), having no one to blame.
+- Blocks and foods: nothing hurt and nothing made the bot ill, so neither side learned.
+
+**What was only seen live** (a first run, fixed before the run above).
+
+- **A small hit made a feared mob safer.** A zombie's 3 health against a prediction of 0.5 was
+  "less harm than expected", which went into "safe here". Fixed at the core: a hurt never
+  lowers anything; only a cue around with nothing happening does.
+- **An inborn bad food was unknown until eaten.** Cues were only made when offered. The listed
+  inborn fears are now held from the first tick.
+- **The ground became a sign of safety in minutes.** Every block touched while a mob was in
+  view and did nothing went below zero by a tenth a time, and together they cancelled the fear
+  of the mob. A sign of safety now moves by its share of what stands out.
+
+**Limits and departures from the spec.**
+
+- **Fear is the size of harm expected, so hits smaller than that teach nothing.** With inborn
+  fears at 0.5 (half the health bar), an ordinary hit never raises an inborn-feared kind. The
+  threat record goes up with every hit. This is the biggest difference from today and needs a
+  decision before the switch: keep it, start inborn fears lower, or count a hurt as larger.
+- **Death shares its blame too.** It teaches in one go in that the cues together then predict
+  it in full; the thing attended to takes about six tenths, not all of it.
+- **A hurt with no attacker and no block named is shared by everything around** (a fall, a
+  blast, drowning): the ground and the time of day take a little each.
+- **Running from a threat for a minute counts as a harmless meeting**, as does watching one
+  through glass. A meeting is the cue leaving, or a minute passing; the first guess is a tenth
+  of the way to safe per meeting.
+- **Good is any need dropping by 0.1 or more in a tick**, except needs about danger. Items
+  handed over by a command count (the check's own kit taught that the base is a little good).
+  Healing one health at a time (0.05) and small changes of light are under the line.
+- **What the cues predict together is their sum, capped at 1.** Three inborn-feared kinds in
+  view already predict the worst.
+- **Soreness is not an outcome of its own**: the damage behind it is.
+- **An illness is blamed on every cue around, and on a food only through the gut.** It is
+  sized at half the effect's sickness.
+- **Likeness is worked out for creatures only.** Blocks and foods do not spread.
+- **A sign is the last event remembered**, and only once a "leads to" fact starts from it
+  (after a rest). None came up in the live run. Sounds are cues in their own right.
+- **The comparison is of what is around**, tick by tick. A rule's knowledge of something not
+  around is not compared.
+- **A kind's danger "agrees" within 0.2; a yes-or-no rule agrees when the amygdala is on the
+  same side of 0.3.** First guesses.
+- **Areas that are joined on the map lose a name**, and what was "safe here" under the lost
+  name then counts as safe elsewhere (a third).
+- **Sureness and "safe here" fade on the wall clock**, as memories do: a bot switched off for
+  a day comes back less sure.
+- **The threat sense runs before any region** (while the state is made). In stage three it
+  must read the saved associations, a tick behind.
+- **17 amygdala ticks in 3,878 took over 1 ms** (worst 7 ms), with 6 to 13 cues around: pauses
+  of the process, as with the map. The unit test holds fifty cues inside the limit.
+- **Not run live:** unlearning over many meetings, a sign of safety, spreading to a kind never
+  met, a bad food, a hurtful block, a death. They are unit-tested; the scenes are stage three's.
+
+## The hippocampus: a map, the order of events, and replay (stage one of the amygdala work)
+
+*Built and run live 2026-11-25. Stage one of three; the amygdala itself is not built yet.*
+
+The hippocampus region now keeps a map of its own, the order things came in, and replays
+recent experience. Each addition has a strength under `memory` in `bots.json`; at 0 the region
+behaves as before. How it works: "The hippocampus" in `docs/brain.md`.
+
+**Live** (`pnpm map-check`, one run of ten minutes on a walled ground of 65 by 49 blocks with a
+roofed house and a tunnel): 36 cells, 54 ways, 3 areas (the open ground 32 cells, the house 3,
+the tunnel 1). Familiarity from 0.16 to 0.99, the middle cell 0.53. A route of 12 cells from
+the far corner to a chest inside the house; the journey went by known spots and ended at the
+chest. 45 of 57 journeys in all were given known spots. The whole-brain scenes `calm`, `ambush`
+and `remembered` pass with the map on.
+
+**What was only seen live.**
+
+- **An open doorway counted as "head inside a block".** A door's kind is "solid" whatever its
+  state, so walking through one set off the hard `dig_out` reflex, which cut the journey short
+  at the door. Fixed at the core: `headInBlock` now goes by the block's solid parts as it
+  stands (an open door is a thin slab at one side). Fences and slabs gain from the same fix.
+- **A ground built where no player stands is not built.** The server does not load those
+  chunks, so the bot fell out of the sky. The check keeps its chunks loaded (`forceload`).
+- **One map tick in 1,340 took 6 ms** (the limit is 2 ms; the middle is 0.03 ms and 99 in 100
+  are under 0.33 ms). The map had ten cells at the time of the slowest in a trial run, so it is
+  a pause of the process, as with the basal ganglia's choice.
+
+**Limits and departures from the spec.**
+
+- **A cell is a cube, not a square.** 8 by 8 by 8 blocks, so that a cave under a field is a
+  cell of its own. The spec said 8 blocks square.
+- **The wandering in the check is scripted.** There is no wandering skill and Jev stays put on
+  the test ground, so the check sends `go_to` to scattered spots. The map itself needs no
+  reward and no goal: it is filled in by the region every tick wherever the bot goes.
+- **Areas are coarse at the edges.** A cell is "open" or "covered" by where the bot spent
+  most ticks in it, so a cell that is half tunnel and half open ground is one or the other.
+  The tunnel (19 by 7 blocks) came out as one covered cell; the rest of it joined the field.
+- **The door was not seen as a barrier.** A door counts when a door sound is heard within 4
+  blocks as the bot changes cell. None was heard when the bot opened the door itself. The house
+  still came out as its own area, by the change of light. A house with windows open to the sky
+  might not.
+- **A climb is a first guess**: 3 blocks up or down in 4 seconds, steeper than 1.5 across to 1
+  up. Stairs up a hill count as a climb; a long gentle slope does not.
+- **Two areas that are later joined keep the larger one's name**, and the other name is gone.
+  Whatever is learned per area (stage two) has to cope with that.
+- **The pathfinder takes one goal at a time**, so known spots are walked as legs. It can take
+  them. A leg with no route drops the spots left and heads straight for the end.
+- **Known spots are given only for a way of three cells or more**, as a stand-in for "out of
+  sight". A target 20 blocks off behind a wall gets none.
+- **A spot is the last place the bot stood in a cell**, not the best place to pass through.
+- **"Leads to" facts are built from memories**, and nothing records a sound as a memory yet.
+  So "a certain sound, then harm" cannot be built until stage two offers sounds as cues. What
+  can be built today: "zombie (danger) is often followed by ..." from the existing triggers.
+- **Backward replay marks from the trail, not from the memory's place**, so a death (which
+  moves the bot) marks the cells walked before it, ending with the cell it died in only if
+  the trail's last cell is that one. *(Checked live 2026-11-26: the trail's last cell was the
+  respawn point, so the death was marked there. Fixed: a cell entered on the tick of the death
+  is left out.)*
+- **Replay at rest goes over at most the last 600 cells**, and is lost if the bot is switched
+  off before it rests (the trail is not saved).
+- **An unknown area relieves boredom once.** It is the area, not the cell, that counts as new,
+  and area names are short (`a6`), so two bots' novelty memories do not compare.
+- **The planner's line is one line per known place** and names only the worst cell on the
+  way. It is worked out each time the planner is asked.
+- **Run live 2026-11-26** (see "The map, corrected by its last live scenes"): going round a
+  cell where the bot died, "led to good" after a reward at the end of a trip, and the planner
+  being told where the bed is. Replay at rest showed in the 30-minute run (21 times).
 
 ## The basal ganglia: one place decides who goes ahead
 
@@ -1625,8 +1935,9 @@ Earlier settings (two slices of 2 ms) reached 5.2 ms and once 6.4, so the slice 
   toward the ledge (it stopped at the edge; the route does not walk off). That check's bot now
   has `defence.learnThreats: 0`.
 - **Fleeing a player by reflex may not be wanted.** Two hits 2 to 60 seconds apart make a
-  player a threat for good (until many harmless meetings). Friendly fire in a shared fight
-  would do it.
+  player a threat. Friendly fire in a shared fight would do it. *(Changed 2026-11-26: with the
+  amygdala read, the player is feared by the size of the hits, and is trusted again where they
+  keep turning up without harm.)*
 - **Not run live on purpose:** a learned non-hostile threat (an angered wolf or golem; a
   player was learned by accident, above), three threats at once, a goal holding back `defence_flee`, last_stand when
   cornered, and a fight lost. All are unit-tested.
@@ -1915,7 +2226,10 @@ decide.*
   a meal is blamed on the food, unless a hostile is within 8 blocks, in which case the food is
   never blamed (a witch could hide a truly bad food for a while). A splash potion thrown from
   further away, or a beacon-like source, would be blamed on lunch. Two occasions are needed, so
-  one coincidence teaches nothing.
+  one coincidence teaches nothing. *(Changed 2026-11-26: with the amygdala read, an illness is
+  shared between the food eaten in the last minute and whatever else is around, a witch
+  included, by how much each stands out. One illness can be enough to call a food bad; it is
+  let go if the food is later eaten without harm, or as sureness fades.)*
 - **Foods whose harm is a chance are learned slowly or never.** Rotten flesh gives hunger 80% of
   the time, raw chicken 30%: a bot born without them needs two unlucky meals. Chorus fruit and
   suspicious stew harm in ways that are not status effects (a teleport) or vary by stew, and can
@@ -1995,10 +2309,15 @@ Hurt to withdrawal starting: median 60 ms, slowest 134 ms, none over the 250 ms 
 - **Blame is a guess.** If the game's damage kind does not name a block the body is touching,
   every block it is touching is blamed. Two incidents on plain stone next to an unnamed hazard
   would teach it that stone hurts, and it would then refuse to stand on stone. `hot_floor` is the
-  one kind with a hand-written pointer (it blames what is under the feet).
+  one kind with a hand-written pointer (it blames what is under the feet). *(Closed 2026-11-26
+  for a bot that has been about a while: with the amygdala read, a hurt that names no block is
+  shared by what is around, and the ground it has long stood on harmlessly takes very little.
+  A newborn bot can still blame the floor.)*
 - **Learning is all or nothing, and never forgotten.** Two incidents make a block type known to
   hurt for good. There is no unlearning, no "hurts a little", and no notion of a harmless state of
-  the same block (a berry bush with no berries).
+  the same block (a berry bush with no berries). *(Closed 2026-11-26 for learned blocks: the
+  amygdala grades how much a block hurts and lets it go where it is touched without harm. The
+  inborn list stays fixed.)*
 - **"Never learn the base's blocks" is a short list**: chests, beds and crafting tables.
 - **`about_to_touch` reads the direction the body is moving**, taken over the last 150 ms. A bot
   standing still next to lava does not trigger it, and it looks at the whole block ahead, not the

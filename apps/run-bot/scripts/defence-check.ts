@@ -11,7 +11,7 @@ import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 const GUARD = "Guard";
 /** A bot born knowing no threats at all (bots.json). */
 const BLANK = "Blank";
-const REGIONS = "reflex,medulla,brainstem,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+const REGIONS = "reflex,medulla,brainstem,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal";
 /** The middle of the lane, facing east along it. */
 const MIDDLE = "60.5 151 40.5 -90 0";
 

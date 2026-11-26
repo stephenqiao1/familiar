@@ -32,6 +32,8 @@ export interface Gut {
    * `hostileNear`: something hostile was close enough to have caused it.
    */
   fellIll(effect: string, now: number, fresh: boolean, hostileNear: boolean): Lesson;
+  /** The last thing eaten, and when (null: nothing yet). */
+  lastMeal(): { food: string; at: number } | null;
   /** Foods learned to be bad since this was last asked (for remembering them). */
   justLearned(): string[];
   /** What it has learned, for saving: food → count. */
@@ -86,6 +88,8 @@ export function createGut(options: GutOptions): Gut {
       const waiting = before + 1 >= MEALS_TO_LEARN ? `${food} made it ill ${before + 1} times, but it is the only food it has ever eaten: waiting for one more before calling it bad` : undefined;
       return { blamed: food, learned: false, count: before + 1, ...(waiting ? { note: waiting } : {}) };
     },
+
+    lastMeal: () => lastMeal,
 
     justLearned() {
       const out = fresh;

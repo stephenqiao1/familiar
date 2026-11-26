@@ -1,11 +1,12 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createNoveltyMemory, createScorebook } from "@familiar/neuromodulators";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMemory } from "@familiar/memory";
 import { createChestMemory } from "@familiar/minecraft";
-import { loadChests, loadLearnedSkills, loadMemories, loadNovelty, loadScorebook, saveChests, saveMemories, saveNovelty, saveScorebook } from "./memory-store.js";
+import { createAssociations } from "@familiar/region-amygdala";
+import { moveOldLearning, loadChests, loadLearnedSkills, loadMemories, loadNovelty, loadScorebook, saveChests, saveMemories, saveNovelty, saveScorebook } from "./memory-store.js";
 
 let dir: string;
 beforeEach(async () => {
@@ -13,6 +14,24 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe("moving the older rules' files over to the amygdala", () => {
+  it("is done once, after copying the old files to a backup folder; the old files stay", async () => {
+    await mkdir(join(dir, "Ann"), { recursive: true });
+    const hurts = JSON.stringify({ sweet_berry_bush: 2 });
+    await writeFile(join(dir, "Ann", "hurts.json"), hurts);
+    const store = createAssociations();
+    const from = (old: { hurts: Record<string, number> }) => Object.fromEntries(Object.keys(old.hurts).map((name) => [`block:${name}`, { harm: 0.5, good: 0, sure: 1, at: 0 }]));
+    expect(await moveOldLearning("Ann", store, from, dir)).toBe(1);
+    expect(store.get("block:sweet_berry_bush")!.harm).toBe(0.5);
+    expect(await readFile(join(dir, "Ann", "before-amygdala", "hurts.json"), "utf8")).toBe(hurts);
+    expect(await readFile(join(dir, "Ann", "hurts.json"), "utf8")).toBe(hurts);
+    // A second start moves nothing: what the amygdala has since unlearned is not put back.
+    const later = createAssociations();
+    expect(await moveOldLearning("Ann", later, from, dir)).toBeNull();
+    expect(later.keys()).toEqual([]);
+  });
 });
 
 describe("memory store", () => {

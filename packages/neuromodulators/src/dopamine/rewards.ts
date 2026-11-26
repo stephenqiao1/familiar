@@ -1,10 +1,12 @@
-import type { SkillEvent, State } from "@familiar/contracts";
+import type { SkillEvent, State, Workspace } from "@familiar/contracts";
 
 /** What a reward rule compares: the state at the last tick, this tick's state, and the skill events in between. */
 export interface RewardMoment {
   before: State;
   after: State;
   events: readonly SkillEvent[];
+  /** The workspace this tick, for a rule that reads what another region shared. */
+  ws?: Workspace;
 }
 
 /** Positive when a need got smaller; negative when one grew, or something bad happened. */

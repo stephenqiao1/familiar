@@ -5,7 +5,7 @@ share one **workspace** (shared memory), and the **basal ganglia** (the arbiter)
 proposals go ahead.
 
 ```
-Workspace (state · views for the deciders · goal · signals · attended · needs · recent events)
+Workspace (state · views for the deciders · goal · signals · attended · needs · place · recent events)
    ▲ read/write            ▲ read/write          ▲ read/write
 Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
 (layer 0, every tick)      Jev, every tick       LLM, every 15 s in the background
@@ -36,7 +36,7 @@ Skill executor → skills → primitives (every movement) and locomotion (all tr
 
 Alongside these run layer-0 regions that propose little or nothing but shape the rest:
 `hypothalamus` (the body's needs), `dopamine`, `serotonin`, `noradrenaline`, `acetylcholine` (the
-neuromodulators) and `hippocampus` (memory).
+neuromodulators), `hippocampus` (memory and the map) and `amygdala` (what predicts harm and good).
 
 Regions that run every tick start in the order they are listed in `apps/run-bot/src/brain.ts`.
 All but instinct finish at once, so each sees the signals set by the ones listed before it in the
@@ -52,6 +52,10 @@ same tick; a signal from a region listed later is read one tick late.
 | View | The state as one deciding layer is told it (`ws.view(reader)`): a selection of the full state, built each tick by the thalamus for instinct and for the planner. With no thalamus it is the full state. Every other region reads `ws.state`. |
 | Attended | The one thing the bot is attending to right now: `{ id, kind, bearing, salience, since, angle, elevation, field, lean }`, or null. Set by the colliculus (`ws.setAttended`); logged each tick. |
 | Needs | The body's needs as the hypothalamus read them this tick (`ws.needs`): each need's level, how hard it presses, where it is heading and its target; the need wanted most; the body clock; stress. Null with no hypothalamus. |
+| Place | Where the bot is on its own map (`ws.place`): `{ cell, area, familiarity }`, or null with no map. Set by the hippocampus. |
+| Cue, association | A cue is a name for something around (`kind:zombie`, `block:cactus`, `area:a3`). An association is what the amygdala has learned of one cue: how much harm and good it predicts, how sure, and where it is safe. |
+| Fear, appeal, matters | Three signals from the amygdala, each 0 to 1: the strongest harm (`fear`) and the strongest good (`appeal`) that the cues here now predict, and the larger of the two (`matters`). The thing attended to and each threat sized up also carry `harm`: what that one thing predicts. |
+| Cell, area | A cell is one cube of the world on the hippocampus's map. An area is a group of cells that connect with no door, climb or change of light between them (a cave, a house, a field). |
 | Signal | A named level from 0 to 1 that one region shares with the others (e.g. `in_danger`, `dopamine`, `patience`, `alarm`). |
 | Goal | What the prefrontal cortex wants the bot working toward: text, steps (and how many are done), what to carry (`wants`), things to watch for (`watchFor`), responses loaded in advance (`ifThen`) and reflexes to hold back (`holdBack`). Instinct reads it each tick. |
 | Hard reflex | A life-saving rule. Always urgency 1; nothing learned, felt or planned can stop it. |
@@ -77,6 +81,7 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `region-brainstem` | Supplies the reflex gains, the defence circuit's choice of defence, a `brainstem` region (startle, loaded responses, the defence signals), a `reticular` region (arousal, bedtime, waking and the graded gate), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
 | `region-thalamus` | The gateway to the deciding layers: builds a view of the state for instinct and for the planner (`ws.view(reader)`), by channel, priority and a size limit. Game-free; the Minecraft side says what the channels are. |
 | `region-hypothalamus` | Owns the body's needs: reads each once a tick and shares the reading (`ws.needs`), with moving targets, looking ahead, the body clock, slow stress and the top drive. Game-free. |
+| `region-amygdala` | Learns what predicts harm and what predicts good, by surprise, by place and by likeness, and shares `fear`, `appeal` and `matters`. Game-free; the Minecraft side offers the cues and the outcomes. |
 | `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
 | `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
 | `neuromodulators` | Chemical dials, each a region that shares signals (see below). |
@@ -139,7 +144,9 @@ else every block it is touching. A block type blamed on two separate occasions (
 seconds apart) becomes *known to hurt*: the standing checks, the pathing rules and the reflexes
 above all respect it from then on, and a memory of kind "danger" is recorded. Only damage with no
 attacker teaches anything, and air, water and the base's own blocks are never learned. The record
-is kept per bot in `data/<name>/hurts.json`.
+is kept per bot in `data/<name>/hurts.json`. That is the older rule, used with
+`amygdala.readers.blocks` at 0. Otherwise which blocks hurt is the amygdala's word (see "The
+amygdala"), with the inborn list kept fixed.
 
 **What the body feels** (state schema 12): `self.lastHurt` has the game's own name for the damage
 (`kind`: "cactus", "hot_floor", "in_wall", "fall", "mob_attack"...) and where it happened (`at`);
@@ -224,8 +231,9 @@ block in `bots.json`.
   a second, about a millisecond of pathfinding each time the state is read, every answer kept
   until a newer one replaces it. While a journey is being planned they are skipped. The cost of
   sizing up is in the trace (`costMs`, `worstMs`).
-- With nothing in view, danger is still **possible** when it is dark, a bad memory is near,
-  something worrying was heard, or a threat is close but unseen.
+- With nothing in view, danger is still **possible** when it is dark, the place or a sign
+  happening now is feared (the amygdala's word; with `amygdala.readers.wary` at 0, a bad memory
+  near), something worrying was heard, or a threat is close but unseen.
 - A state made without the threat sense (tests, `--skill` runs) is sized up by the cheap rules
   alone: the game's hostile mobs, middling danger, always a way out (`cheapDefence`).
 
@@ -266,7 +274,9 @@ pressing threat:
   or has not noticed it, raises no alarm.
 
 **Learning** (`defence/threat-record.ts`, saved in `data/<bot>/threats.json`, by kind; a player is
-`player:<name>`):
+`player:<name>`). With `amygdala.readers.defence` above 0, a kind's danger and whether it is a
+learned threat come from the amygdala instead (see "The amygdala"); beatable, shoots and kills
+stay here:
 
 | Learned | From |
 |---|---|
@@ -450,7 +460,9 @@ pufferfish, chorus_fruit, suspicious_stew). It learns the rest: when a harmful e
 within 5 seconds of a meal, that food is blamed; blamed on two separate occasions (30 seconds
 apart) it becomes *known bad*, a "danger" memory is recorded, and the list is saved in
 `data/<name>/bad-foods.json`. An effect that starts with a hostile within 8 blocks is blamed on
-the mob, not the meal, and the only food the bot has ever eaten needs three occasions. `eat`
+the mob, not the meal, and the only food the bot has ever eaten needs three occasions. (That is
+the older rule, used with `amygdala.readers.foods` at 0. Otherwise which foods are bad is the
+amygdala's word.) `eat`
 never picks a known bad food unless the bot is starving with nothing else. The state counts safe
 food as `self.foodItems` and bad food as `self.badFoodItems`.
 
@@ -1041,6 +1053,204 @@ strengths are in `bots.json` under `locomotion` (`speedFromAlarm`, `speedFromDop
 
 `step`, `jump` and `sneak` are single movements, not journeys, and hold their own key.
 
+## The hippocampus: where, and in what order
+
+`packages/memory` (game-free). One region, `hippocampus`, layer 0, every tick. It never
+proposes an action. It keeps three things: memories of events, a map, and the order things
+came in. What a cell is, and what ends an area, is the game's side:
+`packages/minecraft/src/brain/place.ts`.
+
+**Memories** (`memory.ts`, `memory-region.ts`). A trigger (`brain/memories.ts`) fires on a
+moment worth keeping; the memory has a kind, a place, what was involved, an outcome and a
+strength that fades. Alarm in the minute after stamps it stronger. At rest it consolidates,
+one step a tick: prune, merge, generalise (a fact from 3 agreeing memories).
+
+**The map** (`map.ts`). Learned by moving about; no reward is needed.
+
+| Part | What it is | File |
+|---|---|---|
+| Cell | A cube of 8 blocks, per dimension. Kept: the last spot stood on, visits, time spent, what was seen (kinds and counts, halving every 2 game days if not seen again) | `map.ts`; the cube: `CELL_BLOCKS` in `brain/place.ts` |
+| Way | Two cells walked between, the quickest crossing, how often, and what lay between (a door, a climb) | `map.ts` |
+| Area | Cells joined by plain ways and sharing a setting ("open" under the sky; "covered" where the sky's light is low, or a roof and walls are close round the body). An area keeps its name as the map grows | `map-areas.ts` |
+| Familiarity | 0 to 1 per cell: half after 4 visits (half a minute spent counts as a visit) | `map.ts` |
+| Route | The quickest known way between two cells, only along ways walked. A cell that led to harm counts as two minutes longer, so another way is taken when there is one | `map-route.ts` |
+
+Each tick the region puts the bot on the map and shares `ws.place` and the signal
+`unfamiliar` (1 − familiarity). Reader: dopamine's curiosity. An area known less than half
+counts as something new, once (`newPlace` in `brain/cues.ts`, beside `noticedIn`).
+
+**The order of events** (`memory.ts`, `leads-to.ts`, `trail.ts`).
+- Each memory links to the one before it when they are under two minutes apart.
+- Two memories are one only when they are of the same kind, involve the same things and
+  their outcomes have the same sign. A good and a bad meeting are kept apart.
+- The region keeps the last ten minutes of cells, in order.
+- At rest a fourth step, `sequence`, writes a "leads to" fact when one kind of event has
+  followed another three times ("creeper (danger) is often followed by ...").
+
+**Replay** (`map-replay.ts`). Replay pays nothing and is not a new experience.
+
+| When | What is played | What it leaves |
+|---|---|---|
+| After a memory with an outcome of 0.2 or more, good or bad | The recent cells, backward | Each cell on the way gets "led to good" or "led to harm": the outcome's size at the spot, 0.7 of that one cell back, and so on for 8 cells. A death is marked where the bot died, not where it woke up |
+| At rest (a fifth consolidation step, `replay`) | The cells since the last rest, in order | Each way gone over counts as half a walk, so routes prefer it |
+| Before a journey | The route, forward | For the planner: one line beside a known place ("the way passes where this happened: ..."). For locomotion: the feared cells as avoid areas, and the known spots to pass |
+
+**Journeys on the map** (`brain/map-routes.ts`, `locomotion`). The pathfinder takes one goal at
+a time, so known spots are walked as legs: `goTo` asks `routeHint` once as a journey starts,
+heads for each spot in turn, and drops the spots left when it is within 12 blocks of the end
+or a leg has no route. Spots are given only for a way of three cells or more, and only when
+the way by them is no more than one and a half times the straight line (`DETOUR`): a known way
+that is a long way round is no help. A feared cell is not ringed when its circle would shut in
+the start, the end or a spot to pass.
+
+**Settings** (`bots.json`, under `memory`; each 0 to 1, and at 0 that part is off):
+
+| Setting | At 0 | Above 0 |
+|---|---|---|
+| `map` | No map is kept, `ws.place` stays null, `unfamiliar` is not shared | How fast a cell becomes familiar |
+| `order` | No links between memories, good and bad may merge, no "leads to" facts | On |
+| `replay` | No marks, nothing gone round, the planner told nothing | How strongly a cell is marked |
+| `waypoints` | Locomotion is given no spots | On |
+
+**Reports.** The region's trace carries `place` each tick (cell, area, familiarity, map size,
+time taken and the slowest tick, how many journeys used the map), `replays`, and
+`consolidation`. `pnpm map-check` runs three live scenes: `wander` (a ground with a house and a
+tunnel, then to a chest out of sight), `route` (two ways between two corners, a death on one,
+and the way then given) and `replay` (a trip that ends in being fed).
+
+## The amygdala: what predicts harm, and what predicts good
+
+`packages/region-amygdala` (game-free; per bot in `bots.json` under `amygdala`). One region,
+`amygdala`, layer 0, every tick, listed after the hippocampus (it needs `ws.place`). It never proposes an action and calls no model.
+What a cue is, and what counts as an outcome, is the game's side:
+`packages/minecraft/src/brain/amygdala.ts`.
+
+It is the one place that learns what predicts harm. The older rules (the threat record's
+danger, `hurts.json`, `bad-foods.json`, the feeling of a place from memory) are still there:
+each reader has its own strength in `amygdala.readers`, and at 0 that reader uses its old
+source. The trace still says what the old rule holds next to the amygdala (`shadow`).
+
+**An association** (`association.ts`), one per cue, saved in `data/<bot>/associations.json`:
+
+| Field | What it is |
+|---|---|
+| `harm` | How strongly the cue predicts harm, from -0.5 (a sign of safety) to 1 |
+| `good` | How strongly it predicts good, 0 to 1 |
+| `sure` | How sure, 0 to 1. Halves every 5 game days without evidence. An unsure value is acted on at 0.4 of its size, falling back toward what the cue was born with |
+| `safe` | "Safe here": per area, how fully its harm has been found not to come there. Halves every 3 game days |
+| `born` | What the bot is born believing of it (an inborn fear), if anything |
+| `met` | How many times it has been around with no harm following (up to 20). Something long familiar and harmless is slow to be blamed |
+
+What a cue predicts here and now is `harm × (1 − safe here)`. A "safe" learned in another area
+counts a third.
+
+**Cues** (`brain/amygdala.ts`, `CUE_READERS`). A cue is a name with a type before the colon.
+
+| Cue | When it is offered | How much it stands out |
+|---|---|---|
+| `kind:zombie`, `kind:player:<name>`, `kind:chest` | The thing is in view (or has just struck the bot) | 1 if attended to or it just struck; else 0.3 to 0.6 by nearness |
+| `block:cactus` | The body touches it, or it is a hazard close by (a hazard only seen close by is `apart`: no harm then says nothing about touching it). A block is `direct`: it is blamed for a hurt only when the hurt points at it | 0.15 |
+| `food:bread` | Just eaten; it stays around for a minute and is blamed only for what comes through the gut | 0.8, fading |
+| `area:a3` | The area the hippocampus says the bot is in | 0.2 |
+| `time:night` | Always: day, dusk, night or dawn | 0.1 |
+| `sound:explosion` | Heard in the last second | 0.6 × loudness |
+| `sign:danger\|creeper` | An event just remembered that a "leads to" fact starts from | 0.5 |
+
+Inborn fears are a cue's starting point: `defence.innateThreats` (0.5, as the threat record
+starts), `reflexes.innateHurts` (0.8) and `medulla.innateBadFoods` (0.8). The listed ones are
+held from the first tick, met or not (`inbornFears`); with `innateThreats: "game"` a kind is
+known when first met.
+
+**Outcomes** (`playerOutcomes`).
+
+| Outcome | Size |
+|---|---|
+| Health lost | Its felt size: the square root of the share of full health (1 health is 0.22, 5 is 0.5, 20 is 1), so that a small hurt is still plainly a hurt (`feltSize`). It points at the attacker, or at the block the game names |
+| Death | 1, and it teaches in one go |
+| An illness starting | Half the effect's sickness, through the gut |
+| A need dropping by 0.1 or more in a tick (not a need about danger) | The drop |
+
+Not outcomes: a hurt the bot caused itself (`selfCaused`), a hurt of the body's own doing
+whatever is around (`OWN_DOING`: a fall, flying into a wall, drowning, starving), and a first
+hit from a player (the two-hit rule, shared with the threat record: `createPlayerHits`).
+Replay in the hippocampus is not an outcome either: only the body's own health, illness and
+needs are read.
+
+**Learning** (`learn.ts`, pure).
+- The cues of the last 5 seconds share one surprise: the outcome less what they predicted
+  together. Each moves by rate × its share × the surprise. So a cue that adds nothing to what
+  was already predicted learns nothing.
+- Shares go by how much each cue stands out. A cue the outcome points at counts in full; the
+  others then count a quarter.
+- A cue long familiar and harmless is slow to be blamed for a harm that points at nothing: its
+  share is divided by 1 + half its harmless meetings (`met`). So the ground and the time of
+  day give way to whatever is new (the cave it has just walked into). A harm that points
+  straight at a cue ignores this, and the cue is familiar no longer.
+- The rate grows with the outcome: 0.3 of full for the smallest, all of it for the largest.
+- Harm is never erased, and a hurt never lowers it (a small hit from a feared thing changes
+  nothing). A feared cue that was around with no harm (`presence.ts`: it left, or
+  a minute passed) moves "safe here" a tenth of the way to 1, less for a meeting under 20
+  seconds. Harm in that area takes the safety away again.
+- A cue that is not feared, around with no harm while the other cues predict 0.2 or more, goes
+  below zero: a sign of safety. It moves by its share of how much everything around stands
+  out, so the ground underfoot gets there very slowly.
+- Good fades a little when nothing good follows.
+
+**Spreading** (`spread.ts`, `brain/alike.ts`). A cue never met starts with half of what the
+most similar known cue of its type predicts, times how alike they are. Likeness is from
+physical facts (size, the game's word for how it moves, whether it shoots, the game's hostile
+flag). Only kinds of creature can be compared so far.
+
+**What it shares** (`signals.ts`), each 0 to 1, of the cues that are here now:
+
+| Signal | What it is |
+|---|---|
+| `fear` | The strongest harm any cue around predicts here and now, less any signs of safety around (cues below zero) |
+| `appeal` | The strongest good any cue around predicts |
+| `matters` | The larger of the two |
+
+It also tells the thing attended to how much harm it predicts (`attended.harm`), and the
+threat sense writes the same for each threat it sizes up (`harm`, beside `danger`).
+
+**Who reads it.** Each is one line where the reader is put together (`apps/run-bot/src/brain.ts`,
+`amygdala.ts` and `loop-mode.ts`), with its own strength in `amygdala.readers`:
+
+| Reader (`readers.` name) | What it takes | At 0 |
+|---|---|---|
+| The defence circuit (`defence`) | A kind's `danger` is the harm its cue predicts here. A kind is a threat if it is born one or predicts 0.12 or more (`KNOWN_HARM`). What is known about fighting it (beatable, shoots, kills) stays the threat record's | The threat record's danger and learned threats |
+| Possible danger (`wary`) | A feared area, or a sign of harm happening now, makes danger "possible" with nothing in view, which sets `wary` | A bad memory within 24 blocks |
+| Noradrenaline (`alarm`) | Fear counts beside the vital needs, at half its size (`FEAR_ALARM`): alarm rises before any harm | Fear does not move alarm |
+| The hippocampus (`memory`) | A fresh memory's strength is the larger of alarm and `matters` | Alarm alone |
+| The thalamus (`thalamus`) | A feared thing's priority rises by 0.6 × its harm (`WEIGHTS.feared`), as much as a threat coming, so it is passed in full | Fear does not count |
+| The hypothalamus (`stress`) | Fear is one more load on the body: lasting fear builds stress | It is not |
+| Acetylcholine (`focus`) | `appeal` is a focus input ("promising") | It is not |
+| Safety checks, pathing, the about-to-touch reflex (`blocks`) | A block is known to hurt if it is on the inborn list, or its cue predicts 0.12 or more here | `hurts.json` |
+| Food helpers, the medulla's eating urge (`foods`) | A food is bad if its cue predicts 0.12 or more | `bad-foods.json` |
+
+The threat sense, the safety checks and the food helpers are asked when the state is made,
+before any region runs, so they read what the amygdala held at the end of the last tick. A cue
+it has not met yet is rated as it would begin (born with, or like a similar kind). With the
+amygdala left out of the brain (`--regions`), every reader goes back to its old source.
+
+**What never reads it.** The hard reflexes (in lava or fire, drowning, last stand, cornered
+fight, buried, falling right) and the medulla's hard rules. The inborn hurts stay fixed for the
+safety checks, because the about-to-touch reflex is built on them. A kind born never-to-fight
+stays so. `last_stand` goes by the game's hostile flag.
+
+**Moving the old files over** (`brain/amygdala-move.ts`, `moveOldLearning`). On the first start,
+`threats.json`, `hurts.json` and `bad-foods.json` are copied to `data/<bot>/before-amygdala/`
+and laid over the associations: a threat predicts its recorded danger, a block or food the old
+rule knew predicts 0.5. The folder marks it done. The old files stay and keep being written.
+
+**The log.** Each tick the trace carries `fear`, `appeal`, the cues that predict anything, what
+was `learned` and why (with `rated`: what the cue the harm pointed at was rated before, and
+`spared`: how many cues around were not blamed), `returned` (a fear that came back, and why),
+and `shadow`: for whatever is around, the old rule's answer and the amygdala's. `pnpm
+brain-report` sums these up with the map. `pnpm amygdala-check` runs six live scenes (a feared
+place, a warning, unlearning, a tag-along, a shelter, a similar kind). `pnpm shadow-check
+[minutes]` plays the whole brain by the base with nothing scripted; `pnpm shadow-report <log>`
+prints the comparison with the old rules for any log.
+
 ## The basal ganglia: who goes ahead
 
 One place decides which proposals go ahead: `createArbiter` in `apps/run-bot/src/brain.ts`, built
@@ -1159,8 +1369,8 @@ in `data/<name>/`.
   learned to be costly (weaker while a need is desperate).
 
 **Noradrenaline** (`noradrenaline` region): alarm and search.
-- **Alarm** (fast) is never below what the vital needs press at; a need suddenly worse, or a
-  startle, adds a jump; it fades within seconds once the cause has gone. It takes the planner
+- **Alarm** (fast) is never below what the vital needs press at, nor below half the amygdala's
+  `fear`; a need suddenly worse, or a startle, adds a jump; it fades within seconds once the cause has gone. It takes the planner
   out of charge (offline above 0.8 until back under 0.5), and a jump interrupts the running skill
   (the goal is kept).
 - **Search** (slow) rises while a need presses and the bot is getting nowhere, or knows nothing
@@ -1197,6 +1407,19 @@ in `data/<name>/`.
 | Change what a decider is told | The modulators' weights: `WEIGHTS` in `region-thalamus/src/priority.ts`; what opens a channel: `gate.ts`; one bot: the strengths in `bots.json` under `thalamus` |
 | Give a decider a bigger view | `bots.json`: `thalamus.limits.instinct` or `.prefrontal` (characters of JSON) |
 | Add a reader | Add its region name to `DECIDERS` in `apps/run-bot/src/brain.ts`, give it a limit in `thalamus.limits`, and have it read `ws.view("<name>")` instead of `ws.state` |
+| Change the size of a map cell | `CELL_BLOCKS` in `packages/minecraft/src/brain/place.ts` (an old `map.json` then no longer fits: delete it) |
+| Change what ends an area | `createCellReader` in `brain/place.ts`: the `setting` (open or covered) and `barrier` (door, climb) |
+| Make a bot at home sooner, or never | `bots.json`: `memory.map` (higher: familiar sooner; 0: no map) |
+| Change how far back replay reaches | `BACK` in `packages/memory/src/map-replay.ts` |
+| Change how strongly a feared cell is gone round | `HARM_MS` and `FEARED_CELL` in `packages/memory/src/map-route.ts`; the avoid areas: `AVOID` in `brain/map-routes.ts` |
+| Add a kind of cue for the amygdala | `packages/minecraft/src/brain/amygdala.ts`: write a reader (name it `<type>:<name>`, give it how much it stands out) and list it in `CUE_READERS`. Nothing in `region-amygdala` changes |
+| Add an outcome the amygdala learns from | `playerOutcomes` in `brain/amygdala.ts` (a size from 0 to 1, a sign, and what it points at if the game says) |
+| Make a bot more fearful, or more forgiving | In `bots.json` under `amygdala`: `learn` (how fast anything is learned), `safeHere` (how far a fear is let go where it proved harmless; 0 never), `spread` (how far a new thing starts feared like a similar one). What it is born fearing: `defence.innateThreats`, `reflexes.innateHurts`, `medulla.innateBadFoods`. The rates themselves: `LEARNING` in `packages/region-amygdala/src/learn.ts` (`slowest`, `harmless`, `familiar`); how long things last: `LIMITS` in `association.ts`; how big a hurt feels: `feltSize` in `brain/amygdala.ts` |
+| Add a reader of fear | Read the `fear` signal (or `appeal`, `matters`) where the reader is put together in `apps/run-bot/src/brain.ts`, scaled by a new strength in `AmygdalaReaders` (`packages/region-amygdala/src/settings.ts`). For a yes-or-no about one thing (a block, a food, a kind), add to `PlayerAmygdala` in `apps/run-bot/src/amygdala.ts`: the harm its cue predicts here against `KNOWN_HARM` |
+| Send one reader back to its old rule | `amygdala.readers.<name>: 0` in `bots.json` (`defence`, `wary`, `alarm`, `memory`, `thalamus`, `stress`, `focus`, `blocks`, `foods`) |
+| Change when something counts as known to bring harm | `KNOWN_HARM` in `packages/minecraft/src/defence/threat-record.ts` (a learned threat, a hurtful block, a bad food, a feared place) |
+| Change how alike two kinds of creature are | `DIFFERS` in `packages/minecraft/src/brain/alike.ts`; to compare another type of cue, add its facts in `createAlike` |
+| Add what a memory trigger records | `packages/minecraft/src/brain/memories.ts` (write the trigger, add it to `playerMemories`) |
 | Turn the gate off | `bots.json`: `thalamus.gate: 0` (views are then the nearest few of each kind, by the attention budget) |
 | Make a bot more distractible while it works | `bots.json`: lower `colliculus.fixation` (0: nothing holds its gaze); the size of the brake is `BRAKE` in `region-brainstem/src/fixation.ts` |
 | Change what counts as overhead | `FIELD_BEYOND` in `region-brainstem/src/field.ts` (degrees up and down); what a dive, a fly-over or a small thing is: the `LEAN` table in `lean.ts` |

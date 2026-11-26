@@ -15,9 +15,17 @@ export function touchingOf(bot: EncodableBot): Touching {
   return { feet: name(feet), head: name(feet.offset(0, 1, 0)), below: name(feet.offset(0, -1, 0)), sides: SIDES.map((side) => name(feet.plus(side))) };
 }
 
-/** The head is inside a solid block: being buried. */
+/**
+ * The head is inside a solid block: being buried. Judged by the block's solid parts as it stands
+ * (so not in an open doorway, beside a fence post or under a slab), or by its kind if those are not known.
+ */
 export function headInBlock(bot: EncodableBot): boolean {
-  return bot.blockAt(bot.entity.position.offset(0, EYE_HEIGHT, 0))?.boundingBox === "block";
+  const eyes = bot.entity.position.offset(0, EYE_HEIGHT, 0);
+  const block = bot.blockAt(eyes);
+  if (block?.boundingBox !== "block") return false;
+  if (!block.shapes) return true;
+  const [x, y, z] = [eyes.x - Math.floor(eyes.x), eyes.y - Math.floor(eyes.y), eyes.z - Math.floor(eyes.z)];
+  return block.shapes.some(([x0, y0, z0, x1, y1, z1]) => x >= x0! && x <= x1! && y >= y0! && y <= y1! && z >= z0! && z <= z1!);
 }
 
 /**

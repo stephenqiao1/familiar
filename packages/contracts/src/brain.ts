@@ -84,6 +84,18 @@ export interface Attended {
   field?: "upper" | "lower" | "level";
   /** What its place and movement lean the body toward, from physical facts alone: advice, not a decision. Left out for none. */
   lean?: "avoid" | "freeze" | "approach";
+  /** How much harm it predicts here and now, as the amygdala has learned (-0.5 a sign of safety, to 1). Left out if nothing has said. */
+  harm?: number;
+}
+
+/** Where the agent is, as the hippocampus's map has it. */
+export interface PlaceNow {
+  /** The map cell it is in. */
+  cell: string;
+  /** The area that cell belongs to (a cave, a house, a field): the "where" for learning. */
+  area: string;
+  /** How well it knows this cell, 0 (never been) to 1. */
+  familiarity: number;
 }
 
 /** One need as the hypothalamus read it this tick. */
@@ -162,6 +174,8 @@ export interface Workspace {
   readonly attended: Attended | null;
   /** The body's needs as the hypothalamus read them this tick, or null with no hypothalamus. */
   readonly needs: Needs | null;
+  /** Where the agent is on its own map, or null with no map. */
+  readonly place: PlaceNow | null;
   /** Skill lifecycle events, oldest first, at most the last 20. */
   readonly recentEvents: readonly SkillEvent[];
   /**
@@ -181,6 +195,8 @@ export interface Workspace {
   setAttended(attended: Attended | null): void;
   /** Shares this tick's reading of the body's needs. */
   setNeeds(needs: Needs | null): void;
+  /** Shares where the agent is on its map. */
+  setPlace(place: PlaceNow | null): void;
 }
 
 /** What a region returns each time it runs. */

@@ -1,4 +1,4 @@
-import type { State } from "@familiar/contracts";
+import type { State, Workspace } from "@familiar/contracts";
 import { needChangeReward } from "./need-change.js";
 import type { RewardMoment, RewardRule } from "./rewards.js";
 
@@ -24,7 +24,7 @@ export function createNoveltyMemory(saved: Record<string, number> = {}): Novelty
 
 export interface NoveltyOptions {
   /** The kinds of things the bot notices in a state (e.g. "cow", "biome:plains"). */
-  noticed(state: State): string[];
+  noticed(state: State, ws?: Workspace): string[];
   memory: NoveltyMemory;
   /** How much of its boredom one brand-new kind of thing takes away (0 to 1). Default: 0.5. */
   bonus?: number;
@@ -60,7 +60,7 @@ export function createNoveltyRule({ noticed, memory, bonus = 0.5, fillMs = 600_0
       const { after } = moment;
       if (last !== null) boredom = Math.min(1, boredom + Math.max(0, after.timestamp - last) / fillMs);
       last = after.timestamp;
-      const now = new Set(noticed(after));
+      const now = new Set(noticed(after, moment.ws));
       const arrived = [...now].filter((kind) => !inView.has(kind));
       inView = now;
       const met = arrived.map((kind) => ({ kind, before: memory.meet(kind) }));

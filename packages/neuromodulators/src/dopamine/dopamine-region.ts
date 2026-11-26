@@ -248,7 +248,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
       if (event > 0 && (event >= noticed.strength || clock - noticed.at > NOTICED_MS)) noticed = { strength: event, at: clock };
       const events = ws.recentEvents.filter((e) => !seen.has(e));
       for (const e of events) seen.add(e);
-      const moment = before && { before, after, events };
+      const moment = before && { before, after, events, ws };
       before = after;
       const readings = options.needs?.now(ws);
       const [was, now] = [levels, readings ? Object.fromEntries(readings.map((r) => [r.name, r.level])) : needLevels(rules, after)];

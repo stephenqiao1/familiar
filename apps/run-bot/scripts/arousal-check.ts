@@ -9,7 +9,7 @@ import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 
 const BOT = "Dozer";
 /** Every region but instinct: nothing but the reticular formation can decide to go to bed. */
-const NO_INSTINCT = "reflex,medulla,brainstem,reticular,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+const NO_INSTINCT = "reflex,medulla,brainstem,reticular,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal";
 const ALL = `${NO_INSTINCT},instinct`;
 /** Beside the base bed (the bed is at -8 68 15). */
 const HOME = "-7.5 69 13.5 0 0";

@@ -33,6 +33,9 @@ describe("priority", () => {
     }
     expect(priorityOf({ ...base, attended: true }, ON).priority).toBeCloseTo(0.3 + WEIGHTS.attended);
     expect(priorityOf({ ...base, wanted: 0.5 }, ON).priority).toBeCloseTo(0.3 + 0.5 * WEIGHTS.wanted);
+    // What has been learned to predict harm counts as much as a threat coming: it is passed in full.
+    expect(priorityOf({ ...base, feared: 1 }, ON)).toEqual({ priority: 0.3 + WEIGHTS.feared, by: ["feared"] });
+    expect(WEIGHTS.feared).toBeGreaterThanOrEqual(WEIGHTS.threatComing);
   });
 
   it("a thing that has been got used to drops", () => {

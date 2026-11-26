@@ -45,6 +45,8 @@ export interface ThreatFacts {
   /** The bot has a way out. */
   escapable: boolean;
   danger: number;
+  /** How much harm the amygdala says this kind predicts here and now, if it was asked. */
+  harm?: number;
   beatable: boolean;
 }
 
@@ -52,6 +54,8 @@ export interface ThreatFacts {
 export interface ThreatView extends Threat {
   seen: boolean;
   shoots: boolean;
+  /** How much harm the amygdala says this kind predicts here and now, if it was asked. */
+  harm?: number;
   /** How it was judged to have noticed, or null. */
   noticedBy: "approach" | "facing" | "hurt" | "struck" | "lately" | null;
 }
@@ -96,7 +100,7 @@ export function sizeUp(facts: ThreatFacts, bravery: number, flightStrength = 1, 
           : "possible";
   // Coming only on a guess at its reach (not looming, and it has not hurt the bot lately, which would settle it): to be watched, not yet run from.
   const settling = facts.settling === true && stage === "coming" && !facts.looming && !hurtLately;
-  return { id, kind, dist, stage, noticed, canReach, escapable, danger: round(danger), beatable, flightDistance: round(flight), seen, shoots, noticedBy, ...(settling ? { settling } : {}) };
+  return { id, kind, dist, stage, noticed, canReach, escapable, danger: round(danger), beatable, flightDistance: round(flight), seen, shoots, noticedBy, ...(facts.harm === undefined ? {} : { harm: round(facts.harm) }), ...(settling ? { settling } : {}) };
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;

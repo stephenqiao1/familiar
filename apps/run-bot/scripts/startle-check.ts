@@ -8,7 +8,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 
 const BOT = "Jumper";
-const REGIONS = "reflex,medulla,brainstem,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+const REGIONS = "reflex,medulla,brainstem,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal";
 /** Facing north; behind it is south. */
 const START = "60.5 151 40.5 180 0";
 /** Bangs go off in the open air south of the plaza, 10 blocks behind the bot, where they break nothing. */

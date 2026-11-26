@@ -25,6 +25,8 @@ export interface ThalamusOptions {
   wantOf?(kind: string, ws: Workspace): number;
   /** How far this thing has been got used to, 0 to 1. Default: 0. */
   usedTo?(item: Item, ws: Workspace): number;
+  /** How much harm this thing has been learned to predict, 0 to 1 (the amygdala's word): a feared thing is passed on in full. Default: 0. */
+  fearOf?(item: Item, ws: Workspace): number;
   /** Focus, 0 to 1. Default: 0.5. */
   focusOf?(ws: Workspace): number;
   /** Arousal, 0 to 1. Default: 0.5. */
@@ -107,6 +109,7 @@ export function createThalamusRegion(options: ThalamusOptions): Region {
         ...(item.fresh ? { fresh: true } : {}),
         ...(item.dist === undefined ? {} : { dist: item.dist }),
         usedTo: options.usedTo?.(item, ws) ?? 0,
+        feared: options.fearOf?.(item, ws) ?? 0,
       });
     }
     const open = new Map(split.channels.map((channel) => [channel.name, openedBy(channel.items.map((item) => facts.get(item.id)!), strengths)]));

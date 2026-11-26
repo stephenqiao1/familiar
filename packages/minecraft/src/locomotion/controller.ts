@@ -14,7 +14,7 @@ import { createRules, type RuleSets } from "./rules.js";
 import { createStuckSpots } from "./spots.js";
 import { farFrom, steer } from "./swim.js";
 import { installTick } from "./tick.js";
-import type { Drive, Gait, HeadOverride, Locomotion, LocomotionStatus, PatternName } from "./types.js";
+import type { Drive, Gait, HeadOverride, Locomotion, LocomotionStatus, PatternName, RouteHint } from "./types.js";
 import { createWalk } from "./walk.js";
 
 export interface LocomotionOptions {
@@ -24,6 +24,8 @@ export interface LocomotionOptions {
   log?: (msg: string) => void;
   /** The two sets of pathing rules. Default: built for this bot (tests pass stand-ins). */
   rules?: (avoid: (pos: { x: number; y: number; z: number }) => boolean) => RuleSets;
+  /** A known way to a place, from the bot's own map: spots to pass and areas to go round. Asked once as a journey starts. Default: none. */
+  routeHint?: (from: Vec3, to: Vec3) => RouteHint | null;
 }
 
 /** What a journey expects when it works: not to overrun. Checked with the primitives' mechanism. */
@@ -39,6 +41,8 @@ const FEEL_MS = 250;
 const PAUSE_POLL_MS = 25;
 /** A journey is planned again for a new or moved area to keep clear of at most this often. */
 const REPLAN_FOR_AREA_MS = 1000;
+/** An area the map says to go round is kept clear of for this long (a journey's length). */
+const HINT_AVOID_MS = 120_000;
 /** A journey is late once it has run past this many times its estimate; no estimate is under this long. */
 const LATE_FACTOR = 2;
 const MIN_ESTIMATE_MS = 2000;
@@ -207,7 +211,9 @@ export function createLocomotion(bot: Bot, options: LocomotionOptions = {}): Loc
         if (run.pattern === "walk") {
           applyRules();
           const noRoute = journey.failsWithoutPath ? walk.failure(Date.now()) : null;
-          if (noRoute) return report(run, "failed", noRoute);
+          // A journey by known spots: on to the next leg, or straight for the end if a leg has no route.
+          if (journey.advance?.(noRoute !== null)) setGoal(run);
+          else if (noRoute) return report(run, "failed", noRoute);
           if (journey.replanMs !== undefined && Date.now() - run.goalSetAt >= journey.replanMs) setGoal(run);
           const aim = journey.aim();
           const way = aim && journey.kind === "goTo" ? findDoorWay(bot, aim, run.doors) : null;
@@ -270,7 +276,13 @@ export function createLocomotion(bot: Bot, options: LocomotionOptions = {}): Loc
   }
 
   return {
-    goTo: (place, opts, signal) => begin(goToJourney(bot, place, opts), signal),
+    goTo(place, opts, signal) {
+      const to = typeof place === "function" ? place() : place;
+      const hint = to && !opts.urgent && !opts.via ? (options.routeHint?.(bot.entity.position, to) ?? null) : null;
+      for (const a of hint?.avoid ?? []) spots.area(a.name, a.centre, a.radius, HINT_AVOID_MS, Date.now());
+      if (hint?.via.length) log(`locomotion: going by ${hint.via.length} known spots`);
+      return begin(goToJourney(bot, place, hint?.via.length ? { ...opts, via: hint.via } : opts), signal);
+    },
     follow: (entity, opts, signal) => begin(followJourney(bot, entity, opts), signal),
     awayFrom: (threat, opts, signal) => begin(awayJourney(bot, threat, opts), signal),
     stop() {

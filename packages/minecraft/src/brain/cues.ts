@@ -1,4 +1,5 @@
-import type { Skill, State } from "@familiar/contracts";
+import type { Skill, State, Workspace } from "@familiar/contracts";
+import { UNFAMILIAR_SIGNAL } from "@familiar/memory";
 import type { Aim, Thing } from "@familiar/neuromodulators";
 import { isUsefulBlock, USEFUL_BLOCK_RADIUS } from "../encode/scan-useful-blocks.js";
 import { WORK_PER_BLOCK } from "./effort-spent.js";
@@ -72,6 +73,14 @@ export function skillsToward<Ctx>(skills: Skill<Ctx>[], ctx: Ctx): (thing: Thing
  * biome ("biome:plains") and every item carried ("item:bread"). Hazards are left out, so the bot
  * isn't rewarded for walking up to lava.
  */
+/** A place counts as new while the map knows it less than this well. */
+const NEW_PLACE = 0.5;
+
+/** For novelty: an area the hippocampus's map hardly knows is something new, once (`unfamiliar` is its signal). */
+export function newPlace(ws: Workspace | undefined): string[] {
+  return ws?.place && (ws.signals[UNFAMILIAR_SIGNAL]?.value ?? 0) > NEW_PLACE ? [`place:${ws.place.area}`] : [];
+}
+
 export function noticedIn(state: State): string[] {
   const data = minecraftDataOf(state);
   if (!data) return [];

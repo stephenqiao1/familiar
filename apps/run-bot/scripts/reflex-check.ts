@@ -10,7 +10,7 @@ import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 
 /** A bot born knowing only that lava and fire hurt (bots.json), so it has to learn the rest. */
 const BOT = "Naive";
-const REGIONS = "reflex,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,serotonin,prefrontal";
+const REGIONS = "reflex,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal";
 const START = `tp ${BOT} 60.5 151 40.5 180 0`;
 
 interface Tick {

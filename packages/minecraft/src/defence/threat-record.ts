@@ -68,7 +68,29 @@ export interface ThreatRecord {
   entries(): ThreatEntries;
 }
 
-const isPlayer = (kind: string) => kind.startsWith("player:");
+export const isPlayer = (kind: string) => kind.startsWith("player:");
+
+/** Something predicting this much harm (as the amygdala has learned) is known to bring harm: a kind is a threat, a block hurts, a food is bad. */
+export const KNOWN_HARM = 0.12;
+
+/** Whether the bot is born treating this kind as a threat. `gameHostile`: the game flags it hostile. */
+export const bornThreat = (settings: Pick<DefenceSettings, "innateThreats">, kind: string, gameHostile: boolean) => (settings.innateThreats === "game" ? gameHostile : settings.innateThreats.includes(kind));
+
+/**
+ * The two-hit rule: one hit from another player may be an accident, so only a second, a little
+ * later, counts at all. `counts` notes a hit and says whether it counts.
+ */
+export function createPlayerHits(): { counts(kind: string, now: number): boolean } {
+  const firstHit = new Map<string, number>();
+  return {
+    counts(kind, now) {
+      const first = firstHit.get(kind);
+      if (first !== undefined && now - first <= PLAYER_HITS.withinMs) return now - first >= PLAYER_HITS.apartMs;
+      firstHit.set(kind, now);
+      return false;
+    },
+  };
+}
 const fresh = (): ThreatCounts => ({ seen: 0, hurts: 0, damage: 0, kills: 0, deaths: 0, badLosses: 0, rangedHurts: 0, danger: MIDDLING });
 
 /** `settings.learnThreats` 0: nothing is recorded, and every kind keeps its innate standing. */
@@ -76,9 +98,9 @@ export function createThreatRecord(settings: Pick<DefenceSettings, "innateThreat
   const kinds = new Map<string, ThreatCounts>(Object.entries(saved).map(([kind, c]) => [kind, { ...fresh(), ...c }]));
   const learns = settings.learnThreats > 0;
   const notes: string[] = [];
-  const firstHit = new Map<string, number>();
+  const hits = createPlayerHits();
   const of = (kind: string) => kinds.get(kind) ?? fresh();
-  const innate = (kind: string, gameHostile: boolean) => (settings.innateThreats === "game" ? gameHostile : settings.innateThreats.includes(kind));
+  const innate = (kind: string, gameHostile: boolean) => bornThreat(settings, kind, gameHostile);
   const score = (c: ThreatCounts, kind: string) => c.kills - c.deaths - c.badLosses + (settings.innateNeverFight.includes(kind) ? PRIOR.neverFight : PRIOR.other);
   const shoots = (c: ThreatCounts) => c.rangedHurts >= SHOOTS_AFTER;
 
@@ -106,11 +128,7 @@ export function createThreatRecord(settings: Pick<DefenceSettings, "innateThreat
     met: (kind) => change(kind, (c) => void c.seen++),
     hurtBy(kind, amount, distance, gameHostile, now) {
       // One hit from another player may be an accident: only a second, a little later, counts at all.
-      if (isPlayer(kind) && !of(kind).threat) {
-        const first = firstHit.get(kind);
-        if (first === undefined || now - first > PLAYER_HITS.withinMs) return void firstHit.set(kind, now);
-        if (now - first < PLAYER_HITS.apartMs) return;
-      }
+      if (isPlayer(kind) && !of(kind).threat && !hits.counts(kind, now)) return;
       change(kind, (c) => {
         c.hurts++;
         c.damage += amount;

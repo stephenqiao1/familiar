@@ -24,10 +24,12 @@ export interface Facts {
   dist?: number;
   /** How far it has been got used to, 0 (not at all) to 1. */
   usedTo?: number;
+  /** How much harm it has been learned to predict, 0 to 1. */
+  feared?: number;
 }
 
 /** How much each modulator adds at full strength. Change what matters to a decider here. */
-export const WEIGHTS = { attended: 0.5, target: 0.5, threatSeen: 0.35, threatComing: 0.6, asked: 0.3, wanted: 0.3, watched: 0.25, fresh: 0.2, near: 0.15, usedTo: -0.25 };
+export const WEIGHTS = { attended: 0.5, target: 0.5, threatSeen: 0.35, threatComing: 0.6, asked: 0.3, wanted: 0.3, watched: 0.25, fresh: 0.2, near: 0.15, usedTo: -0.25, feared: 0.6 };
 /** Nearness fades to nothing at this distance. */
 export const NEAR_WITHIN = 16;
 
@@ -59,5 +61,6 @@ export function priorityOf(facts: Facts, strengths: Strengths): { priority: numb
   move("fresh", facts.fresh ? WEIGHTS.fresh : 0);
   move("near", facts.dist === undefined ? 0 : WEIGHTS.near * clamp(1 - facts.dist / NEAR_WITHIN));
   move("used to", WEIGHTS.usedTo * clamp(facts.usedTo ?? 0));
+  move("feared", WEIGHTS.feared * clamp(facts.feared ?? 0));
   return { priority: clamp(priority), by };
 }
