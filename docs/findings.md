@@ -124,6 +124,10 @@ entries named in brackets hold the evidence.*
     `vitals` are read now (as the needs warmth, rest and illness, as hunger's look-ahead, and as
     a source of stress). What does not fit in 0 to 1 is shared as data in `ws.needs` beside the
     signals, which is how mood could be shared too.
+    **Step one of the cerebellum (2026-11-26):** `asExpected` and `late` are read now, but only
+    into the cerebellum's log, beside its own predictions. **Step two (2026-11-27):** `late` now
+    goes by the learned pace, `asExpected` by learned expectations, and a movement that goes wrong
+    raises `mismatch`, which focus, alarm and the striatum read.
     **Would fix:** give `stuck` and `headroom` a reader or drop them.
 
 11. **There is too little to do for the upper layers to show anything.** There are only a few
@@ -154,6 +158,226 @@ entries named in brackets hold the evidence.*
     **Would fix:** add the other dangers as vital needs, and put a time on every memory.
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
+
+## The cerebellum, switched on (step two of the cerebellum work)
+
+*Built 2026-11-27. The models learned in step one now have readers, each with a strength from 0
+to 1 in the bot's `cerebellum` block (0 = the fixed rule, as before). How it works is in
+[brain.md](brain.md), "The cerebellum", The readers.*
+
+**What reads it now.**
+
+| Strength | Reader | Learned | Fixed rule it replaces |
+|---|---|---|---|
+| `estimates` | Journey estimate | Length × learned pace on the ground it starts on | Length ÷ the gait's speed |
+| `late` | Journey `late` | Learned time for the ground crossed + 3 spreads | Twice the estimate |
+| `pace` | Stumble check | Allowance scaled by the learned pace here | 0.5 blocks in 1.5 s |
+| `giveUp` | Give-up clock's base | The skill's usual time + 3 spreads, 30 s to 6 min | 2 minutes |
+| `mismatch` | Focus, alarm, striatum | The `mismatch` signal | Nothing |
+| `expectations` | `asExpected` of a primitive | The changes that follow 9 times in 10 | The written list |
+| `timing` | Defence ("coming") | The learned delay of a "leads to" fact | Nothing |
+
+**Live: `pnpm cerebellum-check`, three rounds on the final code, 18 of 18 scenes with no
+problem.** The numbers were the same in each round to within the ranges shown.
+
+| Scene | Predicted | Actual | Error over the tries | Who read it |
+|---|---|---|---|---|
+| 1 `pace`: ten crossings of 24 blocks of stone | Estimate 4.2 s by the learned pace (fixed: 4.5 s) | 3.9 s | Learned estimates off by 0.08 to 0.18 s, fixed ones by 0.36 to 0.49 s | The journey's estimate, from the sixth crossing on |
+| 2 `late`: eight crossings, then one held up by a wall for 2.5 s | Late after 6.1 to 6.5 s (fixed rule: after 8.5 s) | 7.3 to 7.6 s: late by the learned rule, not by the fixed one | 0 of 8 ordinary crossings called late | `late`; behind its pace on 8 or 9 ticks, `mismatch` up to 0.67; focus read it |
+| 3 `giveup`: seven digs of dirt, then obsidian by hand | Base 30 s from a usual 1.1 s (fixed: 120 s); give up after 47 s at this patience | Given up after 52 s (the fixed base would wait 188 s) | Each dig 1.1 s | Serotonin's give-up clock |
+| 4 `mismatch`: seven digs of dirt, then two with a slowed arm | 1.06 s | 2.8 s: mismatch 1 | −0.01, −0.01, then +1.75, +1.53 | Focus on 4 to 6 ticks; alarm rose by 0.18 |
+| 5 `newtool`: stone with a wooden pickaxe, then an iron one | First 1.46 s (from "stone"), last 0.71 s (from "stone, iron pickaxe") | First 0.71 s (mismatch 1), last 0.70 s (mismatch 0) | −0.75, −0.66, −0.59, −0.52, −0.48, then 0.00 | Focus on 11 ticks; alarm rose by 0.16 |
+| 7 `expectations`: jumps, then hits on a pig that cannot be hurt | Jump: `moved` (learned). Hit on the pig: nothing, since "targetHurt follows only 0%" | A jump under a low roof: not as expected. Pig hits 6 to 8: as expected. Cow hits: by the written list | Pig hits: no ×5, then yes ×3 | The primitives' `asExpected`; focus and alarm for the jump |
+
+**Scenes that could not be run live.**
+- **6, a habit breaks on a mismatch.** A habit needs about ten minutes of routine with Jev, and
+  the routine by the base is nearly all looks, which take no time to go wrong. Any typed
+  movement would itself replace the habit. Shown by `habits.test.ts` through the real striatum.
+- **8, timing.** No "leads to" fact formed in the live runs (see Limits). Shown with plain
+  numbers in `readers.test.ts` and `cerebellum-readers.test.ts`, and the defence's part in
+  `size-up.test.ts`.
+- **Slow ground** for scenes 1 and 2: nothing but water slows this client.
+
+**The older live checks, on the final code.** `locomotion-check` 9 of 9, `posture-check` 9 of 9,
+`serotonin-check` 5 of 5 (its give-up scene still waits 139 s on `idle`, which never finishes
+and so has no learned time). `neuro-check`: 146 checks pass and 4 fail. Three of the four failed
+before this work (a run of 2026-11-24): the night's sleep is not rewarded, the darkness input
+stays at 0, and the far zombie draws no look. The fourth is new since then: in `far`, alarm
+reaches 0.63 (raised by fear, then by danger). It fails the same way with every cerebellum
+reader at 0, `mismatch` was 0 on every tick and nothing was due, so it does not come from the
+cerebellum; it was not followed further here.
+
+**Open, seen while testing.**
+- **A live scene now and then never starts** ("no log file": the bot joined but logged
+  nothing). Seen once in about 45 scenes; the same scene passed when run again.
+- **One run stopped ticking.** In an A/B run of `far`, the bot ticked for 30 s and then stopped,
+  and the server shows its client had disconnected; the check hung for 16 minutes. This looks
+  like the stall seen once in step one. It was not reproduced or explained.
+
+**What my movements do** (`pnpm cerebellum-report <log> data/<bot>/models.json`, after the
+practice scene; models seen five times or more):
+
+| Movement | Situation | Takes | Always (9 in 10) | Sometimes |
+|---|---|---|---|---|
+| `break_block` | dirt, bare hand | 1.06 s | the block becomes air, a drop appears | |
+| `break_block` | stone, wooden pickaxe | 1.46 s | the same | |
+| `break_block` | stone, iron pickaxe | 0.71 s | the same | |
+| `hit` | cow | 0.30 s | the target is hurt | |
+| `sneak` | any | at once | sneaking | |
+| `use_on` | lever | 0.16 s | the block changes state | |
+| `jump` | stone | 0.3 s | moved | |
+| `use_item` | bread (under a hunger effect) | 0.34 s ± 0.40 | nothing | food went down 72% |
+
+**What only showed live, and was fixed.**
+- **One late drop was a full mismatch.** After five digs of dirt, a dig whose drop was seen a
+  moment late raised mismatch to 1. One miss of a change is weak evidence, so it is now a modest
+  mismatch (under 0.5: focus reads it, alarm and habits do not).
+- **A journey's time is no measure.** A whole journey's `seconds` was learned by gait alone, so
+  a journey of two blocks was a full mismatch against one of 24. A journey and a stretch now
+  teach their pace only; `seconds` is kept for primitives and whole skills.
+- **The pace of the legs is not the pace of a journey.** A crossing of 24 blocks of stone takes
+  about 4.2 s where the learned pace alone says 3.7 s: starting up, turning and arriving are in
+  no stretch. Three spreads (a tenth of the pace each, at least) leave room for that, and no
+  ordinary crossing was called late, but the margin is about half a second on a short journey.
+
+**Decisions I made without your word.**
+- **No `due soon` signal.** The threat sense runs before the regions each tick, so the defence
+  asks the cerebellum directly (`due`), and the region's trace lists what is due. A signal would
+  have had no reader.
+- **Only a prediction for a particular situation can be a mismatch.** The any-situation model is
+  a fallback for numbers; being off against it is not "that went wrong". A whole skill has only
+  that key, so a whole skill never raises mismatch: what a skill is worth stays dopamine's.
+- **Faster than predicted is a mismatch too.** A new tool raises it until the tool's own model
+  is trusted (five digs).
+- **Late is judged on the ground actually crossed**, each stretch at its own learned pace, not
+  on the estimate made at the start. The estimate can only know the ground it starts on.
+- **A written expectation is "disagreed with" when it follows less than half the time** in one
+  particular situation. Then the learned list is used there, and the run's `today.used` says so.
+- **The give-up clock's backstop** (the longest any skill may run) rose from 6 to 18 minutes, so
+  that it stays above the longest learned base at full patience.
+- **One spread is never taken as under a tenth of the value** (and never under 0.02), so a model
+  that has always been exactly right is not thrown by a hair.
+
+**Limits.**
+- **A swim has no estimate, so it is never late.** The estimate is made only while the walking
+  pattern has a route; steering through water has none. This was so before, and still is: the
+  learned swimming pace (0.33 s a block against the fixed 0.5) is used only to price a wet
+  stretch of a journey that also walked.
+- **The estimate knows only the ground the journey starts on.** The pathfinder gives the
+  route's length, not its surfaces. `late` is not affected (it goes by the ground crossed).
+- **Slow ground could not be shown live.** Nothing but water slows this client, and water is
+  swum, not walked. That a slow crossing is not called late, and that the stumble check allows
+  for slow ground, are shown by plain numbers in `learned-pace.test.ts` only.
+- **A new tool is a mismatch five times**, once for each dig until its own model is trusted.
+  Focus and alarm are raised each time.
+- **The mismatch reaches focus only where focus has room.** In a place the bot does not know,
+  focus is already as high as it goes.
+- **Alarm's rise is small and short**: at most 0.2, and the signal is gone within a second.
+- **A habit gives way for under a second.** The striatum reads `mismatch` only while it is 0.5
+  or more. Shown by `habits.test.ts`, not live (see the scenes not run).
+- **Timing was tested with plain numbers only.** A "leads to" fact needs the same pair of
+  events three times and a rest to consolidate; none formed in the live runs. The delay is also
+  counted from the moment the sign was remembered, and the memory merges like events, so a
+  second sighting inside the wait does not restart it.
+- **A learned expectation is stricter than a written one.** `break_block` learns that a drop
+  always appears, so a dig that leaves no drop would be "not as expected" if its written list
+  were ever replaced. Today it is not: its written change always follows.
+- **Inner movements wrapped by `watched()` are noted, but not checked** against learned
+  expectations: only a primitive run through the wrapper sets `asExpected`.
+- **Under 1 ms a tick is still not always met**: the same few ticks in a thousand as in step
+  one, on ticks where a movement ended.
+
+## The cerebellum, learning in shadow (step one of the cerebellum work)
+
+*Built 2026-11-26. `packages/region-cerebellum` learns what each movement comes to (time,
+distance, changes) from the signed error between its prediction and the result. It shares
+nothing and nothing reads it yet. How it works is in [brain.md](brain.md), "The cerebellum".*
+
+**What had to be added first.** Only the outermost skill raises a skill event. The hits inside
+`attack`, the dig in `dig_out`, the bite in `eat` and each stretch of a journey never reached
+one: in a 30-minute log, 792 of 835 events that carried `changes` were `look_at`. So the body
+now keeps its own movement log (`movements.ts`), written by the primitive wrapper, by
+`watched()` round a movement inside a skill, and by the locomotion controller, which also adds
+up each journey's ground by what was underfoot (`locomotion/stretches.ts`).
+
+**Live: 30 minutes of ordinary play (whole brain, by the base, nothing scripted).**
+3,543 ticks, 544 movements, 10 cut short. It was a quiet night: the bot looked about and slept.
+
+| Asked | What the run showed |
+|---|---|
+| Journey estimates against learned ones, by surface | Nothing: 3 journeys (to bed), none with an estimate and none with a stretch of 3 blocks |
+| Written expectations the learned ones disagree with | Nothing: no primitive with a written list ran |
+| What the primitives with empty lists do | `look_at` (435 runs): `turned` every time. `use_on` on the bed (3 runs): `turned`, and `moved` twice |
+| Each skill's time against 2 minutes | `look_at` 0 s (90 runs); `sleep` 6.0 s ± 0.2 (3 runs); `idle` never finished by itself (10 runs, all stopped from outside) |
+
+Ordinary play with the echo planner does too little to answer the questions (problem 11), so the
+bot was also put through each movement several times on the test ground.
+
+**Live: `pnpm cerebellum-check practice`, three runs after the scene's own flaws were fixed,
+with the same numbers each time (237 to 241 movements, 60 to 62 models).**
+
+| Asked | What the runs showed |
+|---|---|
+| Pace by surface (seconds per block, at a jog) | Stone 0.19 (today says 0.20). Packed ice 0.21 (0.20). Swimming 0.32 to 0.34 against today's 0.50: today is off by 0.17, the learned pace by 0.01 to 0.02 after five stretches. Stone under the slowness effect 0.19: this client is not slowed by it |
+| Journeys called late today | 0 of 35 (2 of 28 in the first run, when the pool had frozen over and the bot kept climbing out) |
+| Written expectations | `hit` (targetHurt), `step` (moved), `sneak` (sneaking) agree. `break_block` agrees and adds one: `drops+` followed every time |
+| Empty lists | `jump`: `moved` every time. `use_on` on a lever: `targetChanged` every time. `brace`: nothing changes. `look_at`: `turned` every time. `use_item` with bread: no clean answer (see below) |
+| Break time by tool | Dirt by hand 1.06 s; stone with a wooden pickaxe 1.46 s, with an iron one 0.70 s: three separate models, each trusted after five digs |
+| Skill times against 2 minutes | `go_to` 5.3 s ± 1.6, `break_block` 1.1 s ± 0.3, `use_item` 3.1 s, `hit`, `jump`, `brace`, `step`, `use_on` 0.3 to 0.4 s, `surface` 1.2 s. Every one is far under 2 minutes; the fitted limit would sit at its lower bound (30 s) |
+| Size of the error, first half then second | Primitives 29% then 5%; pace 18% then 14%; skills 28% then 20%. Journeys 30% then 34%: a journey's time is keyed by gait only, and the second half was the swims |
+
+**What only showed up live.**
+- **Soul sand, honey and the slowness effect do not slow this client** (the first two were known:
+  see Balance and posture). Water is the only slow going there is to test with. The slowness
+  effect is still in the situation key (`stone|slowness`), so a server that does slow the body
+  would be learned apart.
+- **The pool froze.** The test ground is in a cold biome, and open water turns to ice within a
+  minute or two. The scene sets `random_tick_speed` to 0 while it runs.
+- **Bobbing in water read as slope.** A stretch was split into "up", "down" and level by the
+  rise between two looks, so a swim broke into pieces too short to count. A slope is now a rise
+  of 0.3 blocks or more that is also steep (half the ground covered), and never in water.
+- **A lever thrown changed nothing in `changes`** (an older finding: only the block's type was
+  compared). The snapshot now compares the block's state too and reports `targetChanged`.
+- **`sneak` looked half broken**: letting go of sneak reports `sneaking: false`, which the list
+  of changes dropped. A change to `false` is a change, and is listed.
+- **A look's key carried what was in the hand** (`air|bread`). A movement of the head alone is
+  now keyed by what it was aimed at only.
+- **The meal gave no clean answer.** On peaceful difficulty nobody gets hungry, so three runs
+  held the bread for 3 seconds and nothing changed. With hunger possible (a fourth run), the
+  medulla's own `eat` took over and fought the typed commands: 90 `use_item` runs, 42 of them cut
+  short, and of the rest `food-` followed 75% of the time (the hunger effect drains faster than
+  bread fills), `lost` 25%, `food+` 13%. What a finished bite does is not yet shown live.
+- **Once, the brain stopped ticking for five minutes** during a practice run (ticks at 62 s, then
+  372 s, then none), just as the ground was swapped under the bot and it was teleported. It did
+  not happen again in four further runs, and the bot's output was not being kept at the time.
+  `LIVE_OUTPUT=<file>` now keeps it for any live check. Not explained.
+
+**Limits.**
+- **Under 1 ms is not always met.** The region takes 0.01 ms a tick once warm (2,000 ticks of
+  four movements each, timed alone). Live, 2 to 5 ticks in about 1,100 took 1.2 to 2.4 ms, each
+  one a tick on which a movement ended; every other region's time on those ticks was high too.
+  The worst is logged (`worstMs`).
+- **Only wrapped movements are seen.** `watched()` is round the hit and the equip in `attack`,
+  the dig in `dig_out`, the bite in `eat` and `consume`, and the bed in `sleep`. The chest work
+  in `take_items` and `deposit_items`, the looks inside `freeze`, `hold_still` and `flinch`, the
+  sneak in `recoil` and the door in locomotion are not wrapped. A block the pathfinder digs on
+  the way is never seen as a dig: it is time inside a stretch.
+- **A whole skill has one key: any situation.** `go_to` is timed whatever the distance, so its
+  spread is wide (5.3 s ± 1.6 over 24 blocks; it would be far wider in play).
+- **A pace is by the gait commanded**, not by whether the legs were sprinting at that moment. A
+  jog sprints only on straight stretches.
+- **What the keys cannot hold** (the body does not sense it, or the state does not carry it):
+  the tool's enchantments; haste and mining fatigue (only speed and slowness are read); whether
+  the body was on the ground while digging (the game digs five times slower in the air or under
+  water); the slope or the surfaces of a route before it is walked (the pathfinder's route is
+  not exposed past its length); what a `look_at` at a bare position was looking at (it is keyed
+  by the block there, usually air); for a hit, the target's armour or whether the swing was
+  charged; for a skill, anything at all about its target.
+- **Hurt means health fell during the run.** A hit that did no damage (armour, a shield) does not
+  mark the run as cut short.
+- **A stretch counts only from 3 blocks and 1 second**, so a journey of a few steps teaches no
+  pace. A journey interrupted after a long stretch still teaches that stretch.
+- **Failures teach changes but not time.** How long a movement takes to fail is not learned.
 
 ## The map, corrected by its last live scenes (2026-11-26)
 
@@ -2501,6 +2725,7 @@ runs would be read as the first one ending.
 **What we saw.**
 - The target block's **type** is compared, not its state. Opening a door changes nothing in
   `changes` (the block is still `oak_door`), so `use_on` expects nothing and is always "as expected".
+  *Fixed 2026-11-26: the state is compared too, and reported as `targetChanged`.*
 - `targetHurt` comes from the game's hurt event, which only arrives if the target is in view.
 - `drops` counts dropped items within 5 blocks before and after. A block's drop that lands
   further away, or is picked up at once, shows as `gained` or not at all.

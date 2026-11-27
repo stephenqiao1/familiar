@@ -5,6 +5,13 @@ const facts = (over: Partial<ThreatFacts> = {}): ThreatFacts => ({ id: "entity:1
 const stage = (over: Partial<ThreatFacts>, bravery = 0.5) => sizeUp(facts(over), bravery).stage;
 
 describe("sizeUp", () => {
+  it("harm due about now, by learned timing, makes a threat in view that can reach the bot coming", () => {
+    expect(stage({ dist: 10 })).toBe("seen");
+    expect(stage({ dist: 10, due: true })).toBe("coming");
+    expect(stage({ dist: 10, due: true, canWalkTo: false, clearLine: false })).toBe("seen");
+    expect(stage({ dist: 10, due: true, seen: false })).toBe("possible");
+  });
+
   it("in view and unaware: seen", () => {
     expect(sizeUp(facts({ dist: 10 }), 0.5)).toMatchObject({ stage: "seen", noticed: false, noticedBy: null });
   });

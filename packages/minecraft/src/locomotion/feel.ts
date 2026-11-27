@@ -6,12 +6,13 @@ export const STUCK = { blocks: 0.5, ms: 1500 };
 /**
  * Feels whether the feet are getting anywhere. Feed it the position about four times a second
  * while travelling; `expected` says whether the body is supposed to be moving right now
- * (not standing on purpose, not digging).
+ * (not standing on purpose, not digging). `scale` moves the allowance with the body's pace here
+ * (under 1 on slow ground, where less ground is covered in the time).
  */
-export function createStuckSense(): { feel(pos: Vec3, expected: boolean, now: number): boolean; reset(): void } {
+export function createStuckSense(): { feel(pos: Vec3, expected: boolean, now: number, scale?: number): boolean; reset(): void } {
   let samples: { pos: Vec3; at: number }[] = [];
   return {
-    feel(pos, expected, now) {
+    feel(pos, expected, now, scale = 1) {
       if (!expected) {
         samples = [];
         return false;
@@ -21,7 +22,7 @@ export function createStuckSense(): { feel(pos: Vec3, expected: boolean, now: nu
       while (samples.length > 1 && now - samples[1]!.at >= STUCK.ms) samples.shift();
       const oldest = samples[0]!;
       if (now - oldest.at < STUCK.ms) return false;
-      return samples.every((s) => s.pos.distanceTo(pos) < STUCK.blocks);
+      return samples.every((s) => s.pos.distanceTo(pos) < STUCK.blocks * scale);
     },
     reset() {
       samples = [];

@@ -5,6 +5,7 @@ import { parseLearnedSkills, type LearnedSkill } from "@familiar/core";
 import { createMap, createMemory, type Fact, type KnownPlace, type MapOptions, type MapStore, type Memory, type MemoryOptions, type MemoryStore, type SavedMap } from "@familiar/memory";
 import { createChestMemory, type ChestMemory, type ChestRecord, type SurfaceCounts, type ThreatEntries } from "@familiar/minecraft";
 import { createAssociations, isAssociation, type Associations, type AssociationStore } from "@familiar/region-amygdala";
+import { createModels, isModel, type ModelStore } from "@familiar/region-cerebellum";
 import { createTargetMemory, type TargetMemory } from "@familiar/region-hypothalamus";
 import { createNoveltyMemory, createScorebook, type NoveltyMemory, type SavedScore, type Scorebook } from "@familiar/neuromodulators";
 
@@ -22,6 +23,7 @@ export const targetsFile = (bot: string) => `data/${bot}/targets.json`;
 export const surfacesFile = (bot: string) => `data/${bot}/surfaces.json`;
 export const threatsFile = (bot: string) => `data/${bot}/threats.json`;
 export const associationsFile = (bot: string) => `data/${bot}/associations.json`;
+export const modelsFile = (bot: string) => `data/${bot}/models.json`;
 export const mapFile = (bot: string) => `data/${bot}/map.json`;
 export const habitsFile = (bot: string) => `data/${bot}/habits.json`;
 export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
@@ -184,6 +186,17 @@ export async function moveOldLearning(bot: string, store: AssociationStore, from
 }
 
 type MoveFrom = (old: { threats: Awaited<ReturnType<typeof loadThreats>>; hurts: Record<string, number>; badFoods: Record<string, number> }, held: Associations) => Associations;
+
+/** What the cerebellum has learned: movement and situation → model. A missing file means nothing yet; a broken entry is left out. */
+export async function loadModels(file: string): Promise<ModelStore> {
+  const raw = await readJson(file);
+  const entries = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? Object.entries(raw) : [];
+  return createModels(Object.fromEntries(entries.filter(([, m]) => isModel(m))));
+}
+
+export async function saveModels(store: ModelStore, file: string): Promise<void> {
+  await writeJson(file, store.entries());
+}
 
 export async function saveAssociations(store: AssociationStore, file: string): Promise<void> {
   await writeJson(file, store.entries());

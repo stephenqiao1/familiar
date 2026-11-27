@@ -1,6 +1,8 @@
 // Summarises a run's tick log for checking the brain: each dial's range, what moved it, rewards,
-// surprises, the drives (top drive, needs, looking ahead, stress, targets learned), reflexes and the brainstem, arousal (bands, bedtimes, wakings, calls saved), the defence circuit, the medulla, balance and posture, the colliculus, the basal ganglia (wins, near ties, habits, terms), memories, interrupts, warnings and region errors.
+// surprises, the drives (top drive, needs, looking ahead, stress, targets learned), reflexes and the brainstem, arousal (bands, bedtimes, wakings, calls saved), the defence circuit, the medulla, balance and posture, the colliculus, the basal ganglia (wins, near ties, habits, terms), memories, the cerebellum (errors, models, mismatches, late, give-ups, expectations), interrupts, warnings and region errors.
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
+import { readersReport } from "./cerebellum-readers-report.ts";
+import { cerebellumReport } from "./cerebellum-shadow-report.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { amygdalaReport } from "./amygdala-report.ts";
 import { join } from "node:path";
@@ -472,6 +474,9 @@ console.log(`CONSOLIDATION: ${passes.length} phases, ${passes.reduce((a, p) => a
 
 // The amygdala, and the hippocampus's map.
 console.log(`\n${amygdalaReport(ticks).join("\n")}`);
+
+// The cerebellum: the error over time by kind of movement, what the models said, and what read them.
+console.log(`\nCEREBELLUM\n${[...cerebellumReport(ticks), "", ...readersReport(ticks)].join("\n")}`);
 
 // Planner.
 const plans = ticks.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && r.trace?.plan).map((r) => r.trace!.plan as { goal: string }));

@@ -1,13 +1,13 @@
 // What the live checks of the neuromodulators share: running the real bot through a scripted
 // scene on the test server (reflexes only, or the whole brain), and reading its tick log back.
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 
 /** Everything but instinct: the reflexes, upkeep and every neuromodulator, with the echo planner. */
 // LESION=hypothalamus (or any names, comma-separated) leaves those out too, to see what the brain does without them.
 const LESION = (process.env.LESION ?? "").split(",").filter(Boolean);
-const NO_INSTINCT = "reflex,medulla,hypothalamus,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal"
+const NO_INSTINCT = "reflex,cerebellum,medulla,hypothalamus,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,serotonin,prefrontal"
   .split(",")
   .filter((name) => !LESION.includes(name))
   .join(",");
@@ -52,13 +52,18 @@ export async function play(act: (bot: { say(command: string): void }) => Promise
   }
   // `also`: regions the usual list leaves out (the colliculus); `flags`: more command-line flags.
   // `without`: the whole brain less these regions (to see what one adds).
-  const everything = "reflex,medulla,hypothalamus,brainstem,reticular,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,thalamus,instinct,serotonin,prefrontal".split(",").filter((name) => !(options.without ?? []).includes(name));
+  const everything = "reflex,cerebellum,medulla,hypothalamus,brainstem,reticular,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,thalamus,instinct,serotonin,prefrontal".split(",").filter((name) => !(options.without ?? []).includes(name));
   const brain = options.whole ? ["--engine", "jev", ...(options.without ? ["--regions", everything.join(",")] : [])] : ["--engine", "echo", "--regions", [NO_INSTINCT, ...(options.also ?? [])].join(",")];
   const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", ...brain, "--planner", "echo", ...(options.plan ? ["--plan", JSON.stringify(options.plan)] : []), ...(options.flags ?? []), "--manual", "--name", BOT], { stdio: ["pipe", "pipe", "pipe"], env });
   let output = "";
   let exited = false;
-  child.stdout.on("data", (d: Buffer) => (output += d));
-  child.stderr.on("data", (d: Buffer) => (output += d));
+  // LIVE_OUTPUT=<file>: keep what the bot prints as it prints it, for looking into a scene that went wrong.
+  const keep = (d: Buffer) => {
+    output += d;
+    if (process.env.LIVE_OUTPUT) appendFileSync(process.env.LIVE_OUTPUT, d);
+  };
+  child.stdout.on("data", keep);
+  child.stderr.on("data", keep);
   child.once("exit", () => (exited = true));
   const joined = Date.now();
   while (!output.includes("Logging to") && !exited && Date.now() - joined < 30_000) await sleep(200);

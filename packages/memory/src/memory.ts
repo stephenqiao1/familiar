@@ -5,7 +5,7 @@
 // Left for later, on purpose (hook only):
 // TODO(memory): sharing memories between bots.
 
-import { buildLeadsTo, signOf } from "./leads-to.js";
+import { buildLeadsTo, eventLabel, pairOf, signOf } from "./leads-to.js";
 
 export type MemoryKind = "danger" | "death" | "reward" | "discovery" | "social" | "failure" | "goal_done";
 
@@ -128,6 +128,10 @@ export interface MemoryStore {
   consolidate(phase: ConsolidationPhase, now: number, support?: number): number;
   /** Signs: events of the last few seconds that have been found to lead to something ("leads to" facts), by label. */
   signs(now: number): string[];
+  /** The last event stored, by its label (kind and first thing involved), and when. Null: none yet. */
+  latest(): { label: string; at: number } | null;
+  /** Every "leads to" pair known, as [the sign, what follows it], by label. */
+  leadsTo(): [string, string][];
   /** Everything, for saving. */
   entries(): { memories: Memory[]; places: KnownPlace[]; facts: Fact[] };
 }
@@ -319,6 +323,9 @@ export function createMemory(options: MemoryOptions = {}): MemoryStore {
       const sign = justNow && now - justNow.time <= SIGN_MS ? signOf(justNow, facts) : null;
       return sign ? [sign] : [];
     },
+
+    latest: () => (justNow ? { label: eventLabel(justNow), at: justNow.time } : null),
+    leadsTo: () => facts.flatMap((f) => (f.after ? [pairOf(f.after)] : [])),
 
     entries: () => ({
       memories: memories.map((m) => ({ ...m })),

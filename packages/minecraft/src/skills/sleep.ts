@@ -3,6 +3,7 @@ import type { Bot } from "mineflayer";
 import { nearestHostile } from "../mobs.js";
 import { doUseOnBlock, doWake } from "../primitives/use-on.js";
 import { withJourney } from "../locomotion/index.js";
+import { watched } from "../primitives/watch.js";
 import type { MinecraftCtx } from "../skill-context.js";
 
 const HOSTILE_RANGE = 8;
@@ -41,7 +42,7 @@ export const sleep: Skill<MinecraftCtx> = {
     if (!bed || !bot.isABed(bed)) return withJourney({ status: "failed", reason: `no bed at ${base.bed}` }, walk);
 
     try {
-      await doUseOnBlock(bot, bed);
+      await watched(bot, "use_on", { block: bed.position }, () => doUseOnBlock(bot, bed), signal);
     } catch (error) {
       // The game said no (too close to dawn, monsters near): leave it a while.
       refusedAt.set(bot, Date.now());

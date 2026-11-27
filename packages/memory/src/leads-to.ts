@@ -6,6 +6,11 @@ import type { Fact, Memory } from "./memory.js";
 
 /** What an event is, for counting what follows what: its kind and the first thing involved. */
 export const eventLabel = (m: Pick<Memory, "kind" | "involved">) => `${m.kind}|${m.involved[0] ?? ""}`;
+/** The two labels of a "leads to" fact's pair ("sign>what follows|feeling"). */
+export const pairOf = (after: string): [string, string] => {
+  const [sign = "", rest = ""] = after.split(">");
+  return [sign, rest.slice(0, rest.lastIndexOf("|"))];
+};
 const words = (kind: string, thing: string) => `${thing ? `${thing.replace(/_/g, " ")} ` : ""}(${kind.replace("_", " ")})`;
 
 /** The sign an event is, if it has been found to lead to something: its label, or null. */

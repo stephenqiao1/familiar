@@ -43,6 +43,8 @@ export interface ThreatSenseOptions {
    * known about fighting it. Default: the record alone.
    */
   fear?: { harmOf(kind: string, now: number): number; strength: number };
+  /** Whether harm from this kind is due about now, by the timing the cerebellum has learned. Default: never. */
+  due?(kind: string, now: number): boolean;
   /** What the amygdala fears with nothing in view, in words, or null. Default: the bad memory near is used. */
   dread?(now: number): string | null;
   /** The route checks. Default: none (the cheap guess at reach, and never cornered). */
@@ -224,6 +226,7 @@ export function createThreatSense(bot: Bot, options: ThreatSenseOptions): Threat
         escapable: settings.cornered <= 0 || (noWayOutAt === undefined && ((asked ? routes.escapable(entity.id) : null) ?? true)),
         danger: dangerOf(kind, now),
         ...(options.fear ? { harm: options.fear.harmOf(kind, now) } : {}),
+        ...(options.due?.(kind, now) ? { due: true } : {}),
         beatable: record.beatable(kind),
       };
     });

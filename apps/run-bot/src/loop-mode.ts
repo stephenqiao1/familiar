@@ -4,7 +4,13 @@ import { createBrainLoop, createChainSkill, createLogger, createSkillExecutor, c
 import { createPlaceKeeper, createTrail, distance, feelingNear, type Place } from "@familiar/memory";
 import {
   associationsFrom,
+  keepMovements,
+  playerCerebellum,
+  setLearnedExpectations,
+  MEASURE_BOUNDS,
   moveOver,
+  playerMovements,
+  takeMovements,
   createFirstSeenTracker,
   createGut,
   createLocomotion,
@@ -63,6 +69,7 @@ import type { BrainArgs, ServerArgs } from "./args.js";
 import { loadBotConfig } from "./bot-config.js";
 import { playerAmygdala } from "./amygdala.js";
 import { NO_READERS } from "@familiar/region-amygdala";
+import { NO_READERS as NO_MODEL_READERS, READERS } from "@familiar/region-cerebellum";
 import { createArbiter, createBrain, patienceOf } from "./brain.js";
 import { createPlayerStriatum } from "./habits.js";
 import { createHabits } from "@familiar/basal-ganglia";
@@ -102,6 +109,9 @@ import {
   loadMap,
   saveMap,
   associationsFile,
+  loadModels,
+  modelsFile,
+  saveModels,
   loadAssociations,
   moveOldLearning,
   saveAssociations,
@@ -130,7 +140,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, selection, memory: memorySettings, amygdala: amygdalaSettings } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, selection, memory: memorySettings, amygdala: amygdalaSettings, cerebellum: cerebellumConfig } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   const engine = createEngine(brainArgs.engine);
   const planner = createPlanner(brainArgs.planner, brainArgs.plan);
@@ -193,7 +203,12 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   };
 
   // The one thing that travels. Careful (no digging) near home; its notes go to the console.
-  const locomotion = createLocomotion(bot, { home: base.chest, log: (msg) => console.log(`    ${msg}`), ...(mapRoutes ? { routeHint: (from, to) => mapRoutes.hint(from, to) } : {}) });
+  // The cerebellum: what each movement comes to. Its models are read by the journeys, the give-up clock, the
+  // primitives' expectations and the defence; left out of the brain (--regions), every reader is back on its fixed rule.
+  const models = await loadModels(modelsFile(server.name));
+  const cerebellumSettings = { ...cerebellumConfig, bounds: MEASURE_BOUNDS, ...(!brainArgs.regions || brainArgs.regions.includes("cerebellum") ? {} : NO_MODEL_READERS) };
+  const cerebellum = playerCerebellum({ store: models, settings: cerebellumSettings, timing: memory });
+  const locomotion = createLocomotion(bot, { home: base.chest, log: (msg) => console.log(`    ${msg}`), learned: cerebellum.pace, ...(mapRoutes ? { routeHint: (from, to) => mapRoutes.hint(from, to) } : {}) });
   // What the bot knows hurts (born knowing some, learning the rest), and how sore it is. The
   // safety checks, pathing and reflexes all ask it. It never learns the base's own blocks as harmful.
   const neverHurts = (name: string) => name === "chest" || name.endsWith("_bed") || name === "crafting_table";
@@ -234,11 +249,16 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   // With the amygdala left out of the brain (--regions), nothing would be learned: every reader goes back to its old source.
   const fearSettings = !brainArgs.regions || brainArgs.regions.includes("amygdala") ? amygdalaSettings : { ...amygdalaSettings, readers: NO_READERS };
   const amygdala = playerAmygdala({ bot, store: associations, settings: fearSettings, innateThreats: defence.innateThreats, innateHurts: reflexes.innateHurts, innateBadFoods: medulla.innateBadFoods, gut, pain, threats: threatRecord, memory, hostile, area: () => view.place?.area ?? null, neverHurts });
+  // The body notes its own movements for the cerebellum from here on, and asks it what to expect of each.
+  keepMovements(bot);
+  setLearnedExpectations(bot, cerebellum.expects);
   setKnownHurts(bot, amygdala.knowsHurt);
   setKnownBadFoods(bot, amygdala.knowsBadFood);
   const threats = createThreatSense(bot, {
     fear: amygdala.fear,
     ...(amygdala.dread ? { dread: amygdala.dread } : {}),
+    // Harm that usually follows a sign about now makes the threat it comes from "coming".
+    due: cerebellum.due,
     settings: defence,
     bravery: brainstem.bravery,
     // A desperate need lets a threat a little closer before the body runs (the hard reflexes are not touched).
@@ -266,13 +286,23 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     patience: () => patienceOf(view, patience),
     chanceOf: (skill) => chanceOfPayoff(scorebook.get(situationOf(view.state), skill)),
     strength: patience.persistence,
+    // The clock starts from how long the skill usually takes, once the cerebellum knows.
+    baseOf: cerebellum.giveUpBaseMs,
+    mostBaseMs: cerebellum.mostBaseMs,
   });
   // The striatum: the bot's habits, learned from who wins and how it ends.
   const habits = createHabits(await loadHabits(habitsFile(server.name)));
-  const striatum = createPlayerStriatum({ habits, selection, skills, log: (msg) => console.log(`    ${msg}`) });
+  const striatum = createPlayerStriatum({ habits, selection, skills, mismatch: cerebellumSettings.mismatch, log: (msg) => console.log(`    ${msg}`) });
   const regions = createBrain(
     {
       amygdala: amygdala.options,
+      cerebellum: {
+        store: models,
+        settings: cerebellumSettings,
+        movements: ((own) => (ws, now) => [...own(ws, now), ...cerebellum.timings()])(playerMovements({ notes: () => takeMovements(bot), lastHurtAt: () => bodyEvents.lastHurt()?.at ?? null })),
+        behind: () => locomotion.status().behind,
+        notes: cerebellum.notes,
+      },
       fearOfThing: amygdala.fearOfThing,
       engine,
       planner,
@@ -328,6 +358,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   console.log(`Thalamus: ${thalamus.gate > 0 ? `gate on (instinct is told up to ${thalamus.limits.instinct ?? "?"} characters, the planner ${thalamus.limits.prefrontal ?? "?"})` : "gate off (the deciding layers are told the nearest few of each kind)"}, field of view ${thalamus.fieldOfView > 0 ? "on (they are told only what is seen or heard)" : "off"}.`);
   console.log(`Defence: innate threats ${defence.innateThreats === "game" ? "the game's hostile flag" : `[${defence.innateThreats.join(", ")}]`}, ${Object.keys(threatRecord.entries()).length} kinds learned about, route checks ${defence.reachCheck > 0 ? "on" : "off"}.`);
   console.log(`Amygdala: ${associations.keys().length} cues held; readers ${Object.entries(fearSettings.readers).map(([reader, strength]) => `${reader} ${strength}`).join(", ")}.`);
+  const reading = READERS.filter((r) => cerebellumSettings[r] > 0);
+  console.log(`Cerebellum: ${models.ids().length} models held; ${reading.length ? `read for ${reading.join(", ")}` : "in shadow (every reader on its fixed rule)"}.`);
   console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}.`);
   console.log(`Selection: body first ${selection.bodyFirst}, wait ${selection.wait}, channels ${selection.channels > 0 ? "on" : "off"}, habits ${selection.habits} (${Object.values(habits.entries()).reduce((n, skills) => n + Object.keys(skills).length, 0)} known, blind ${selection.habit.blind}).`);
   console.log(`Arousal: resting ${arousal.resting}, bedtime ${arousal.bedtime}, wake threshold ${arousal.wakeThreshold}, gate ${arousal.gate}.`);
@@ -501,6 +533,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       saveBody({ sleptAtAge: sleepClock.sleptAtAge() }, bodyFile(server.name)),
       saveMemories(memory, memoriesFile(server.name)),
       saveAssociations(associations, associationsFile(server.name)),
+      saveModels(models, modelsFile(server.name)),
       ...(map ? [saveMap(map, mapFile(server.name))] : []),
     ]).catch((error) => console.error(`Could not save what the bot learned: ${error}`));
   };

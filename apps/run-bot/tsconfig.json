@@ -58,6 +58,9 @@
       "path": "../../packages/region-amygdala"
     },
     {
+      "path": "../../packages/region-cerebellum"
+    },
+    {
       "path": "../../packages/region-thalamus"
     }
   ]

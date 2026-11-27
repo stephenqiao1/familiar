@@ -27,4 +27,6 @@ export { playerReticular } from "./reticular.js";
 export { BORN as BORN_FEARING, CUE_OF, CUE_READERS, feltSize, inbornFears, kindKey, playerCues, playerOutcomes, timeBand, type AmygdalaSenses } from "./amygdala.js";
 export { associationsFrom, moveOver, type OldLearning } from "./amygdala-move.js";
 export { createShadow, type OldRules, type ShadowRow } from "./amygdala-shadow.js";
+export { playerCerebellum, type PlayerCerebellum, type TimingSources } from "./cerebellum-readers.js";
+export { changeList, keysOf, MEASURE_BOUNDS, movementOf, playerMovements, TODAY_GIVE_UP_SECONDS, type MovementSources } from "./cerebellum.js";
 export { alikeKinds, createAlike, type KindFacts } from "./alike.js";

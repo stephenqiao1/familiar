@@ -28,6 +28,8 @@ export interface Snapshot {
   drops?: number;
   /** The target block's type (undefined if the movement has no target block). */
   targetBlock?: string | null;
+  /** The target block's state (a lever thrown, a door open), as the game numbers it. */
+  targetState?: number | null;
   /** The solid blocks straight above the target block, nearest first, "air" for anything else (so a block coming down can be noticed). */
   above?: string[];
   /** Whether the target entity is still there, and how many times it has been seen hurt. */
@@ -51,7 +53,9 @@ export function takeSnapshot(bot: Bot, focus: Focus, hurts = 0): Snapshot {
     drops: Object.values(bot.entities).filter((e) => e.name === "item" && e.position.distanceTo(bot.entity.position) <= DROPS_WITHIN).length,
   };
   if (focus.block) {
-    snapshot.targetBlock = bot.blockAt(focus.block)?.name ?? null;
+    const block = bot.blockAt(focus.block);
+    snapshot.targetBlock = block?.name ?? null;
+    snapshot.targetState = (block as { stateId?: number } | null)?.stateId ?? null;
     snapshot.above = ABOVE.map((dy) => {
       const block = bot.blockAt(focus.block!.offset(0, dy, 0));
       return block?.boundingBox === "block" ? block.name : "air";
@@ -92,6 +96,8 @@ export function changesBetween(before: Snapshot, after: Snapshot): Changes {
     changes.targetBlockWas = before.targetBlock ?? "unknown";
     changes.targetBlock = after.targetBlock ?? "unknown";
   }
+  // The same block in another state: a lever thrown, a door opened, a crop grown.
+  else if (before.targetState != null && after.targetState != null && after.targetState !== before.targetState) changes.targetChanged = true;
   // The target went and the solid block above it left its place: it came down (it may still be in the air).
   const was = before.above?.[0];
   const targetWent = after.targetBlock !== before.targetBlock || after.targetBlock === was;

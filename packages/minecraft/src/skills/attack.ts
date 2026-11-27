@@ -5,6 +5,7 @@ import type { Entity } from "../mc-types.js";
 import { isStillThere, resolveMobTarget } from "../mobs.js";
 import { doEquip } from "../primitives/equip.js";
 import { doHit } from "../primitives/hit.js";
+import { watched } from "../primitives/watch.js";
 import type { MinecraftCtx } from "../skill-context.js";
 import { bestWeapon } from "../weapons.js";
 
@@ -30,7 +31,7 @@ export const attack: Skill<MinecraftCtx> = {
     if (!mob) return { status: "failed", reason: "no target" };
 
     const weapon = bestWeapon(bot);
-    if (weapon) await doEquip(bot, weapon);
+    if (weapon) await watched(bot, "equip", {}, () => doEquip(bot, weapon), signal);
     ctx.log(`attack: fighting ${mob.name ?? "entity"} ${mob.id} with ${weapon?.name ?? "bare hands"}`);
 
     // Chasing runs beside this loop: the controller keeps the bot within reach while it swings.
@@ -48,7 +49,7 @@ export const attack: Skill<MinecraftCtx> = {
           chasing = true;
         } else {
           if (chasing) ctx.locomotion.stop();
-          await doHit(bot, mob);
+          await watched(bot, "hit", { entity: mob }, () => doHit(bot, mob), signal);
         }
         await sleepFor(SWING_MS, signal);
       }

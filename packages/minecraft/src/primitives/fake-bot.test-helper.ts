@@ -206,7 +206,7 @@ export function fakeBot(options: FakeOptions = {}) {
   // A stand-in controller: travel is not what these tests are about. `stop` lets go of every key, as the real one does.
   const locomotion = {
     stop: () => (log.push("path cleared"), keys.clear()),
-    status: () => ({ moving: walking, pattern: walking ? "walk" : null, gait: "walk", stuck: false, progress: 0, recoveries: 0 }),
+    status: () => ({ moving: walking, pattern: walking ? "walk" : null, gait: "walk", stuck: false, progress: 0, recoveries: 0, behind: 0 }),
     setHeadOverride: () => {},
     setDrive: () => {},
     pause: (ms: number) => (log.push(`paused ${ms}`), walking),

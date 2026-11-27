@@ -36,7 +36,8 @@ Skill executor → skills → primitives (every movement) and locomotion (all tr
 
 Alongside these run layer-0 regions that propose little or nothing but shape the rest:
 `hypothalamus` (the body's needs), `dopamine`, `serotonin`, `noradrenaline`, `acetylcholine` (the
-neuromodulators), `hippocampus` (memory and the map) and `amygdala` (what predicts harm and good).
+neuromodulators), `hippocampus` (memory and the map), `amygdala` (what predicts harm and good) and `cerebellum`
+(what each movement comes to; in shadow so far).
 
 Regions that run every tick start in the order they are listed in `apps/run-bot/src/brain.ts`.
 All but instinct finish at once, so each sees the signals set by the ones listed before it in the
@@ -62,6 +63,7 @@ same tick; a signal from a region listed later is read one tick late.
 | Soft reflex | A tunable rule. Its base urgency is multiplied by a gain and capped at 0.95, so it competes in the arbiter. |
 | Primitive | One of the body's built-in movements (`look_at`, `step`, `break_block`, ...): small, stoppable, and reporting what it changed. Skills marked `primitive: true`. The only code that moves the bot's body. |
 | Changes | What a skill run changed (`moved`, `gained`, `targetBlock`, ...), carried on the skill event that ends it. |
+| Movement, model | A movement is one thing the body did, as it ended: a primitive, a journey, one stretch of a journey over one kind of ground, or a whole skill. A model is what the cerebellum has learned that one movement comes to in one situation. |
 | Arbiter | Picks the winning proposals: the basal ganglia. |
 | Term | One named rule about who wins: it adds to a candidate's score (go), scales it (no-go) or removes the candidate (gate). |
 | Channel | A part of the body with a contest of its own: `body` (legs and hands) and `head`. |
@@ -82,6 +84,7 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `region-thalamus` | The gateway to the deciding layers: builds a view of the state for instinct and for the planner (`ws.view(reader)`), by channel, priority and a size limit. Game-free; the Minecraft side says what the channels are. |
 | `region-hypothalamus` | Owns the body's needs: reads each once a tick and shares the reading (`ws.needs`), with moving targets, looking ahead, the body clock, slow stress and the top drive. Game-free. |
 | `region-amygdala` | Learns what predicts harm and what predicts good, by surprise, by place and by likeness, and shares `fear`, `appeal` and `matters`. Game-free; the Minecraft side offers the cues and the outcomes. |
+| `region-cerebellum` | Learns what each of the body's movements comes to (how long, how far, which changes), from the signed error between prediction and result. Game-free; the Minecraft side says what a movement is, its situation and its measures. It shares `mismatch`, and its numbers are read by the journeys, the give-up clock, the primitives' expectations and the defence, each by a strength in `cerebellum` (bots.json). |
 | `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
 | `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
 | `neuromodulators` | Chemical dials, each a region that shares signals (see below). |
@@ -957,10 +960,13 @@ else is built from, and the **single doorway** to the bot's body.
 - **Report back.** Every primitive run is wrapped in one before-and-after snapshot
   (`primitive.ts`, `snapshot.ts`). The skill event that ends the run carries `changes`, listing
   only what changed: `moved`, `turned`, `gained`, `lost`, `held`, `targetBlockWas` and
-  `targetBlock`, `health`, `food`, `targetHurt`, `targetGone`, `opened`, `closed`, `drops`,
-  `sneaking`. Each primitive declares in one line what it expects when it works
-  (`expects: ["targetBlock=air"]`), and `changes.asExpected` says whether that happened. Nothing
-  reacts to it yet; the hook for a later prediction checker is marked in `primitive.ts`.
+  `targetBlock`, `targetChanged` (the same block in another state: a lever thrown), `health`,
+  `food`, `targetHurt`, `targetGone`, `opened`, `closed`, `drops`, `sneaking`. Each primitive declares in one line what it expects when it works
+  (`expects: ["targetBlock=air"]`), and `changes.asExpected` says whether that happened (by the written list, or by what the cerebellum has learned the movement does in this situation: see The cerebellum). Each run
+  is also noted in the body's movement log (`movements.ts`), which the cerebellum reads. A
+  movement made inside a longer skill (a hit in `attack`, a dig in `dig_out`, a bite in `eat`)
+  raises no skill event, so the skill wraps the call in `watched()` (`primitives/watch.ts`) and
+  it is noted the same way, without holding the skill up.
 - **A container stays open only for container work.** `open` leaves the container open for
   `move_item` and `close`. Any other primitive closes it first.
 - **Different body parts at the same time.** A skill names the parts it uses (`parts`); one that
@@ -1038,8 +1044,11 @@ strengths are in `bots.json` under `locomotion` (`speedFromAlarm`, `speedFromDop
 - *A door in the way*: the pathfinder sees a door as a wall. If the bot and its goal are on
   opposite sides of a door, the controller walks up to it, opens it with the `use_on` movement,
   steps through, and carries on.
-- *Late*: when the route is known, the journey's time is estimated from its length and the gait.
-  Past twice that, the result's changes say `late: true`. Nothing reacts to it yet.
+- *Late*: when the route is known, the journey's time is estimated from its length and the gait,
+  or from the pace the cerebellum has learned on this ground. Past twice that, or past the
+  learned time for the ground crossed plus three spreads, the result's changes say `late: true`
+  (see The cerebellum, The readers). The stumble check's allowance goes by the learned pace too,
+  and `status().behind` says how far behind its learned pace the journey is.
 
 **What it reports.**
 - The state: `self.locomotion` is `{ moving, pattern, gait, stuck }`.
@@ -1048,6 +1057,9 @@ strengths are in `bots.json` under `locomotion` (`speedFromAlarm`, `speedFromDop
 - Each journey's skill event carries in `changes`: `distance`, `seconds`, `patternSwitches`,
   `recoveries` (and which, in `recovered`), `late`, and `asExpected` (done and not late). This is
   the same mechanism the primitives use.
+- The body's movement log gets one note for the journey and one for each stretch of it over one
+  kind of ground (`locomotion/stretches.ts`: at least 3 blocks and 1 second while the legs were
+  meant to be moving), with the seconds per block. The cerebellum learns the pace from these.
 - `pnpm brain-report` has a locomotion section: journeys, the share that finished, stuck events
   and how each ended, and time in each pattern and gait.
 
@@ -1251,6 +1263,123 @@ place, a warning, unlearning, a tag-along, a shelter, a similar kind). `pnpm sha
 [minutes]` plays the whole brain by the base with nothing scripted; `pnpm shadow-report <log>`
 prints the comparison with the old rules for any log.
 
+## The cerebellum: what each movement comes to
+
+The cerebellum (`packages/region-cerebellum`, game-free; a `cerebellum` region, layer 0, every
+tick) learns, for each movement the body makes, what that movement comes to in that situation:
+how long it takes, how far it carries, which changes follow. It learns from **error, not reward**:
+a reward says good or bad, an error says how far off and which way. It never chooses, blocks or
+starts an action, and it calls no model.
+
+It was built in two steps: first it learned in shadow, then its readers were switched over. Each
+reader has a strength from 0 to 1 in the bot's `cerebellum` block; at 0 that reader goes by the
+bot's fixed rule exactly as before (see The readers, below).
+
+**What a movement reports.** The Minecraft side (`packages/minecraft/src/brain/cerebellum.ts`)
+hands the region each movement that ended since the last tick, as three things:
+
+| | |
+|---|---|
+| Kind and name | `primitive` (`hit`, `break_block`, ...), `journey` (`goTo`, `follow`, `awayFrom`), `pace` (one stretch of a journey over one kind of ground: `walk`, `swim`, `dash`), `skill` (`eat`, `attack`, ...) |
+| Situation | A list of short keys from specific to general, physical only. Hands and head: `stone\|wooden_pickaxe` → `stone` → any (what it was aimed at, what was in the hand). The head alone: what it was aimed at → any. Legs: `soul_sand\|sneak` → `slow\|sneak` → any (the block underfoot, how such a block behaves, in water, sneaking, a slowed or quickened body). Travel: `jog\|ice\|up` → `jog\|slippery\|up` → `jog` → any (gait, ground, climbing or dropping, in water, sneaking, a slowed or quickened body). A skill: any. |
+| Measures | `seconds` for a primitive or a whole skill that finished (not for a journey or a stretch: their time goes by how far they went); `secondsPerBlock` for a stretch and a journey; `recoveries` for a journey; `moved` for a movement of the legs; and for every movement the list of changes it caused (`moved`, `targetBlock=air`, `targetHurt`, `food+`). |
+
+Where they come from:
+- Primitives and journeys: **the body's movement log** (`packages/minecraft/src/movements.ts`),
+  written by the primitive wrapper, by `watched()` for a movement inside a longer skill, and by
+  the locomotion controller. A skill event alone would miss these: only the outermost skill
+  raises one.
+- Whole skills: the skill events in the workspace, timed from `started` to the end.
+
+**What teaches nothing.** A movement that was interrupted, a skill cut short by a reflex, given
+up on or timed out, and any movement during which the body lost health. One exception: a stretch
+already walked still tells the pace when the journey is interrupted afterwards. A failed
+movement teaches its changes (what did not follow) but not its time.
+
+**Learning by error** (`learn.ts`, pure; the same runs give the same models). For each movement
+in each situation, each measure keeps `{ value, spread, seen, at }`:
+- error = actual − predicted; the value moves by rate × error, so the sign carries through; the
+  spread moves toward the size of the error the same way.
+- The rate is 1 over the count while the model is new and settles at 0.1.
+- Forgetting: nothing is lost for one game day unused; after that the count halves every three
+  game days, so a new tool or a changed body is relearned quickly.
+- Each measure is kept inside stated bounds (`MEASURE_BOUNDS`: seconds 0 to 600, seconds per
+  block 0.05 to 20), so one strange run cannot teach a strange number.
+- Changes: how often each change followed. One that follows nine times in ten is a learned
+  expectation. Older runs fade at the same settled rate, so a change that stops following stops
+  being expected.
+Every key in the list learns from the run. Saved in `data/<bot>/models.json`.
+
+**Trust and falling back** (`predict.ts`). A model is used once it stands on five runs. A
+specific key with too few uses the more general one; with none, nothing is predicted and the
+bot's fixed rule stands.
+
+**The log.** Each tick with a movement, the region's trace lists it under `runs`: the movement,
+its key, each measure's `predicted`, `spread`, `from` (the key the prediction came from),
+`actual` and signed `error`, the `changes`, the `expected` changes and any `missing`, and
+`today`: what the bot goes by now (the written `expects` and `asExpected`, the journey's
+estimate and `late`, the gait's fixed speed, the 2-minute clock). `worstMs` is the slowest tick.
+
+**The readers.** The region is listed straight after the reflexes, so what it shares is read the
+same tick. Its numbers reach their readers through `playerCerebellum`
+(`packages/minecraft/src/brain/cerebellum-readers.ts`), one function per reader. Every reader
+uses a trusted model only, moves the fixed number toward the learned one by its strength
+(`toward` in `readers.ts`), and is back on the fixed rule at strength 0 or with the region left
+out (`--regions`).
+
+| Strength | Reader | What it takes | The fixed rule (strength 0) |
+|---|---|---|---|
+| `estimates` | The locomotion controller (`locomotion/learned-pace.ts`) | The journey's estimate: its length × the learned pace on the ground it starts on | Length ÷ the gait's fixed speed |
+| `late` | The locomotion controller | Late once past the learned time for the ground actually crossed (each stretch at its own pace) plus three spreads, and never under 4 s. Ground with no trusted model is priced by the fixed rule | Past twice the estimate |
+| `pace` | The stumble check (`feel.ts`, one line in `controller.ts`) | Its allowance of ground covered is scaled by fixed pace ÷ learned pace here, between ½ and 1½ | 0.5 blocks in 1.5 s everywhere |
+| `giveUp` | Serotonin's give-up clock (`baseOf` in `persistence.ts`) | The clock's base: the skill's usual time plus three spreads, kept between ¼ and 3× of two minutes (30 s to 6 min). Patience and the chance of payoff scale it as before | Two minutes for every skill |
+| `mismatch` | Focus, alarm, the striatum | The `mismatch` signal (below) | No signal |
+| `expectations` | The primitives' `asExpected` (`setLearnedExpectations` in `movements.ts`) | An empty written list is filled by the changes that follow nine times in ten. A written list is replaced only in one particular situation (never by the any-situation model) where a written change follows less than half the time; the run's `today.used` says which list was used and why | The written list |
+| `timing` | The defence (`due` in the threat sense) | Harm that usually follows a sign about now makes the thing it comes from "coming" while it is in view and can reach the bot | Never due |
+
+**The `mismatch` signal** (`mismatch.ts`): "that went wrong", at once.
+
+| Signal | 0 means | 1 means | Read by |
+|---|---|---|---|
+| `mismatch` | Movements are coming out as predicted | A movement just came out five spreads or more from its prediction | Focus (an input beside `surprised()`), noradrenaline (a rise of at most 0.2 in alarm, only for 0.5 and above), the striatum (0.5 and above is notable: a habit gives way) |
+
+- The size goes by spreads off: one spread is nothing, three is 0.5 ("large"), five is 1. One
+  spread is never taken as under a tenth of the predicted value.
+- A change that nearly always follows and did not this time is a mismatch too, but never a
+  large one (under 0.5): one miss is weak evidence, and a drop can simply be seen late.
+- Slower and faster both count (a new tool is a mismatch until its own model is trusted).
+- Only a prediction made for a particular situation counts. A guess from the any-situation model
+  being off is not something gone wrong.
+- A run that was cut short raises nothing. It fades to nothing within a second.
+- It is also raised while a journey is well behind its learned pace (`status().behind` of the
+  locomotion controller: seconds over the learned time for the ground covered, in spreads).
+- It never touches the scorebook: what a skill is worth is dopamine's to learn.
+
+**Timing** (`timing.ts`). Each "leads to" fact of the hippocampus is a pair: a sign, and what
+follows it. The delay between them is learned like any movement (kind `timing`, measure
+`seconds`), from the events the bot remembers (`memory.latest()`, `memory.leadsTo()`). While a
+sign is waited on and its delay is trusted, what follows is "due" from 2 s before its earliest
+usual time (the delay less three spreads) to its latest. No signal is shared for this: the
+threat sense runs before the regions each tick, so the defence asks directly, and the region's
+trace lists what is due under `due`.
+
+**Guardrails.** The cerebellum never chooses, blocks or starts an action. The hard reflexes, the
+medulla's hard rules and `last_stand` never read it. Readers use trusted models only, every
+learned number is bounded, and only the bot's own movements that were not interrupted teach it.
+It is deterministic and calls no model.
+
+**Settings** (`cerebellum` in bots.json; checked in `bot-config.ts`): `learn`, `estimates`,
+`late`, `pace`, `giveUp`, `mismatch`, `expectations`, `timing`, each 0 to 1 (default 1).
+
+**Checks.** `pnpm cerebellum-check` runs the live scenes on the test server: `practice` (in
+shadow: each kind of movement several times, then the shadow report), `pace`, `late`, `giveup`,
+`mismatch`, `newtool` and `expectations` (the readers on; each prints what was predicted, what
+happened, the error over the tries and who read it). `pnpm cerebellum-shadow [minutes]` plays
+the whole brain by the base in shadow. `pnpm cerebellum-report <log> [data/<bot>/models.json]`
+prints the shadow report and the readers' report for any log, and with the models the table of
+what each movement does. `pnpm brain-report` has the same under CEREBELLUM. `LIVE_OUTPUT=<file>`
+before any live check keeps what the bot printed.
+
 ## The basal ganglia: who goes ahead
 
 One place decides which proposals go ahead: `createArbiter` in `apps/run-bot/src/brain.ts`, built
@@ -1412,6 +1541,14 @@ in `data/<name>/`.
 | Make a bot at home sooner, or never | `bots.json`: `memory.map` (higher: familiar sooner; 0: no map) |
 | Change how far back replay reaches | `BACK` in `packages/memory/src/map-replay.ts` |
 | Change how strongly a feared cell is gone round | `HARM_MS` and `FEARED_CELL` in `packages/memory/src/map-route.ts`; the avoid areas: `AVOID` in `brain/map-routes.ts` |
+| Add a measure for the cerebellum | `measuresOf` in `packages/minecraft/src/brain/cerebellum.ts` (one line), its bounds in `MEASURE_BOUNDS`; if the body must report something new, add it to the note where the movement ends (`primitives/watch.ts`, or `noteJourney` in `locomotion/controller.ts`). Nothing in `region-cerebellum` changes |
+| Add something to a movement's situation key | Sense it in `factsNow` (`primitives/watch.ts`) or in `locomotion/stretches.ts`, add the field to `MovementFacts` (`movements.ts`), and put it in `handKeys`, `legKeys` or `travelKeys` in `brain/cerebellum.ts`, specific keys first |
+| Have a skill's inner movement noted | Wrap the call: `watched(bot, "<primitive name>", { block } or { entity }, () => doX(...), signal)` |
+| Turn one of the cerebellum's readers down or off | Its strength in the bot's `cerebellum` block in bots.json (0 = the fixed rule) |
+| Give the cerebellum's numbers a new reader | A function on `playerCerebellum` (`packages/minecraft/src/brain/cerebellum-readers.ts`) that answers with the fixed rule when untrusted, a strength in `CerebellumSettings` and `READERS` (`settings.ts`), and one line where the reader is built (`loop-mode.ts`, or `brain.ts` for a region) |
+| Change how big a mismatch is, or how long it lasts | `NOTHING`, `FULL_AFTER`, `MISMATCH_FADE_MS`, `LARGE_MISMATCH` in `packages/region-cerebellum/src/mismatch.ts`; how far it raises alarm: `MISMATCH_ALARM` in `apps/run-bot/src/brain.ts` |
+| Change when a journey is late or the bounds of the give-up clock | `SPREADS`, `LATE_FACTOR` in `locomotion/learned-pace.ts`; `LIMIT_BOUNDS` in `packages/region-cerebellum/src/readers.ts` |
+| Change how fast the cerebellum learns, trusts or forgets | `DEFAULT_CEREBELLUM` in `packages/region-cerebellum/src/settings.ts`: `settledRate`, `trusted`, `forgetAfterMs`, `forgetHalfLifeMs`, `expectedAt` |
 | Add a kind of cue for the amygdala | `packages/minecraft/src/brain/amygdala.ts`: write a reader (name it `<type>:<name>`, give it how much it stands out) and list it in `CUE_READERS`. Nothing in `region-amygdala` changes |
 | Add an outcome the amygdala learns from | `playerOutcomes` in `brain/amygdala.ts` (a size from 0 to 1, a sign, and what it points at if the game says) |
 | Make a bot more fearful, or more forgiving | In `bots.json` under `amygdala`: `learn` (how fast anything is learned), `safeHere` (how far a fear is let go where it proved harmless; 0 never), `spread` (how far a new thing starts feared like a similar one). What it is born fearing: `defence.innateThreats`, `reflexes.innateHurts`, `medulla.innateBadFoods`. The rates themselves: `LEARNING` in `packages/region-amygdala/src/learn.ts` (`slowest`, `harmless`, `familiar`); how long things last: `LIMITS` in `association.ts`; how big a hurt feels: `feltSize` in `brain/amygdala.ts` |

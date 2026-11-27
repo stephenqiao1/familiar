@@ -7,6 +7,7 @@ import { doBreak } from "../primitives/break-block.js";
 import { isProtectedBlock } from "../protected.js";
 import { postureCheck } from "../posture/check.js";
 import { isSafeToStand, nearestSpot, touchesHurt } from "../safety.js";
+import { watched } from "../primitives/watch.js";
 import type { MinecraftCtx } from "../skill-context.js";
 
 /** Open space is looked for this close; stepping there takes about this long per block. */
@@ -59,7 +60,7 @@ export const digOut: Skill<MinecraftCtx> = {
       } else {
         how = `broke the ${block!.name}`;
         ctx.log(`dig_out: breaking the ${block!.name} at head height`);
-        await doBreak(bot, block!, signal);
+        await watched(bot, "break_block", { block: block!.position }, () => doBreak(bot, block!, signal), signal);
       }
     }
     return { status: "done", changes: { how } };

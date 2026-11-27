@@ -214,6 +214,9 @@ importers:
       '@familiar/region-brainstem':
         specifier: workspace:*
         version: link:../../packages/region-brainstem
+      '@familiar/region-cerebellum':
+        specifier: workspace:*
+        version: link:../../packages/region-cerebellum
       '@familiar/region-hypothalamus':
         specifier: workspace:*
         version: link:../../packages/region-hypothalamus
@@ -312,6 +315,9 @@ importers:
       '@familiar/region-brainstem':
         specifier: workspace:*
         version: link:../region-brainstem
+      '@familiar/region-cerebellum':
+        specifier: workspace:*
+        version: link:../region-cerebellum
       '@familiar/region-hypothalamus':
         specifier: workspace:*
         version: link:../region-hypothalamus
@@ -366,6 +372,16 @@ importers:
       '@familiar/region-reflex':
         specifier: workspace:*
         version: link:../region-reflex
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/region-cerebellum:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       '@familiar/core':
         specifier: workspace:*

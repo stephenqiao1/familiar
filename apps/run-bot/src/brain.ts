@@ -8,6 +8,7 @@ import { createWantsInView } from "./wants.js";
 import { COMPETE, createHypothalamusRegion, DEFAULT_DRIVES, describeDrives, DESPERATE_SIGNAL, pressing, STRESS_SIGNAL, UNMET_SIGNAL, type DriveSettings, type Need, type TargetMemory } from "@familiar/region-hypothalamus";
 import { createDriveWatch, createReliefIndex, stressOnOutlook } from "./drives.js";
 import type { Arbiter, Candidate, DecisionEngine, NeedReading, Planner, Region, Skill, State, Workspace } from "@familiar/contracts";
+import { createCerebellumRegion, LARGE_MISMATCH, MISMATCH_SIGNAL, type CerebellumOptions } from "@familiar/region-cerebellum";
 import { APPEAL_SIGNAL, createAmygdalaRegion, FEAR_SIGNAL, MATTERS_SIGNAL, NO_READERS, type AmygdalaOptions } from "@familiar/region-amygdala";
 import { createMemoryRegion, memoryNotes, type MemoryStore, type Place, type PlaceKeeper } from "@familiar/memory";
 import {
@@ -146,6 +147,8 @@ const USUAL_MS = { instinct: 500, planner: 15_000 };
 const FRAZZLED_NOTE = "You are badly rattled right now: keep the plan short and simple, and put safety first.";
 /** Fear at its strongest raises alarm to this, before any harm has come. */
 const FEAR_ALARM = 0.5;
+/** A full mismatch (a movement that went badly wrong) raises alarm to this: a small start, not a fright. */
+const MISMATCH_ALARM = 0.2;
 /** Above this search level, more of the engine's options are offered. */
 const WIDER_OPTIONS_ABOVE = 0.6;
 
@@ -203,6 +206,8 @@ export interface BrainParts<Ctx> {
   order?: number;
   /** The amygdala: what it is offered and what it has learned; its settings say how far each reader takes its word. Default: none. */
   amygdala?: AmygdalaOptions;
+  /** The cerebellum: the movements it is told of and the models it has learned. Default: none. */
+  cerebellum?: CerebellumOptions;
   /** How feared a thing in the state is, 0 to 1, as the amygdala has learned (for the thalamus). Default: nothing is. */
   fearOfThing?: (kind: string, id: string) => number;
   /** For the planner: what lies on the known way from here to a place, in a few words. Default: nothing said. */
@@ -253,6 +258,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const selection = parts.selection ?? DEFAULT_SELECTION;
   // How far each reader takes the amygdala's word (all 0 with no amygdala: every reader on its old source).
   const fears = parts.amygdala?.settings?.readers ?? NO_READERS;
+  // How far a movement that went wrong reaches focus, alarm and habits (0 with no cerebellum).
+  const mismatch = parts.cerebellum?.settings?.mismatch ?? 0;
   // With channels the basal ganglia let a look run beside whatever leaves the head free, so a look need not take over.
   const channels = selection.channels > 0;
   // The needs as the hypothalamus read them; with it left out, the plain reading from the state.
@@ -286,6 +293,11 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       rules: createPlayerReflexes(parts.reflexes, posture.righting, { ...defence, lean: hasColliculus && colliculus.fields > 0 && colliculus.elevation > 0 ? defence.lean : 0 }),
       ...(gainOf ? { gainOf } : {}),
     }), //                                                                                  layer 0, every tick
+    // The cerebellum: learns what each of the body's movements comes to (how long, how far, which changes) from
+    // the error between what it predicted and what happened, and shares `mismatch` when a movement comes out far
+    // from its prediction. Straight after the reflexes, so focus, alarm and the striatum read this tick's.
+    // Its numbers (pace, each skill's usual time, expectations, timing) go to their readers outside this list.
+    ...(parts.cerebellum ? [createCerebellumRegion(parts.cerebellum)] : []), //            layer 0, every tick
     // The medulla: vital signs, and the graded urges of upkeep. Left out (--regions), the hard reflexes above still fire.
     createMedullaRegion({ vitals: playerVitals, share: medulla.vitals, urges: medullaUrges(medulla), asleep, analgesiaOf: (ws) => level(ws, ANALGESIA_SIGNAL), ...(upkeepGain ? { gainOf: upkeepGain } : {}) }), // layer 0, every tick
     // The hypothalamus: reads every need once and shares the reading. Straight after the medulla, so everything
@@ -343,7 +355,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createFocusRegion({
       // A thing that stood out strongly raises focus for a moment.
       // So does a near tie the basal ganglia are waiting on: look closely while the choice hangs.
-      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []), ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : []), ...(fears.focus > 0 ? [{ name: "promising", read: (ws: Workspace) => fears.focus * level(ws, APPEAL_SIGNAL) }] : [])],
+      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []), ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : []), ...(fears.focus > 0 ? [{ name: "promising", read: (ws: Workspace) => fears.focus * level(ws, APPEAL_SIGNAL) }] : []), ...(mismatch > 0 ? [{ name: "mismatch", read: (ws: Workspace) => level(ws, MISMATCH_SIGNAL) }] : [])],
       settings: focus,
       asleep,
       moved,
@@ -368,7 +380,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createNoradrenalineRegion({
       // Alarm is read from the same needs; search from whether a pressing one is being answered.
       // Fear counts beside the vital needs: what is around predicts harm, so alarm rises before any has come.
-      needs: (ws) => [...needs(ws), ...(fears.alarm > 0 ? [{ name: "fear", level: fears.alarm * FEAR_ALARM * level(ws, FEAR_SIGNAL), rank: 1, weight: 1 }] : [])],
+      // A movement that went badly wrong is a small start: only a large mismatch counts.
+      needs: (ws) => [...needs(ws), ...(fears.alarm > 0 ? [{ name: "fear", level: fears.alarm * FEAR_ALARM * level(ws, FEAR_SIGNAL), rank: 1, weight: 1 }] : []), ...(level(ws, MISMATCH_SIGNAL) >= LARGE_MISMATCH ? [{ name: "mismatch", level: MISMATCH_ALARM * level(ws, MISMATCH_SIGNAL), rank: 1, weight: 1 }] : [])],
       startle: startleOf,
       // Search rises while a pressing need is not being answered, and while the top need has not eased for minutes whatever the skill reports.
       searchInputs: [gettingNowhere((ws) => unanswered(needs(ws)), (_ws, now) => persistence.status(now)?.progress ?? 0), { name: "unmet", read: (ws) => level(ws, UNMET_SIGNAL) }],

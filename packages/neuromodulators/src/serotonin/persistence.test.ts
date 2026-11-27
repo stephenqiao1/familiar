@@ -19,6 +19,20 @@ function setup(initialPatience: number, strength = 1) {
 }
 
 describe("createPersistence", () => {
+  it("starts the clock from a skill's own base where one is known, and from the fixed base otherwise", () => {
+    const persistence = createPersistence({ patience: () => 0.5, chanceOf: () => 0.5, strength: 1, baseOf: (skill) => (skill === "dig" ? 30_000 : BASE), mostBaseMs: 3 * BASE });
+    persistence.observe(event("dig", "started", 0));
+    expect(persistence.status(1000)).toMatchObject({ baseSeconds: 30, giveUpSeconds: 30 });
+    expect(persistence.giveUpReason(29_999)).toBeNull();
+    expect(persistence.giveUpReason(30_000)).toContain("gave up after 30 s");
+    persistence.observe(event("dig", "failed", 30_000));
+    persistence.observe(event("go_to", "started", 40_000));
+    expect(persistence.giveUpReason(40_000 + BASE - 1)).toBeNull();
+    expect(persistence.giveUpReason(40_000 + BASE)).not.toBeNull();
+    // The backstop leaves room for the longest base there can be.
+    expect(persistence.backstopMs()).toBe(9 * BASE);
+  });
+
   it("gives up at the base time at neutral patience with no history", () => {
     const { persistence, start } = setup(0.5);
     start("go_to");

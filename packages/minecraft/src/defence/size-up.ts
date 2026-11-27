@@ -45,6 +45,8 @@ export interface ThreatFacts {
   /** The bot has a way out. */
   escapable: boolean;
   danger: number;
+  /** Harm from this kind is due about now, by the timing the cerebellum has learned. */
+  due?: boolean;
   /** How much harm the amygdala says this kind predicts here and now, if it was asked. */
   harm?: number;
   beatable: boolean;
@@ -79,7 +81,8 @@ export function couldHarm(threat: Pick<Threat, "canReach" | "stage" | "kind">): 
  *   canReach: a route exists, or it shoots and has a clear line.
  *   stage:    on it (within 3 blocks and able to reach, within 6 while the bot is fighting it,
  *             or it has just hurt the bot),
- *             coming (looming, or noticed and able to reach inside the flight distance),
+ *             coming (looming, noticed and able to reach inside the flight distance, or in view,
+ *             able to reach and its harm due about now by learned timing),
  *             seen (in view), else possible.
  */
 export function sizeUp(facts: ThreatFacts, bravery: number, flightStrength = 1, flightScale = 1): ThreatView {
@@ -93,7 +96,7 @@ export function sizeUp(facts: ThreatFacts, bravery: number, flightStrength = 1, 
   const stage: Stage =
     (dist <= CONTACT_DISTANCE && canReach) || (justHurt && dist <= CONTACT_DISTANCE + 1) || (facts.engaged === true && canReach && dist <= ENGAGED_DISTANCE)
       ? "on_it"
-      : facts.looming || justHurt || (noticed && canReach && dist <= flight)
+      : facts.looming || justHurt || (noticed && canReach && dist <= flight) || (facts.due === true && seen && canReach)
         ? "coming"
         : seen && dist <= Math.max(FAR_DISTANCE, flight)
           ? "seen"

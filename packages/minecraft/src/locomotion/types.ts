@@ -25,6 +25,8 @@ export interface LocomotionStatus {
   progress: number;
   /** Recoveries tried on the current journey. */
   recoveries: number;
+  /** How far behind its learned pace the journey is, in spreads (0: on time, no journey, or no trusted pace). */
+  behind: number;
 }
 
 /** Somewhere to head for: a fixed point, or one that is asked for again as the journey goes (null: stand still). */

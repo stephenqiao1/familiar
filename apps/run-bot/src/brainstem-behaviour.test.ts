@@ -21,6 +21,7 @@ import { DEFAULT_DRIVES, DRIVES_OFF, type DriveSettings } from "@familiar/region
 import type { FiredReflex } from "@familiar/region-reflex";
 import { THALAMUS_OFF, type ThalamusSettings } from "@familiar/region-thalamus";
 import { createAssociations, DEFAULT_AMYGDALA, NO_READERS, type AmygdalaOptions, type AmygdalaReaders } from "@familiar/region-amygdala";
+import { createModels, DEFAULT_CEREBELLUM, type CerebellumOptions } from "@familiar/region-cerebellum";
 import { describe, expect, it } from "vitest";
 import { createArbiter, createBrain } from "./brain.js";
 
@@ -102,7 +103,7 @@ const SKILLS = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[]; amygdala?: AmygdalaOptions } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[]; amygdala?: AmygdalaOptions; cerebellum?: CerebellumOptions } = {}) {
   const skills = options.skills ?? SKILLS;
   const store = createWorkspace();
   const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
@@ -147,6 +148,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       arousal: { ...DEFAULT_AROUSAL, ...options.arousal },
       ...(options.drives ? { drives: options.drives } : {}),
       ...(options.amygdala ? { amygdala: options.amygdala } : {}),
+      ...(options.cerebellum ? { cerebellum: options.cerebellum } : {}),
       sameTime: options.sameTime ?? false,
       // These tests are about the layers below the choice: the basal ganglia's own parts have their tests in selection-parts.test.ts.
       selection: options.selection ?? NO_SELECTION,
@@ -1142,5 +1144,49 @@ describe("the basal ganglia's channels through the real brain", () => {
     await eating.tick({}, "eat");
     const out = await eating.tick(appears(mob("zombie", 12)), "eat");
     expect(out).toMatchObject({ won: "eat", beside: ["look_at"] });
+  });
+});
+
+describe("the cerebellum's mismatch through the real brain", () => {
+  /** A cerebellum that knows a dig of stone takes 2 s, and is told of one dig, taking `seconds`, on the tick at 5 s. */
+  const digging = (seconds: number, strength = 1): CerebellumOptions => {
+    const known = { value: 2, spread: 0.2, seen: 10, at: 0 };
+    return {
+      store: createModels({ "primitive:break_block@stone": { measures: { seconds: known }, runs: 10, changes: {}, at: 0 } }),
+      settings: { ...DEFAULT_CEREBELLUM, mismatch: strength },
+      movements: (_ws, now) => (now === 5000 ? [{ kind: "primitive", name: "break_block", keys: ["stone", ""], measures: { seconds }, at: now }] : []),
+    };
+  };
+  async function play(cerebellum?: CerebellumOptions) {
+    const b = bot(cerebellum ? { cerebellum } : {});
+    const seen: Record<string, number>[] = [];
+    for (let i = 0; i < 14; i++) {
+      const { traces } = await b.tick();
+      // What focus read of it is kept too: in a place it does not know, focus is already as high as it goes.
+      const read = (traces.acetylcholine?.inputs as Record<string, number> | undefined)?.mismatch;
+      seen.push({ ...Object.fromEntries(Object.entries(b.store.signals()).map(([name, s]) => [name, s.value])), ...(read === undefined ? {} : { focusRead: read }) });
+    }
+    return seen;
+  }
+  /** The highest a signal stood from the tick of the dig on. */
+  const peak = (seen: Record<string, number>[], name: string) => Math.max(...seen.slice(9).map((s) => s[name] ?? 0));
+
+  it("a dig that took far longer than predicted raises focus, and alarm a little", async () => {
+    const [wrong, right] = [await play(digging(6)), await play(digging(2))];
+    expect(peak(wrong, "mismatch")).toBe(1);
+    expect(peak(right, "mismatch")).toBe(0);
+    expect(peak(wrong, "focusRead")).toBe(1);
+    expect(peak(right, "focusRead")).toBe(0);
+    const rise = peak(wrong, "alarm") - peak(right, "alarm");
+    expect(rise).toBeGreaterThan(0);
+    expect(rise).toBeLessThanOrEqual(0.2);
+    // Gone within a second: two ticks later nothing is left of it.
+    expect(wrong[11]!.mismatch).toBe(0);
+  });
+
+  it("at strength 0 every signal is what it is with no cerebellum at all", async () => {
+    const shadow = await play(digging(6, 0));
+    expect(shadow.some((s) => "focusRead" in s)).toBe(false);
+    expect(shadow).toEqual(await play());
   });
 });

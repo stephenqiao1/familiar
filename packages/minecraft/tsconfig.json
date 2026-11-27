@@ -36,6 +36,9 @@
       "path": "../region-amygdala"
     },
     {
+      "path": "../region-cerebellum"
+    },
+    {
       "path": "../region-thalamus"
     }
   ]

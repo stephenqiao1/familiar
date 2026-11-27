@@ -2,6 +2,7 @@ import type { Skill } from "@familiar/contracts";
 import { carriedItem } from "../primitives/aim.js";
 import { doEquip } from "../primitives/equip.js";
 import { doUseItem } from "../primitives/use-item.js";
+import { watched } from "../primitives/watch.js";
 import type { MinecraftCtx } from "../skill-context.js";
 
 /**
@@ -24,7 +25,7 @@ export const consume: Skill<MinecraftCtx> = {
     await doEquip(ctx.bot, item);
     // Noted as it begins as well as when it ends (see eat.ts): an illness arrives with the last mouthful.
     ctx.gut.ate(item.name, Date.now());
-    const used = await doUseItem(ctx.bot, signal).catch(() => false);
+    const used = await watched(ctx.bot, "use_item", {}, () => doUseItem(ctx.bot, signal), signal).catch(() => false);
     if (signal.aborted) return { status: "interrupted" };
     if (!used) return { status: "failed", reason: `could not finish the ${item.name}` };
     ctx.gut.ate(item.name, Date.now());

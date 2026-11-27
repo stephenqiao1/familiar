@@ -24,6 +24,8 @@ export interface PersistenceStatus {
   /** How fresh that progress still is, from 1 (just now) to 0 (none inside the window): what the stay bonus goes by. */
   progress: number;
   giveUpSeconds: number;
+  /** The give-up time at neutral patience with an even chance, for this skill (the fixed base, or its own learned one). */
+  baseSeconds: number;
   patience: number;
   chanceOfPayoff: number;
   stayBonus: number;
@@ -65,6 +67,10 @@ export function createPersistence(options: {
   strength: number;
   /** The give-up time at neutral patience with an even chance of payoff. Default: 120 000. */
   baseMs?: number;
+  /** A skill's own base, if something has learned how long it usually takes (bounded by whoever supplies it). Default: `baseMs` for every skill. */
+  baseOf?(skill: string, now: number): number;
+  /** The most `baseOf` may answer, for the backstop. Default: `baseMs`. */
+  mostBaseMs?: number;
 }): Persistence {
   const { patience, chanceOf, strength, baseMs = 120_000 } = options;
   let running: { skill: string; clockFrom: number } | null = null;
@@ -77,16 +83,18 @@ export function createPersistence(options: {
   function status(now: number): PersistenceStatus | null {
     if (!running) return null;
     const waited = now - running.clockFrom;
-    const overPersisting = streak.ms + waited > OVER_PERSISTING_FACTOR * baseMs;
+    const base = options.baseOf?.(running.skill, now) ?? baseMs;
+    const overPersisting = streak.ms + waited > OVER_PERSISTING_FACTOR * base;
     const p = overPersisting ? 0.5 : patience();
     const chance = chanceOf(running.skill);
-    const giveUpMs = baseMs * giveUpFactor(p, chance, strength);
+    const giveUpMs = base * giveUpFactor(p, chance, strength);
     const progress = Math.max(0, 1 - waited / (PROGRESS_WINDOW_MS * (0.5 + p)));
     return {
       skill: running.skill,
       waitedSeconds: waited / 1000,
       progress,
       giveUpSeconds: giveUpMs / 1000,
+      baseSeconds: base / 1000,
       patience: p,
       chanceOfPayoff: chance,
       stayBonus: strength * MAX_STAY_BONUS * progress,
@@ -128,7 +136,7 @@ export function createPersistence(options: {
       return `gave up after ${Math.round(s.waitedSeconds)} s (${why})`;
     },
     heldBack: (skill, now) => now < (waiting.get(skill)?.until ?? -Infinity),
-    backstopMs: () => (strength > 0 ? OVER_PERSISTING_FACTOR * baseMs : baseMs),
+    backstopMs: () => (strength > 0 ? OVER_PERSISTING_FACTOR : 1) * Math.max(baseMs, options.mostBaseMs ?? 0),
     status,
   };
 }

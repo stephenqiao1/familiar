@@ -3,6 +3,7 @@ import type { Bot } from "mineflayer";
 import { badFoods, foodsByValue } from "../foods.js";
 import { doEquip } from "../primitives/equip.js";
 import { doUseItem } from "../primitives/use-item.js";
+import { watched } from "../primitives/watch.js";
 import type { MinecraftCtx } from "../skill-context.js";
 
 const FULL = 20;
@@ -50,7 +51,7 @@ export const eat: Skill<MinecraftCtx> = {
       // the last mouthful, before this skill hears that the meal is over.
       ctx.gut.ate(food.name, Date.now());
       // Holds the food in use until it is eaten, and always lets go (also when stopped mid-bite).
-      const eaten = await doUseItem(bot, signal).catch(() => false);
+      const eaten = await watched(bot, "use_item", {}, () => doUseItem(bot, signal), signal).catch(() => false);
       if (signal.aborted) return { status: "interrupted", changes: { ate: ate.join(", ") } };
       if (!eaten) return { status: "failed", reason: `could not eat ${food.name}` };
       ate.push(food.name);

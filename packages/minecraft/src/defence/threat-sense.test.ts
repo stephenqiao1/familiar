@@ -40,7 +40,7 @@ function world(options: { settings?: Partial<DefenceSettings>; reach?: "yes" | "
     routes,
     ...(options.fear ? { fear: { harmOf: (kind: string) => options.fear!.harm[kind] ?? 0, strength: options.fear.strength } } : {}),
     ...(options.dread !== undefined ? { dread: () => options.dread! } : {}),
-    locomotion: { avoidArea: (name, _centre, radius) => void avoided.push({ name, radius }), status: () => ({ moving: options.moving ?? false, pattern: null, gait: "walk", stuck: false, progress: 0, recoveries: 0 }) },
+    locomotion: { avoidArea: (name, _centre, radius) => void avoided.push({ name, radius }), status: () => ({ moving: options.moving ?? false, pattern: null, gait: "walk", stuck: false, progress: 0, recoveries: 0, behind: 0 }) },
     log: (msg) => logged.push(msg),
   });
   let now = 10_000;

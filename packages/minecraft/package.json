@@ -17,6 +17,7 @@
     "@familiar/neuromodulators": "workspace:*",
     "@familiar/region-brainstem": "workspace:*",
     "@familiar/region-amygdala": "workspace:*",
+    "@familiar/region-cerebellum": "workspace:*",
     "@familiar/region-hypothalamus": "workspace:*",
     "@familiar/region-instinct": "workspace:*",
     "@familiar/region-reflex": "workspace:*",

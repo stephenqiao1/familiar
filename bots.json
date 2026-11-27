@@ -242,6 +242,16 @@
         "blocks": 1,
         "foods": 1
       }
+    },
+    "cerebellum": {
+      "learn": 1,
+      "estimates": 1,
+      "late": 1,
+      "pace": 1,
+      "giveUp": 1,
+      "mismatch": 1,
+      "expectations": 1,
+      "timing": 1
     }
   },
   "Brave": {

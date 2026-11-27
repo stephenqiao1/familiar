@@ -39,6 +39,9 @@
     "amygdala-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/amygdala-check.ts",
     "shadow-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/shadow-check.ts",
     "shadow-report": "node apps/run-bot/scripts/shadow-report.ts",
+    "cerebellum-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/cerebellum-check.ts",
+    "cerebellum-shadow": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/cerebellum-shadow.ts",
+    "cerebellum-report": "node apps/run-bot/scripts/cerebellum-shadow-report.ts",
     "map-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/map-check.ts",
     "replay-selection": "tsc -b && node apps/run-bot/scripts/replay-selection.ts",
     "thalamus-check": "tsc -b && node --env-file-if-exists=.env apps/run-bot/scripts/thalamus-check.ts"
