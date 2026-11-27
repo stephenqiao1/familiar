@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Planner, PlanRequest } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
-import { createPrefrontalRegion } from "./prefrontal-region.js";
+import { areaRegions } from "@familiar/neocortex";
+import { createPrefrontalArea, createPrefrontalRegion } from "./prefrontal-region.js";
 
 describe("createPrefrontalRegion", () => {
   it("runs in the background on the slowest layer by default", () => {
@@ -98,5 +99,46 @@ describe("createPrefrontalRegion", () => {
     const store = createWorkspace();
     await createPrefrontalRegion({ planner, describe: () => "" }).run(store.viewFor("prefrontal"), new AbortController().signal);
     expect(store.goal()?.wants).toEqual([]);
+  });
+});
+
+describe("createPrefrontalArea", () => {
+  const signal = new AbortController().signal;
+  const plans = [
+    { goal: "build", steps: ["wood", "walls"], reason: "night", detail: ["chest"], holdBack: ["flee"] },
+    { goal: "build", steps: ["wood", "walls"], reason: "night", stepsDone: 1, detail: ["chest", "bed"] },
+    { goal: "hide", steps: ["dig in"], reason: "zombies", stepsDone: 2 },
+  ];
+  const options = () => {
+    const queue = [...plans];
+    const planner: Planner = { name: "fixed", plan: async () => queue.shift()! };
+    return { planner, describe: () => "s", guidance: () => ({ maxSteps: 2 }), wake: () => true, everyMs: 5000, timeoutMs: 100 };
+  };
+  const plain = ({ setAt: _setAt, stepDoneAt, ...goal }: NonNullable<ReturnType<ReturnType<typeof createWorkspace>["goal"]>>) => ({ ...goal, stepped: stepDoneAt !== null });
+
+  it("sets the same goals as the region, plan after plan, and feeds each down with its ask", async () => {
+    const [old, now] = [createWorkspace(), createWorkspace()];
+    const region = createPrefrontalRegion(options());
+    const [hold, area] = areaRegions(createPrefrontalArea(options()), ["instinct", "prefrontal"]);
+    expect(area).toMatchObject({ name: region.name, layer: region.layer, everyMs: 5000, timeoutMs: 100 });
+    expect(area!.dueNow?.(now.viewFor("prefrontal"))).toBe(true);
+    for (const plan of plans) {
+      const before = await region.run(old.viewFor("prefrontal"), signal);
+      const after = await area!.run(now.viewFor("prefrontal"), signal);
+      expect(after.proposals).toEqual(before.proposals);
+      const { ports, ...trace } = after.trace as Record<string, unknown>;
+      expect(trace).toEqual(before.trace);
+      expect(plain(now.goal()!)).toEqual(plain(old.goal()!));
+      expect(ports).toMatchObject({ input: "prefrontal", up: null, action: [], ask: plan.detail ?? [], down: { goal: now.goal() } });
+      expect(now.cortex().prefrontal).toMatchObject({ feedback: { goal: now.goal() }, ask: plan.detail ?? [] });
+    }
+    // Paused, it plans nothing, like the region; what it holds is still said every tick.
+    const paused = { ...options(), paused: () => true };
+    const was = await createPrefrontalRegion(paused).run(old.viewFor("prefrontal"), signal);
+    const is = await areaRegions(createPrefrontalArea(paused), ["prefrontal"])[1]!.run(now.viewFor("prefrontal"), signal);
+    expect(is.trace).toMatchObject(was.trace!);
+    now.viewFor("noradrenaline").clearGoal();
+    await hold!.run(now.viewFor("prefrontal-hold"), signal);
+    expect(now.cortex().prefrontal).toMatchObject({ feedback: { goal: null }, ask: [] });
   });
 });

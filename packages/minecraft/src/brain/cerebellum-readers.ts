@@ -21,6 +21,8 @@ export interface PlayerCerebellum {
   /** For the give-up clock: a skill's own base, in ms, and the most that can be. */
   giveUpBaseMs(skill: string, now: number): number;
   mostBaseMs: number;
+  /** For the motor area's stuck clock: how long a skill usually takes, in ms, or null while that is not known. */
+  usualMs(skill: string, now: number): number | null;
   /** For the primitives: what to expect of a movement here instead of its written list. */
   expects(name: string, facts: MovementFacts, parts: readonly BodyPart[], written: readonly string[]): LearnedCheck | null;
   /** The delays between events known to follow each other, as movements to learn from. Call once a tick. */
@@ -44,6 +46,10 @@ export function playerCerebellum(parts: { store: ModelStore; settings: Cerebellu
     },
     giveUpBaseMs: (skill, now) => giveUpBase(store, skill, TODAY_GIVE_UP_SECONDS * 1000, now, settings).ms,
     mostBaseMs: LIMIT_BOUNDS.most * TODAY_GIVE_UP_SECONDS * 1000,
+    usualMs(skill, now) {
+      const usual = predict(store, "skill", skill, [""], "seconds", now, settings);
+      return usual ? usual.value * 1000 : null;
+    },
     expects(name, facts, bodyParts, written) {
       const learned = learnedExpectations(store, "primitive", name, keysOf({ kind: "primitive", facts, parts: bodyParts }), written, Date.now(), settings);
       return learned && { expects: learned.expects, why: learned.why, met: (changes: Changes) => learned.expects.every((c) => changeList(changes).includes(c)) };

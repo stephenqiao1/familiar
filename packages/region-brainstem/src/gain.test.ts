@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createWorkspace } from "@familiar/core";
-import { createReflexGain, HELD_BACK, isHeldBack, MAX_GAIN, MIN_GAIN, reflexGain } from "./gain.js";
+import { createReflexGain, HELD_BACK, heldBack, isHeldBack, lapsed, MAX_GAIN, MIN_GAIN, reflexGain } from "./gain.js";
 import { brainstemProblem, DEFAULT_BRAINSTEM } from "./settings.js";
 
 const calm = { alarm: 0, bravery: 0.5, leaning: null, heldBack: false } as const;
@@ -42,10 +42,51 @@ describe("reflexGain", () => {
 
 describe("isHeldBack", () => {
   it("matches the reflex's name or the skill it proposes", () => {
-    expect(isHeldBack({ holdBack: ["flee"] }, "defence_flee", "flee")).toBe(true);
-    expect(isHeldBack({ holdBack: ["defence_fight"] }, "defence_fight", "attack")).toBe(true);
-    expect(isHeldBack({ holdBack: ["flee"] }, "defence_fight", "attack")).toBe(false);
+    const holding = (name: string) => ({ holdBack: [{ name, strength: 1 }], stepsDone: 0 });
+    expect(isHeldBack(holding("flee"), "defence_flee", "flee")).toBe(true);
+    expect(isHeldBack(holding("defence_fight"), "defence_fight", "attack")).toBe(true);
+    expect(isHeldBack(holding("flee"), "defence_fight", "attack")).toBe(false);
     expect(isHeldBack(null, "defence_flee", "flee")).toBe(false);
+  });
+});
+
+describe("a hold-back with a strength and an end", () => {
+  const goal = (held: { strength: number; until?: "step" | number }, stepsDone = 0) => ({ holdBack: [{ name: "flee", step: 0, since: 1000, ...held }], stepsDone });
+
+  it("damps by its strength: half strength is half way between free and held back in full", () => {
+    const free = reflexGain({ ...calm, alarm: 1 });
+    const full = reflexGain({ ...calm, alarm: 1, heldBack: 1 });
+    expect(full).toBeCloseTo(free * HELD_BACK);
+    expect(reflexGain({ ...calm, alarm: 1, heldBack: 0.5 })).toBeCloseTo((free + full) / 2);
+    expect(reflexGain({ ...calm, alarm: 1, heldBack: 0 })).toBeCloseTo(free);
+    expect(heldBack(goal({ strength: 0.5 }), "defence_flee", "flee", 2000)).toBe(0.5);
+  });
+
+  it("ends when its step is finished", () => {
+    expect(heldBack(goal({ strength: 1, until: "step" }, 0), "defence_flee", "flee", 2000)).toBe(1);
+    expect(heldBack(goal({ strength: 1, until: "step" }, 1), "defence_flee", "flee", 2000)).toBe(0);
+    expect(lapsed({ name: "flee", strength: 1, until: "step", step: 2 }, { stepsDone: 2 }, 0)).toBe(false);
+    expect(lapsed({ name: "flee", strength: 1, until: "step", step: 2 }, { stepsDone: 3 }, 0)).toBe(true);
+  });
+
+  it("ends when its seconds are up, and one with no end lasts as long as the goal", () => {
+    expect(heldBack(goal({ strength: 1, until: 5 }), "defence_flee", "flee", 5999)).toBe(1);
+    expect(heldBack(goal({ strength: 1, until: 5 }), "defence_flee", "flee", 6000)).toBe(0);
+    expect(heldBack(goal({ strength: 1 }, 9), "defence_flee", "flee", 1e12)).toBe(1);
+  });
+
+  it("with grading off, every hold-back is in full for as long as the goal", () => {
+    expect(heldBack(goal({ strength: 0.2, until: 5 }, 3), "defence_flee", "flee", 1e12, 0)).toBe(1);
+    expect(heldBack(goal({ strength: 0.2, until: "step" }, 3), "defence_flee", "flee", 1e12, 0.5)).toBe(0);
+    expect(heldBack(goal({ strength: 0.2 }), "defence_flee", "flee", 0, 0.5)).toBeCloseTo(0.6);
+  });
+
+  it("the reflex region's gain reads the strength from the goal", () => {
+    const gainOf = createReflexGain({ settings: { bravery: 0.5, gains: 0, holdBack: 1 }, alarmOf: () => 0.5, leaningOf: () => null });
+    const ws = (strength: number) => ({ goal: { holdBack: [{ name: "flee", strength }], stepsDone: 0 } }) as never;
+    const flee = { action: { skill: "flee" }, urgency: 1, reason: "" };
+    expect(gainOf({ name: "defence_flee" }, ws(1), flee)).toBeCloseTo(HELD_BACK);
+    expect(gainOf({ name: "defence_flee" }, ws(0.5), flee)).toBeCloseTo((1 + HELD_BACK) / 2);
   });
 });
 

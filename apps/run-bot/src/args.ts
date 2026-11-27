@@ -24,8 +24,10 @@ export interface BrainArgs {
   manual?: boolean;
   /** Let a head-only movement (a look) run alongside a skill that leaves the head free. Default: off. */
   sameTime?: boolean;
-  /** The fixed plan the echo planner returns (for tests and live checks). Default: "Stay safe." */
-  plan?: Plan;
+  /** The fixed plan the echo planner returns (for tests and live checks), or several: it moves to the next each time a stuck step wakes it. Default: "Stay safe." */
+  plan?: Plan | Plan[];
+  /** The echo engine's fixed rules of choice, in order: of those whose `when` (a condition) holds, the first whose skill is on the menu is chosen. For live checks that must not depend on a model. Default: it idles. */
+  choices?: { when: string; choose: string }[];
 }
 
 export type Command =
@@ -37,7 +39,8 @@ export type Command =
  * (no command) [--engine echo|jev]                   run the decision loop (default engine: echo)
  *   [--planner echo|claude]                          what the prefrontal cortex plans with (default: echo)
  *   [--regions reflex,instinct,...]                  run only these regions (default: all)
- *   [--plan '{"goal":"...","ifThen":[...]}']         the echo planner's fixed plan, as JSON
+ *   [--choices '[{"when":"carrying 1 bread","choose":"eat"}]']   the echo engine's fixed rules of choice (the first whose condition holds)
+ *   [--plan '{"goal":"...","ifThen":[...]}']         the echo planner's fixed plan, as JSON (or a list of plans: the next one each time a stuck step wakes it)
  *   [--manual]                                       take "do <skill> [target]" lines on standard input
  *   [--same-time]                                    let a look run alongside a skill that leaves the head free
  *   [--primitives]                                   let the engine choose primitives too (default: reflexes only)
@@ -66,6 +69,7 @@ export function parseCommand(argv: string[]): Command {
       "same-time": { type: "boolean", default: false },
       manual: { type: "boolean", default: false },
       plan: { type: "string" },
+      choices: { type: "string" },
     },
   });
   const [command, skill, ...extra] = positionals;
@@ -85,6 +89,7 @@ export function parseCommand(argv: string[]): Command {
     if (values["same-time"]) brain.sameTime = true;
     if (values.manual) brain.manual = true;
     if (values.plan !== undefined) brain.plan = parsePlan(values.plan);
+    if (values.choices !== undefined) brain.choices = parseChoices(values.choices);
     if (values.regions !== undefined) brain.regions = values.regions.split(",").map((r) => r.trim()).filter(Boolean);
     return { kind: "loop", server, brain };
   }
@@ -100,16 +105,33 @@ export function parseCommand(argv: string[]): Command {
   throw new Error(`Unknown command "${positionals.join(" ")}". Use: skills | skill <name> [--target t] [--interrupt-after s]`);
 }
 
-/** A plan given as JSON: it needs a goal; steps and reason default to none. */
-function parsePlan(raw: string): Plan {
-  let plan: Partial<Plan>;
+/** A plan given as JSON, or a list of them: each needs a goal; steps and reason default to none. */
+function parsePlan(raw: string): Plan | Plan[] {
+  let given: Partial<Plan> | Partial<Plan>[];
   try {
-    plan = JSON.parse(raw) as Partial<Plan>;
+    given = JSON.parse(raw) as Partial<Plan> | Partial<Plan>[];
   } catch {
     throw new Error(`Invalid --plan: not JSON`);
   }
-  if (typeof plan?.goal !== "string" || !plan.goal) throw new Error(`Invalid --plan: it needs a "goal"`);
-  return { steps: [], reason: "given on the command line", ...plan, goal: plan.goal };
+  const one = (plan: Partial<Plan>): Plan => {
+    if (typeof plan?.goal !== "string" || !plan.goal) throw new Error(`Invalid --plan: it needs a "goal"`);
+    return { steps: [], reason: "given on the command line", ...plan, goal: plan.goal };
+  };
+  if (!Array.isArray(given)) return one(given);
+  if (!given.length) throw new Error(`Invalid --plan: the list is empty`);
+  return given.map(one);
+}
+
+/** The echo engine's rules of choice as JSON: a list of { when, choose }. */
+function parseChoices(raw: string): { when: string; choose: string }[] {
+  let given: unknown;
+  try {
+    given = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid --choices: not JSON`);
+  }
+  if (!Array.isArray(given) || given.some((r) => typeof r?.when !== "string" || typeof r?.choose !== "string")) throw new Error(`Invalid --choices: it must be a list of { "when": "<condition>", "choose": "<skill>" }`);
+  return given.map((r: { when: string; choose: string }) => ({ when: r.when, choose: r.choose }));
 }
 
 function seconds(raw: string, flag: string): number {

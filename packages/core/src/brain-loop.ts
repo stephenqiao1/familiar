@@ -21,7 +21,8 @@ export interface BrainLoopOptions {
   /** The skill running right now. Default: always null. */
   current?: () => RunningSkill | null;
   /** May return a promise; the tick waits for it before logging. */
-  onAction: (action: Action) => void | Promise<void>;
+  /** `by`: the proposal that won (null when nothing was proposed and the running skill just keeps going). */
+  onAction: (action: Action, by: Candidate | null) => void | Promise<void>;
   /**
    * Different body parts at the same time. `isSide` marks a candidate that should run alongside
    * the main action instead of competing with it (e.g. a look while the hands are busy); the most
@@ -183,8 +184,8 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       early = arbiter.settledEarly(competing(), [...pending].map((r) => r.layer), view);
       if (!early) return;
       decideMs = performance.now() - started;
-      const action = early.action;
-      acting = (async () => onAction(action))();
+      const [action, by] = [early.action, early];
+      acting = (async () => onAction(action, by))();
     };
 
     settleEarly();
@@ -208,7 +209,7 @@ export function createBrainLoop(options: BrainLoopOptions): BrainLoop {
       await acting;
     } else {
       decideMs = performance.now() - started;
-      await onAction(action);
+      await onAction(action, winner);
     }
     if (beside) await options.alongside!.onAction(beside.action);
 

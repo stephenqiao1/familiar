@@ -67,6 +67,13 @@ describe("parseCommand", () => {
     expect(() => parseCommand(["skill", "idle", "--interrupt-after", "soon"])).toThrow(/Invalid --interrupt-after/);
   });
 
+  it("reads a list of plans for the echo planner, each needing a goal", () => {
+    const step = { text: "walk", skill: "go_to", doneWhen: "within 3 of chest" };
+    expect(parseCommand(["--plan", JSON.stringify([{ goal: "A", steps: [step] }, { goal: "B" }])])).toMatchObject({ brain: { plan: [{ goal: "A", steps: [step] }, { goal: "B", steps: [] }] } });
+    expect(() => parseCommand(["--plan", '[{"goal":"A"},{}]'])).toThrow(/needs a "goal"/);
+    expect(() => parseCommand(["--plan", "[]"])).toThrow(/the list is empty/);
+  });
+
   it("reads --primitives and a fixed --plan for the echo planner", () => {
     expect(parseCommand(["--same-time"])).toMatchObject({ brain: { sameTime: true } });
     expect(parseCommand(["--manual"])).toMatchObject({ brain: { manual: true } });

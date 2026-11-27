@@ -14,6 +14,7 @@
   "dependencies": {
     "@familiar/contracts": "workspace:*",
     "@familiar/memory": "workspace:*",
+    "@familiar/neocortex": "workspace:*",
     "@familiar/neuromodulators": "workspace:*",
     "@familiar/region-brainstem": "workspace:*",
     "@familiar/region-amygdala": "workspace:*",

@@ -95,7 +95,7 @@ describe("memory store", () => {
 
   it("loads learned skills from a JSON file; a missing file means none", async () => {
     const file = join(dir, "learned-skills.json");
-    expect(await loadLearnedSkills(file, ["turn", "step"], ["go_to"])).toEqual({ skills: [], problems: [] });
+    expect(await loadLearnedSkills(file, ["turn", "step"], ["go_to"])).toEqual({ skills: [], retired: [], problems: [] });
     await writeFile(file, JSON.stringify([{ name: "peek", description: "Turn and step.", steps: [{ primitive: "turn", target: "dir:left" }, { primitive: "step" }] }, { name: "go_to", steps: [{ primitive: "turn" }] }]));
     const { skills, problems } = await loadLearnedSkills(file, ["turn", "step"], ["go_to"]);
     expect(skills).toEqual([{ name: "peek", description: "Turn and step.", steps: [{ primitive: "turn", target: "dir:left" }, { primitive: "step" }] }]);

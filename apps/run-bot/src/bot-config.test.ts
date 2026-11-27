@@ -1,5 +1,6 @@
 import { DEFAULT_AMYGDALA } from "@familiar/region-amygdala";
 import { DEFAULT_CEREBELLUM } from "@familiar/region-cerebellum";
+import { DEFAULT_CORTEX } from "@familiar/neocortex";
 import { DEFAULT_SELECTION } from "@familiar/basal-ganglia";
 import { DEFAULT_THALAMUS } from "@familiar/region-thalamus";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -12,7 +13,7 @@ import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS } from "@familia
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, thalamus: DEFAULT_THALAMUS, selection: DEFAULT_SELECTION, memory: DEFAULT_MEMORY, amygdala: DEFAULT_AMYGDALA, cerebellum: DEFAULT_CEREBELLUM };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, thalamus: DEFAULT_THALAMUS, selection: DEFAULT_SELECTION, memory: DEFAULT_MEMORY, amygdala: DEFAULT_AMYGDALA, cerebellum: DEFAULT_CEREBELLUM, cortex: DEFAULT_CORTEX };
 
 let dir: string;
 let file: string;
@@ -41,6 +42,12 @@ describe("loadBotConfig", () => {
     expect((await loadBotConfig("Calm", file)).patience).toEqual({ ...DEFAULT_PATIENCE, resting: 0.8, brake: 0 });
     await writeFile(file, JSON.stringify({ Calm: { patience: { resting: 2 } } }));
     await expect(loadBotConfig("Calm", file)).rejects.toThrow(/bot "Calm": patience.resting/);
+  });
+
+  it("reads the cortex block: a strength left out keeps its default, and a bad one stops the bot", async () => {
+    await writeFile(file, JSON.stringify({ Plain: { cortex: { motor: 0, goalGate: 0.5 } }, Odd: { cortex: { conditions: 2 } } }));
+    expect((await loadBotConfig("Plain", file)).cortex).toEqual({ ...DEFAULT_CORTEX, motor: 0, goalGate: 0.5 });
+    await expect(loadBotConfig("Odd", file)).rejects.toThrow('bot "Odd": cortex.conditions must be a number from 0 to 1, got 2');
   });
 
   it("reads the cerebellum block: a strength left out keeps its default, and a bad one stops the bot", async () => {

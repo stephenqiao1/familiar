@@ -18,7 +18,7 @@ const BAD_SURPRISE = 0.2;
  */
 export function createPlayerStriatum<Ctx>(parts: { habits: Habits; selection: SelectionSettings; skills: readonly Skill<Ctx>[]; log?: (line: string) => void; /** How far a movement that went wrong counts as notable (the cerebellum's `mismatch` strength). Default: 0. */ mismatch?: number }): Striatum {
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
-  const risky = new Set(parts.skills.filter((s) => s.risky).map((s) => s.name));
+  const risky = { has: (name: string) => parts.skills.find((s) => s.name === name)?.risky === true };
   // Whether the bot's predictions hold, read the way focus reads it (the focus level itself is also up in an unfamiliar place, which is no reason to drop a habit).
   const failing = surprised();
   return createStriatum({

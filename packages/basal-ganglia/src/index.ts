@@ -1,6 +1,7 @@
 export { createBasalGanglia, ONE_CONTEST, type BasalGangliaOptions, type Choice } from "./basal-ganglia.js";
 export { channelsOf, contests, decidedAcross, share, type Body, type Channel, type Contests, type Dropped, type PartsOf } from "./channels.js";
 export { acted, contest, decidedBy, enter, mostUrgent, settle, without, type Contest, type Entered, type Removed, type Settled } from "./choose.js";
+export { createGoalChannel, PROTECTED_MOST_MS, type GoalChannelOptions } from "./goal-channel.js";
 export { createHabits, HABIT, parseHabits, type Habit, type HabitEntries, type Habits } from "./habits.js";
 export { score, type Effect, type Scored } from "./score.js";
 export { DEFAULT_SELECTION, NO_SELECTION, selectionProblem, type SelectionSettings } from "./settings.js";
@@ -14,6 +15,7 @@ export { givenUp } from "./terms/given-up.js";
 export { holdForWant } from "./terms/hold-for-want.js";
 export { learnedValue, VALUE_WEIGHT } from "./terms/learned-value.js";
 export { restraint } from "./terms/restraint.js";
+export { restYields, type RestYieldsOptions } from "./terms/rest-yields.js";
 export { standingChoice } from "./terms/standing-choice.js";
 export { stay } from "./terms/stay.js";
 export { switching } from "./terms/switching.js";

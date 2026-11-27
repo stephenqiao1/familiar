@@ -17,13 +17,16 @@ const rcon = (command: string) => {
 };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Whether a logged goal holds a reflex back (a hold-back is logged as a name in old logs, as `{ name, strength }` since the motor area). */
+const holdsBack = (goal: { holdBack?: (string | { name: string })[] } | null | undefined, name: string) => (goal?.holdBack ?? []).some((h) => (typeof h === "string" ? h : h.name) === name);
+
 interface Tick {
   tick: number;
   timestamp: number;
   regions: { region: string; proposals: unknown[]; trace?: Record<string, unknown>; error?: string }[];
   winner: { region: string; reason: string; urgency: number; action: { skill?: string; target?: string } } | null;
   action: { skill?: string };
-  goal: { text: string; setBy: string; ifThen?: { when: string; skill: string }[]; holdBack?: string[] } | null;
+  goal: { text: string; setBy: string; ifThen?: { when: string; skill: string }[]; holdBack?: (string | { name: string })[] } | null;
   signals: Record<string, { value: number }>;
   state: {
     data: {
@@ -462,8 +465,8 @@ const scenes: Scene[] = [
       const died = run.ticks.some((t) => selfOf(t).deaths > 0);
       const logged = /DIED WITH DEFENCE OVERRULED/.test(run.output);
       return [
-        ["the goal holds back flee", run.ticks.some((t) => t.goal?.holdBack?.includes("flee"))],
-        ["the goal survives the fright", kept || run.ticks.at(-1)?.goal?.holdBack?.includes("flee") === true, "a fright no longer clears a goal"],
+        ["the goal holds back flee", run.ticks.some((t) => holdsBack(t.goal, "flee"))],
+        ["the goal survives the fright", kept || holdsBack(run.ticks.at(-1)?.goal, "flee"), "a fright no longer clears a goal"],
         ["the flee reflex fired, held back", softFlee.length > 0 && softFlee.every((f) => f.gain <= 0.46), softFlee.length ? `${softFlee.length} firings, gain ${Math.min(...softFlee.map((f) => f.gain)).toFixed(2)} to ${Math.max(...softFlee.map((f) => f.gain)).toFixed(2)}, urgency up to ${Math.max(...softFlee.map((f) => f.urgency)).toFixed(2)}` : "never fired"],
         ["it stood its ground: no flee before last_stand", early.length === 0, `${early.length} early flees`],
         ["last_stand fired at low health, at urgency 1", lastStand.length > 0 && lastStand.every((f) => f.urgency === 1 && selfOf(f.t).health <= 6), `${lastStand.length} firings`],

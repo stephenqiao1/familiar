@@ -14,7 +14,9 @@
     {
       "path": "../../packages/arbiter"
     },
-    { "path": "../../packages/basal-ganglia" },
+    {
+      "path": "../../packages/basal-ganglia"
+    },
     {
       "path": "../../packages/contracts"
     },
@@ -62,6 +64,15 @@
     },
     {
       "path": "../../packages/region-thalamus"
+    },
+    {
+      "path": "../../packages/neocortex"
+    },
+    {
+      "path": "../../packages/region-motor"
+    },
+    {
+      "path": "../../packages/region-sensory"
     }
   ]
 }

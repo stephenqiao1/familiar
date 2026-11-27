@@ -40,6 +40,9 @@
     },
     {
       "path": "../region-thalamus"
+    },
+    {
+      "path": "../neocortex"
     }
   ]
 }

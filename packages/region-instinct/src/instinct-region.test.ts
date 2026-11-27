@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { Answer, DecisionEngine, Question } from "@familiar/contracts";
+import type { Answer, DecisionEngine, Feedback, Goal, Question } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { EchoEngine } from "@familiar/engine-echo";
-import { actionProposal, createInstinctRegion } from "./instinct-region.js";
+import { areaRegions } from "@familiar/neocortex";
+import { actionProposal, createInstinctArea, createInstinctRegion } from "./instinct-region.js";
 
 const signal = new AbortController().signal;
 const questions: Question[] = [
@@ -71,5 +72,42 @@ describe("actionProposal", () => {
 
   it("proposes nothing without a next_action answer", () => {
     expect(actionProposal([target])).toEqual([]);
+  });
+});
+
+describe("createInstinctArea", () => {
+  const answers: Answer[] = [
+    { kind: "choice", id: "next_action", choice: "mine", probabilities: { mine: 0.7, idle: 0.3 }, confidence: 0.9 },
+    { kind: "noul", id: "in_danger", value: 0.7 },
+    { kind: "score", id: "spot", score: 2.5, confidence: 1 },
+  ];
+  const engine: DecisionEngine = { name: "fixed", decide: async () => answers };
+
+  it("gives the same proposals, signals and trace as the region, paused or not", async () => {
+    for (const paused of [false, true]) {
+      const options = { engine, questions: () => questions, paused: () => paused, timeoutMs: 900 };
+      const [old, now] = [createWorkspace(), createWorkspace()];
+      const region = createInstinctRegion(options);
+      const [area] = areaRegions(createInstinctArea(options), ["instinct", "prefrontal"]);
+      expect(area).toMatchObject({ name: region.name, layer: region.layer, everyMs: region.everyMs, timeoutMs: 900 });
+      const before = await region.run(old.viewFor("instinct"), signal);
+      const after = await area!.run(now.viewFor("instinct"), signal);
+      expect(after.proposals).toEqual(before.proposals);
+      const { ports, engineMs: _a, ...trace } = after.trace as Record<string, unknown>;
+      const { engineMs: _b, ...traceBefore } = before.trace as Record<string, unknown>;
+      expect(trace).toEqual(traceBefore);
+      expect(ports).toMatchObject({ input: "instinct", feedback: null, up: null, ask: [], action: before.proposals.map((p) => p.action) });
+      const values = (store: typeof old) => Object.fromEntries(Object.entries(store.signals()).map(([name, s]) => [name, s.value]));
+      expect(values(now)).toEqual(values(old));
+    }
+  });
+
+  it("is handed what the area above says, and the questions are shaped by it", async () => {
+    const store = createWorkspace();
+    store.viewFor("prefrontal").setCortex("prefrontal", { feedback: { goal: { text: "find iron" } as Goal } });
+    const told: (Feedback | null | undefined)[] = [];
+    const [area] = areaRegions(createInstinctArea({ engine, questions: (_ws, feedback) => (told.push(feedback), questions) }), ["instinct", "prefrontal"]);
+    await area!.run(store.viewFor("instinct"), signal);
+    expect(told).toEqual([{ goal: { text: "find iron" } }]);
   });
 });

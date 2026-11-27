@@ -7,7 +7,9 @@
     {
       "path": "packages/arbiter"
     },
-    { "path": "packages/basal-ganglia" },
+    {
+      "path": "packages/basal-ganglia"
+    },
     {
       "path": "packages/core"
     },
@@ -33,6 +35,9 @@
       "path": "packages/region-cerebellum"
     },
     {
+      "path": "packages/neocortex"
+    },
+    {
       "path": "packages/region-instinct"
     },
     {
@@ -55,6 +60,12 @@
     },
     {
       "path": "packages/region-thalamus"
+    },
+    {
+      "path": "packages/region-motor"
+    },
+    {
+      "path": "packages/region-sensory"
     }
   ]
 }

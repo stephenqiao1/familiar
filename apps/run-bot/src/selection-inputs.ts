@@ -1,3 +1,4 @@
+import type { CortexSettings } from "@familiar/neocortex";
 import type { Choice, SelectionSettings } from "@familiar/basal-ganglia";
 import type { Candidate, Skill, State, Workspace } from "@familiar/contracts";
 import { needsNow, situationOf, thingsInView } from "@familiar/minecraft";
@@ -36,6 +37,8 @@ export interface SelectionParts<Ctx> {
   selection?: SelectionSettings;
   /** Without channels: a look may run alongside a skill that leaves the head free. Default: false. */
   sameTime?: boolean;
+  /** The cortex's settings: how far a decider's rest yields to a step the motor area is carrying out. Default: all on. */
+  cortex?: CortexSettings;
   /** Told what each choice came to (the striatum). Default: nobody. */
   onChoice?(choice: Choice, ws: Workspace): void;
   /** The time, for what goes by the clock (the stay bonus, the wait after giving up). Default: the wall clock. A replay passes the recorded time. */
@@ -49,7 +52,8 @@ export function patienceOf(ws: Pick<Workspace, "signals">, patience: PatienceSet
 
 export function selectionInputs<Ctx>(parts: SelectionParts<Ctx>) {
   const { scorebook, personality, patience, persistence, now = () => Date.now() } = parts;
-  const risky = new Set(parts.skills.filter((s) => s.risky).map((s) => s.name));
+  // Looked up each time: the list of skills grows when the bot saves one for itself.
+  const risky = { has: (name: string) => parts.skills.find((s) => s.name === name)?.risky === true };
   // Both are asked for every candidate by several terms, and each is worked out from the whole state: once per state is enough.
   const once = <T>(read: (state: State) => T) => {
     let last: { state: State; value: T } | null = null;

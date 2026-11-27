@@ -10,6 +10,8 @@ export interface SkillEvent {
   changes?: Changes;
   /** On the event that ends a run: the thing it was aimed at, if the skill chose it itself. */
   aimedAt?: string;
+  /** The region whose proposal started the run (left out when nothing says: a typed command). */
+  by?: string;
   /** True for a movement that ran alongside the main skill, using other body parts. */
   alongside?: true;
   timestamp: number;

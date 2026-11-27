@@ -1,11 +1,13 @@
 import { createInterface } from "node:readline";
-import type { Action, Candidate, NeedReading, SkillEvent, State, TickLog } from "@familiar/contracts";
+import type { Action, Candidate, NeedReading, SkillEvent, State, TickLog, Skill, Workspace } from "@familiar/contracts";
 import { createBrainLoop, createChainSkill, createLogger, createSkillExecutor, createWorkspace, defaultLogPath } from "@familiar/core";
 import { createPlaceKeeper, createTrail, distance, feelingNear, type Place } from "@familiar/memory";
 import {
   associationsFrom,
   keepMovements,
   playerCerebellum,
+  playerConditions,
+  targetAsKind,
   setLearnedExpectations,
   MEASURE_BOUNDS,
   moveOver,
@@ -39,6 +41,7 @@ import {
   sleepProblem,
   trackGut,
   trackSenses,
+  CHAIN_RUN,
   tidyBody,
   posId,
   situationOf,
@@ -70,7 +73,8 @@ import { loadBotConfig } from "./bot-config.js";
 import { playerAmygdala } from "./amygdala.js";
 import { NO_READERS } from "@familiar/region-amygdala";
 import { NO_READERS as NO_MODEL_READERS, READERS } from "@familiar/region-cerebellum";
-import { createArbiter, createBrain, patienceOf } from "./brain.js";
+import { createArbiter, createBrain, createGoalGate, patienceOf } from "./brain.js";
+import { createLearnedStore } from "./learned-skills.js";
 import { createPlayerStriatum } from "./habits.js";
 import { createHabits } from "@familiar/basal-ganglia";
 import { cutShortReason } from "./cut-short.js";
@@ -101,6 +105,13 @@ import {
   surfacesFile,
   loadThreats,
   loadHabits,
+  loadChains,
+  saveChains,
+  chainsFile,
+  saveLearnedSkills,
+  loadNotes,
+  saveNotes,
+  notesFile,
   saveHabits,
   habitsFile,
   saveThreats,
@@ -140,10 +151,13 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, selection, memory: memorySettings, amygdala: amygdalaSettings, cerebellum: cerebellumConfig } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, selection, memory: memorySettings, amygdala: amygdalaSettings, cerebellum: cerebellumConfig, cortex } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
-  const engine = createEngine(brainArgs.engine);
-  const planner = createPlanner(brainArgs.planner, brainArgs.plan);
+  // The echo engine may be given fixed rules of choice (conditions, read once the vocabulary exists further down).
+  let chooser: ((state: State) => string[]) | undefined;
+  const engine = createEngine(brainArgs.engine, brainArgs.choices ? (state) => chooser?.(state) ?? [] : undefined);
+  // What more a plan may say goes by what the cortex can use: steps in full for the motor area, graded hold-backs, a priority.
+  const planner = createPlanner(brainArgs.planner, brainArgs.plan, { steps: cortex.motor > 0 && cortex.conditions > 0, holdBack: cortex.holdBack > 0, priority: cortex.motor > 0 || cortex.goalGate > 0, expect: cortex.sensory > 0 && cortex.conditions > 0, notes: cortex.notes > 0 });
   const scorebook = await loadScorebook(scorebookFile(server.name));
   const novelty = await loadNovelty(noveltyFile(server.name));
   const targets = await loadTargets(targetsFile(server.name));
@@ -174,11 +188,43 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     }
   };
   namePlaces();
-  // Learned skills are chains of primitives kept as data; none ship with the bot.
-  const learned = await loadLearnedSkills(learnedSkillsFile(server.name), primitives.map((s) => s.name), minecraftSkills.map((s) => s.name));
+  // Learned skills are chains of abilities the bot already has, kept as data; none ship with the bot. A chain may
+  // use anything but what only reflexes may use. The bot saves new ones for itself (chunks), and retires those that fail.
+  const chainable = minecraftSkills.filter((s) => !s.reflexOnly);
+  const learned = await loadLearnedSkills(learnedSkillsFile(server.name), chainable.map((s) => s.name), minecraftSkills.filter((s) => s.reflexOnly).map((s) => s.name));
   for (const problem of learned.problems) console.error(`Learned skill left out: ${problem}`);
-  const skills = [...minecraftSkills, ...learned.skills.map((s) => createChainSkill(s, primitives, tidyBody))];
-  const workspace = createWorkspace();
+  // This list grows and shrinks as skills are learned and retired: everything that reads it reads it afresh.
+  const skills = [...minecraftSkills, ...learned.skills.map((s) => createChainSkill(s, chainable, tidyBody, CHAIN_RUN))];
+  const chains = await loadChains(chainsFile(server.name));
+  /** Set once the executor exists: adds a learned skill to it, or takes one away. */
+  let teach: { learn(skill: Skill<MinecraftCtx>): void; forget(name: string): void } | null = null;
+  const learnedStore = createLearnedStore({
+    saved: learned,
+    builtIn: minecraftSkills.map((s) => s.name),
+    onLearn(skill) {
+      const made = createChainSkill(skill, chainable, tidyBody, CHAIN_RUN);
+      skills.push(made);
+      teach?.learn(made);
+      console.log(`    learned a skill: ${skill.name} (${skill.steps.map((s) => s.primitive).join(", then ")}): ${skill.description}`);
+      void saveLearnedSkills(learnedStore.entries(), learnedSkillsFile(server.name));
+    },
+    onRetire(skill) {
+      const at = skills.findIndex((s) => s.name === skill.name);
+      if (at >= 0) skills.splice(at, 1);
+      teach?.forget(skill.name);
+      console.log(`    retired a learned skill: ${skill.name} (it failed ${skill.fails} times running)`);
+      void saveLearnedSkills(learnedStore.entries(), learnedSkillsFile(server.name));
+    },
+  });
+  // What a step's "done when" can say, and the goal channel every offered goal goes through.
+  const conditions = playerConditions(() => memory.knownPlaces(Date.now()));
+  const workspace = createWorkspace({ goalGate: createGoalGate(cortex, conditions) });
+  if (brainArgs.choices) {
+    const rules = brainArgs.choices.map((rule) => ({ when: conditions.parse(rule.when), choose: rule.choose, text: rule.when }));
+    for (const rule of rules) if (!rule.when) throw new Error(`--choices: "${rule.text}" is not a condition`);
+    // Every rule whose condition holds, in order: the engine takes the first that is on its menu.
+    chooser = (state) => rules.filter((rule) => rule.when!.holds({ state, needs: null } as unknown as Workspace)).map((rule) => rule.choose);
+  }
   const view = workspace.viewFor("run-bot");
   const focus = () => view.signals[FOCUS_SIGNAL]?.value ?? focusSettings.resting;
 
@@ -292,6 +338,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   });
   // The striatum: the bot's habits, learned from who wins and how it ends.
   const habits = createHabits(await loadHabits(habitsFile(server.name)));
+  // The planner's notes: its working memory between plans.
+  const notes = await loadNotes(notesFile(server.name));
   const striatum = createPlayerStriatum({ habits, selection, skills, mismatch: cerebellumSettings.mismatch, log: (msg) => console.log(`    ${msg}`) });
   const regions = createBrain(
     {
@@ -332,6 +380,12 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       attentionBudget: () => budgetNow,
       thalamus,
       selection,
+      cortex,
+      conditions,
+      usualMs: cerebellum.usualMs,
+      ...(map ? { usual: map } : {}),
+      notes,
+      chunks: { chains, targetAsKind, learned: learnedStore },
       striatum,
       ...(map ? { place: createPlaceKeeper({ map, trail: createTrail(), cellOf: cellReader.cellOf, barrier: cellReader.barrier, replay: memorySettings.replay, used: () => mapRoutes!.counts() }) } : {}),
       order: memorySettings.order,
@@ -362,12 +416,19 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   console.log(`Cerebellum: ${models.ids().length} models held; ${reading.length ? `read for ${reading.join(", ")}` : "in shadow (every reader on its fixed rule)"}.`);
   console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}.`);
   console.log(`Selection: body first ${selection.bodyFirst}, wait ${selection.wait}, channels ${selection.channels > 0 ? "on" : "off"}, habits ${selection.habits} (${Object.values(habits.entries()).reduce((n, skills) => n + Object.keys(skills).length, 0)} known, blind ${selection.habit.blind}).`);
+  console.log(`Cortex: motor ${cortex.motor}, conditions ${cortex.conditions}, graded hold-backs ${cortex.holdBack}, goal channel ${cortex.goalGate}, sensory ${cortex.sensory}, notes ${cortex.notes > 0 ? `on (${notes.list().length} held)` : "off"}, chunks ${cortex.chunks > 0 ? `on (${chains.entries().length} chains noted)` : "off"}.`);
   console.log(`Arousal: resting ${arousal.resting}, bedtime ${arousal.bedtime}, wake threshold ${arousal.wakeThreshold}, gate ${arousal.gate}.`);
-  if (learned.skills.length) console.log(`Learned skills: ${learned.skills.map((s) => s.name).join(", ")}.`);
+  if (learned.skills.length || learned.retired.length) console.log(`Learned skills: ${learned.skills.map((s) => s.name).join(", ") || "none in use"}${learned.retired.length ? `; retired: ${learned.retired.map((s) => s.name).join(", ")}` : ""}.`);
   console.log(`Logging to ${logPath}`);
 
   const pendingEvents: SkillEvent[] = [];
+  /** The region whose proposal is starting a skill right now, and the one that started the skill now running. */
+  let startingBy: string | undefined;
+  let runningBy: string | undefined;
   const onEvent = (event: SkillEvent) => {
+    // Every event of a run says who started it (the chunks leave out what a reflex did).
+    if (event.type === "started") runningBy = startingBy;
+    if (runningBy !== undefined) event.by = runningBy;
     pendingEvents.push(event);
     workspace.addEvent(event);
     persistence.observe(event);
@@ -384,6 +445,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     logEvent(event);
   };
   const executor = createSkillExecutor({ skills, ctx, onEvent, onSideEvent, defaultTimeoutMs: persistence.backstopMs() });
+  teach = { learn: (skill) => executor.learn(skill as Skill<unknown>), forget: (name) => executor.forget(name) };
   const alarm = () => view.signals[ALARM_SIGNAL]?.value ?? 0;
   let lastReward = 0;
   let lastState: State | null = null;
@@ -396,8 +458,9 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
    * otherwise starts the chosen skill unless it is the one already running. An alarm interrupt
    * stops the running skill when nothing new takes its place.
    */
-  async function act(action: Action): Promise<void> {
+  async function act(action: Action, by: Candidate | null = null): Promise<void> {
     const now = Date.now();
+    startingBy = by?.region;
     // The command from above, once per tick: how fast and how carefully to travel.
     locomotion.setDrive(driveFrom(view.signals, locomotionSettings, { dopamine: personality.restingDA, focus: focusSettings.resting }));
     const reward = view.signals[REWARD_SIGNAL];
@@ -462,7 +525,7 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     regions,
     workspace,
     // The basal ganglia decide what runs alongside too (a contest for each channel of the body).
-    arbiter: createArbiter({ scorebook, personality, patience, persistence, skills, selection, sameTime: brainArgs.sameTime ?? false, onChoice: striatum.observe }),
+    arbiter: createArbiter({ scorebook, personality, patience, persistence, skills, selection, cortex, sameTime: brainArgs.sameTime ?? false, onChoice: striatum.observe }),
     alongside: { onAction: (action: Action) => ("skill" in action ? executor.startAlongside(action.skill, action.target) : undefined) },
     getState: () => {
       const { x, y, z } = bot.entity.position.floored();
@@ -530,6 +593,9 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       saveSurfaces(posture.surfaces.entries(), surfacesFile(server.name)),
       saveThreats(threatRecord.entries(), threatsFile(server.name)),
       saveHabits(habits.entries(), habitsFile(server.name)),
+      saveNotes(notes, notesFile(server.name)),
+      saveChains(chains, chainsFile(server.name)),
+      saveLearnedSkills(learnedStore.entries(), learnedSkillsFile(server.name)),
       saveBody({ sleptAtAge: sleepClock.sleptAtAge() }, bodyFile(server.name)),
       saveMemories(memory, memoriesFile(server.name)),
       saveAssociations(associations, associationsFile(server.name)),

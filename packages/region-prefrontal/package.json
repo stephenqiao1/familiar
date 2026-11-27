@@ -12,7 +12,8 @@
     }
   },
   "dependencies": {
-    "@familiar/contracts": "workspace:*"
+    "@familiar/contracts": "workspace:*",
+    "@familiar/neocortex": "workspace:*"
   },
   "devDependencies": {
     "@familiar/core": "workspace:*"

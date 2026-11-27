@@ -82,8 +82,8 @@ describe("learned skills", () => {
   });
 
   it("a missing or empty file means no learned skills", () => {
-    expect(parseLearnedSkills(null, ["turn"])).toEqual({ skills: [], problems: [] });
-    expect(parseLearnedSkills([], ["turn"])).toEqual({ skills: [], problems: [] });
+    expect(parseLearnedSkills(null, ["turn"])).toEqual({ skills: [], retired: [], problems: [] });
+    expect(parseLearnedSkills([], ["turn"])).toEqual({ skills: [], retired: [], problems: [] });
   });
 
   it("leaves out anything malformed and says why: learned skills are data, never code", () => {
@@ -103,6 +103,44 @@ describe("learned skills", () => {
     );
     expect(skills).toEqual([{ name: "ok", description: "ok", steps: [{ primitive: "turn" }] }]);
     expect(problems).toHaveLength(7);
-    expect(parseLearnedSkills({ not: "a list" }, [])).toEqual({ skills: [], problems: ["learned skills must be a list"] });
+    expect(parseLearnedSkills({ not: "a list" }, [])).toEqual({ skills: [], retired: [], problems: ["learned skills must be a list"] });
+  });
+
+  it("reads a learned skill's test of success and its failures, and keeps a retired one apart", () => {
+    const raw = [
+      { name: "fetch", description: "d", steps: [{ primitive: "turn" }], doneWhen: "carrying 1 bread", fails: 2 },
+      { name: "old", description: "d", steps: [{ primitive: "turn" }], retired: true, fails: 3 },
+      { name: "old", description: "again", steps: [{ primitive: "turn" }] },
+    ];
+    const { skills, retired, problems } = parseLearnedSkills(raw, ["turn"]);
+    expect(skills).toEqual([{ name: "fetch", description: "d", steps: [{ primitive: "turn" }], doneWhen: "carrying 1 bread", fails: 2 }]);
+    expect(retired).toEqual([{ name: "old", description: "d", steps: [{ primitive: "turn" }], fails: 3, retired: true }]);
+    expect(problems).toEqual(['"old": the name is already taken']);
+  });
+
+  it("a chain skill aims each step as it comes up: a target written as a kind is turned into what it means now", async () => {
+    const ran: string[] = [];
+    const ability = (name: string): Skill<null> => ({ name, description: name, canRun: (_ctx, target) => target !== "nearest:nothing", run: async (_ctx, target) => (ran.push(`${name} ${target ?? ""}`.trim()), { status: "done" }) });
+    const aim = (_ctx: null, target: string | undefined) => (target === "nearest:chest" ? "pos:1,2,3" : target);
+    const fetch = createChainSkill({ name: "fetch", description: "", steps: [{ primitive: "go", target: "nearest:chest" }, { primitive: "take", target: "nearest:chest" }, { primitive: "eat" }] }, [ability("go"), ability("take"), ability("eat")], undefined, { aim });
+    expect(fetch.canRun(null)).toBe(true);
+    expect(await fetch.run(null, undefined, new AbortController().signal)).toMatchObject({ status: "done" });
+    expect(ran).toEqual(["go pos:1,2,3", "take pos:1,2,3", "eat"]);
+    const lost = createChainSkill({ name: "lost", description: "", steps: [{ primitive: "go", target: "nearest:nothing" }] }, [ability("go")], undefined, { aim });
+    expect(lost.canRun(null)).toBe(false);
+  });
+
+  it("a later step that cannot run yet is waited for a little while, and fails only if it still cannot", async () => {
+    let ready = false;
+    const first: Skill<null> = { name: "take", description: "", canRun: () => true, run: async () => (setTimeout(() => (ready = true), 200), { status: "done" }) };
+    const second: Skill<null> = { name: "eat", description: "", canRun: () => ready, run: async () => ({ status: "done" }) };
+    const signal = new AbortController().signal;
+    const steps = [{ primitive: "take" }, { primitive: "eat" }];
+    expect(await runChain(steps, [first, second], null, signal)).toMatchObject({ status: "failed", stoppedAt: 1, reason: "step 2 (eat) failed: cannot run" });
+    ready = false;
+    expect(await runChain(steps, [first, second], null, signal, { settleMs: 1000 })).toMatchObject({ status: "done" });
+    // The first step is never waited for: a chain that cannot begin fails at once.
+    ready = false;
+    expect(await runChain([{ primitive: "eat" }], [second], null, signal, { settleMs: 1000 })).toMatchObject({ status: "failed", stoppedAt: 0 });
   });
 });

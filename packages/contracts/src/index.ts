@@ -1,9 +1,9 @@
 export type { Action } from "./action.js";
 export type { Answer, ChoiceAnswer, NoulAnswer, ScoreAnswer } from "./answer.js";
-export type { Arbiter, Attended, Candidate, Goal, IfThen, ItemWant, NeedReading, Needs, PlaceNow, TopDrive, BodyClock, Proposal, Region, RegionOutput, Signal, Workspace } from "./brain.js";
+export type { Arbiter, AreaPorts, Attended, Feedback, Candidate, Expectation, Goal, GoalOffer, HoldBack, IfThen, ItemWant, NeedReading, Needs, PlaceNow, TopDrive, BodyClock, Proposal, Region, RegionOutput, Signal, Step, Workspace } from "./brain.js";
 export type { DecisionEngine } from "./engine.js";
 export type { FirstSeen } from "./first-seen.js";
-export type { Plan, Planner, PlanRequest } from "./planner.js";
+export type { NameRequest, Plan, Planner, PlanRequest } from "./planner.js";
 export type { Choice, Noul, Question, Score } from "./question.js";
 export type { BodyPart, Changes, RunningSkill, Skill, SkillResult } from "./skill.js";
 export type { SkillEvent } from "./skill-event.js";

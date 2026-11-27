@@ -33,6 +33,7 @@ import {
 import { DEFAULT_SELECTION, selectionProblem, type SelectionSettings } from "@familiar/basal-ganglia";
 import { DEFAULT_DRIVES, drivesProblem, type DriveSettings } from "@familiar/region-hypothalamus";
 import { DEFAULT_THALAMUS, thalamusProblem, type ThalamusSettings } from "@familiar/region-thalamus";
+import { cortexProblem, DEFAULT_CORTEX, type CortexSettings } from "@familiar/neocortex";
 import { cerebellumProblem, DEFAULT_CEREBELLUM, type CerebellumSettings } from "@familiar/region-cerebellum";
 import { amygdalaProblem, DEFAULT_AMYGDALA, type AmygdalaReaders, type AmygdalaSettings } from "@familiar/region-amygdala";
 import { arousalProblem, brainstemProblem, colliculusProblem, DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type ArousalSettings, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
@@ -79,6 +80,8 @@ export interface BotConfig {
   amygdala: AmygdalaSettings;
   /** The cerebellum: how it learns what each movement comes to, and how far each reader goes by it (0 = the fixed rule). */
   cerebellum: CerebellumSettings;
+  /** The cortex: the motor area, conditions, graded hold-backs and the goal channel (0 = two areas that only pass the goal down). */
+  cortex: CortexSettings;
 }
 
 export interface MemorySettings {
@@ -110,7 +113,7 @@ function memoryProblem(memory: MemorySettings): string | null {
 export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Promise<BotConfig> {
   const bots = await readBots(file);
   const entry = bots[name] as
-    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings> & { arousalGate?: number }; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings> & { fieldOfView?: number }; thalamus?: Partial<ThalamusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: Partial<DriveSettings>; selection?: Partial<SelectionSettings>; memory?: Partial<MemorySettings>; amygdala?: Partial<Omit<AmygdalaSettings, "readers">> & { readers?: Partial<AmygdalaReaders> }; cerebellum?: Partial<Omit<CerebellumSettings, "bounds">> }
+    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings> & { arousalGate?: number }; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings> & { fieldOfView?: number }; thalamus?: Partial<ThalamusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: Partial<DriveSettings>; selection?: Partial<SelectionSettings>; memory?: Partial<MemorySettings>; amygdala?: Partial<Omit<AmygdalaSettings, "readers">> & { readers?: Partial<AmygdalaReaders> }; cerebellum?: Partial<Omit<CerebellumSettings, "bounds">>; cortex?: Partial<CortexSettings> }
     | undefined;
   const personality = { ...DEFAULT_PERSONALITY, ...entry?.personality };
   const patience = { ...DEFAULT_PATIENCE, ...entry?.patience };
@@ -140,9 +143,10 @@ export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Pro
   // A bot may give only some of the readers; the rest keep their defaults.
   const amygdala = { ...DEFAULT_AMYGDALA, ...entry?.amygdala, readers: { ...DEFAULT_AMYGDALA.readers, ...entry?.amygdala?.readers } };
   const cerebellum = { ...DEFAULT_CEREBELLUM, ...entry?.cerebellum, bounds: DEFAULT_CEREBELLUM.bounds };
-  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? arousalProblem(arousal) ?? drivesProblem(drives) ?? thalamusProblem(thalamus) ?? selectionProblem(selection) ?? memoryIssue ?? amygdalaProblem(amygdala) ?? cerebellumProblem(cerebellum);
+  const cortex = { ...DEFAULT_CORTEX, ...entry?.cortex };
+  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? arousalProblem(arousal) ?? drivesProblem(drives) ?? thalamusProblem(thalamus) ?? selectionProblem(selection) ?? memoryIssue ?? amygdalaProblem(amygdala) ?? cerebellumProblem(cerebellum) ?? cortexProblem(cortex);
   if (problem) throw new Error(`${file}: bot "${name}": ${problem}`);
-  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, arousal, drives, thalamus, selection, memory, amygdala, cerebellum };
+  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, arousal, drives, thalamus, selection, memory, amygdala, cerebellum, cortex };
 }
 
 /** The file's bots by name; none if the file is missing. Throws if it exists but is not valid. */

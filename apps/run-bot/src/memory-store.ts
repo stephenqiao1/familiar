@@ -1,3 +1,5 @@
+import { createChunks, type Chunks } from "@familiar/region-motor";
+import { createNotes, type Notes } from "@familiar/region-prefrontal";
 import { parseHabits, type HabitEntries } from "@familiar/basal-ganglia";
 import { access, copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -26,7 +28,10 @@ export const associationsFile = (bot: string) => `data/${bot}/associations.json`
 export const modelsFile = (bot: string) => `data/${bot}/models.json`;
 export const mapFile = (bot: string) => `data/${bot}/map.json`;
 export const habitsFile = (bot: string) => `data/${bot}/habits.json`;
+export const notesFile = (bot: string) => `data/${bot}/notes.json`;
 export const learnedSkillsFile = (bot: string) => `data/${bot}/learned-skills.json`;
+/** The chains that have finished steps, and how often each: what learned skills are made from. */
+export const chainsFile = (bot: string) => `data/${bot}/chains.json`;
 
 /** What the bot has learned about how much is enough: need → how many times the usual, and when. A missing file means nothing yet; a broken entry is left out. */
 export async function loadTargets(file: string): Promise<TargetMemory> {
@@ -96,8 +101,21 @@ export async function saveHurts(hurts: Record<string, number>, file: string): Pr
  * The bot's learned skills: chains of primitives kept as data. A missing or empty file means none.
  * `problems` lists entries that were left out and why.
  */
-export async function loadLearnedSkills(file: string, primitiveNames: string[], takenNames: string[]): Promise<{ skills: LearnedSkill[]; problems: string[] }> {
+export async function loadLearnedSkills(file: string, primitiveNames: string[], takenNames: string[]): Promise<{ skills: LearnedSkill[]; retired: LearnedSkill[]; problems: string[] }> {
   return parseLearnedSkills(await readJson(file), primitiveNames, takenNames);
+}
+
+/** Writes the learned skills back, retired ones too, in the format the loader reads. */
+export async function saveLearnedSkills(skills: LearnedSkill[], file: string): Promise<void> {
+  await writeJson(file, skills);
+}
+
+export async function loadChains(file: string): Promise<Chunks> {
+  return createChunks(await readJson(file));
+}
+
+export async function saveChains(chains: Chunks, file: string): Promise<void> {
+  await writeJson(file, chains.entries());
 }
 
 export async function loadScorebook(file: string): Promise<Scorebook> {
@@ -143,7 +161,7 @@ export async function loadMap(file: string, options: Omit<MapOptions, "saved"> =
   const cells = Array.isArray(raw?.cells) ? raw.cells.filter((c) => typeof c?.key === "string" && typeof c.area === "string" && Number.isFinite(c.spot?.x) && c.seen !== null && typeof c.seen === "object") : [];
   const keys = new Set(cells.map((c) => c.key));
   const links = Array.isArray(raw?.links) ? raw.links.filter((l) => keys.has(l?.a) && keys.has(l?.b) && Number.isFinite(l.ms)) : [];
-  return createMap({ ...options, saved: { cells, links, nextArea: Number.isInteger(raw?.nextArea) ? raw!.nextArea! : cells.length + 1 } });
+  return createMap({ ...options, saved: { cells, links, nextArea: Number.isInteger(raw?.nextArea) ? raw!.nextArea! : cells.length + 1, ...(raw?.changes && typeof raw.changes === "object" ? { changes: raw.changes } : {}) } });
 }
 
 export async function saveMap(map: MapStore, file: string): Promise<void> {
@@ -270,6 +288,15 @@ function isFact(f: unknown): boolean {
 }
 
 /** The bot's habits: situation → skill → how well-worn the choice is. A missing file means none yet; a broken entry is left out. */
+/** The planner's notes. A missing or unreadable file means none. */
+export async function loadNotes(file: string): Promise<Notes> {
+  return createNotes(await readJson(file));
+}
+
+export async function saveNotes(notes: Notes, file: string): Promise<void> {
+  await writeJson(file, notes.entries());
+}
+
 export async function loadHabits(file: string): Promise<HabitEntries> {
   return parseHabits(await readJson(file));
 }

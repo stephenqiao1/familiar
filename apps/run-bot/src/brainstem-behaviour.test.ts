@@ -3,10 +3,14 @@ import { DEFAULT_SELECTION, NO_SELECTION, type SelectionSettings } from "@famili
 // createBrain (every region, the player's reflexes and brainstem settings) and the arbiter.
 // Only the world, the engine and the planner are made up.
 
-import type { Answer, Candidate, DecisionEngine, Plan, Planner, Question, Skill, State } from "@familiar/contracts";
-import { createWorkspace } from "@familiar/core";
-import { createMemory } from "@familiar/memory";
-import { createChestMemory, DEFAULT_DEFENCE, SCHEMA_VERSION, type DefenceSettings, type MinecraftStateData } from "@familiar/minecraft";
+import type { Answer, Candidate, DecisionEngine, Plan, Planner, PlanRequest, Question, Skill, SkillEvent, State } from "@familiar/contracts";
+import { createChainSkill, createWorkspace } from "@familiar/core";
+import { createMap, createMemory, createPlaceKeeper, createTrail, type MapStore } from "@familiar/memory";
+import { createCellReader, createChestMemory, DEFAULT_DEFENCE, playerConditions, targetAsKind, RETREAT_GOAL, SCHEMA_VERSION, type DefenceSettings, type MinecraftStateData } from "@familiar/minecraft";
+import { DEFAULT_CORTEX, NO_CORTEX, type CortexSettings } from "@familiar/neocortex";
+import { createNotes, type Notes } from "@familiar/region-prefrontal";
+import { createChunks } from "@familiar/region-motor";
+import { createLearnedStore } from "./learned-skills.js";
 import {
   createNoveltyMemory,
   createPersistence,
@@ -19,11 +23,11 @@ import {
 import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS, type ArousalSettings, type BrainstemSettings, type ColliculusSettings } from "@familiar/region-brainstem";
 import { DEFAULT_DRIVES, DRIVES_OFF, type DriveSettings } from "@familiar/region-hypothalamus";
 import type { FiredReflex } from "@familiar/region-reflex";
-import { THALAMUS_OFF, type ThalamusSettings } from "@familiar/region-thalamus";
+import { DEFAULT_THALAMUS, THALAMUS_OFF, type ThalamusSettings } from "@familiar/region-thalamus";
 import { createAssociations, DEFAULT_AMYGDALA, NO_READERS, type AmygdalaOptions, type AmygdalaReaders } from "@familiar/region-amygdala";
 import { createModels, DEFAULT_CEREBELLUM, type CerebellumOptions } from "@familiar/region-cerebellum";
-import { describe, expect, it } from "vitest";
-import { createArbiter, createBrain } from "./brain.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createArbiter, createBrain, createGoalGate } from "./brain.js";
 
 const signal = new AbortController().signal;
 const ALL_OFF: BrainstemSettings = { bravery: 0.5, gains: 0, startle: 0, potentiation: 0, warning: 0, habituation: 0, selfCaused: 0, startReact: 0, loadedResponses: 0, holdBack: 0, arousalStartle: 0, bodySignals: 0 };
@@ -32,7 +36,7 @@ type Mob = MinecraftStateData["nearby"]["mobs"][number];
 const mob = (type: string, dist: number, id = 1): Mob => ({ id: `entity:${id}`, type, dist, hostile: true, reachable: true });
 
 type Near = MinecraftStateData["nearby"];
-type Patch = { self?: Partial<MinecraftStateData["self"]>; mobs?: Mob[]; night?: boolean; sudden?: Near["sudden"]; heard?: Near["heard"] };
+type Patch = { self?: Partial<MinecraftStateData["self"]>; mobs?: Mob[]; blocks?: Near["blocks"]; night?: boolean; sudden?: Near["sudden"]; heard?: Near["heard"] };
 const LEFT = { side: "left" as const, angle: 60 };
 /** A mob that has just come into view: on the list, and among the things that suddenly changed. */
 const appears = (m: Mob, what: Near["sudden"][number]["what"] = "appeared"): Patch => ({ mobs: [m], sudden: [{ id: m.id, what, bearing: LEFT, dist: m.dist }] });
@@ -82,7 +86,7 @@ function state(p: Patch, ms: number): State {
       locomotion: { moving: false, pattern: null, gait: "walk", stuck: false },
       ...p.self,
     },
-    nearby: { hazards: [], mobs: p.mobs ?? [], blocks: [], players: [], sudden: p.sudden ?? [], heard: p.heard ?? [] },
+    nearby: { hazards: [], mobs: p.mobs ?? [], blocks: p.blocks ?? [], players: [], sudden: p.sudden ?? [], heard: p.heard ?? [] },
     memory: null,
     current: null,
   };
@@ -103,10 +107,15 @@ const SKILLS = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[]; amygdala?: AmygdalaOptions; cerebellum?: CerebellumOptions } = {}) {
-  const skills = options.skills ?? SKILLS;
-  const store = createWorkspace();
-  const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[] };
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[]; amygdala?: AmygdalaOptions; cerebellum?: CerebellumOptions; cortex?: CortexSettings; plans?: (request: PlanRequest) => Plan; usualMs?: (skill: string) => number | null; map?: MapStore; notes?: Notes; chunks?: boolean; names?: { name: string; description: string } } = {}) {
+  // A list of its own: it grows when the bot saves a skill for itself.
+  const skills = [...(options.skills ?? SKILLS)];
+  const chains = createChunks();
+  const learned = createLearnedStore({ builtIn: skills.map((s) => s.name), onLearn: (made) => void skills.push(createChainSkill(made, skills.filter((s) => !s.reflexOnly))), onRetire: (gone) => void skills.splice(skills.findIndex((s) => s.name === gone.name), 1) });
+  // With `cortex` given, the brain has the player's conditions and the goal channel, as the bot does.
+  const conditions = playerConditions();
+  const store = createWorkspace(options.cortex ? { goalGate: createGoalGate(options.cortex, conditions) } : {});
+  const calls = { engine: 0, planner: 0, menus: [] as string[][], shown: [] as State[], prompts: [] as string[], requests: [] as PlanRequest[] };
   const engine: DecisionEngine = {
     name: "fake",
     async decide(_state, questions: Question[]): Promise<Answer[]> {
@@ -115,6 +124,7 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       const next = questions.find((q) => q.kind === "choice" && q.id === "next_action");
       if (next?.kind !== "choice") return [];
       calls.menus.push(next.options);
+      calls.prompts.push(next.prompt);
       calls.shown.push(_state);
       const choice = store.viewFor("x").current?.skill ?? "idle";
       // `spread`: an engine in two or three minds, to show how many options get proposed.
@@ -123,11 +133,14 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
   };
   const planner: Planner = {
     name: "fake",
-    async plan() {
+    async plan(request) {
       calls.planner++;
-      return options.plan ?? { goal: "Stay safe.", steps: [], reason: "" };
+      calls.requests.push(request);
+      return options.plans?.(request) ?? options.plan ?? { goal: "Stay safe.", steps: [], reason: "" };
     },
+    ...(options.names ? { nameRoutine: async () => options.names! } : {}),
   };
+  const cells = createCellReader();
   const scorebook = createScorebook();
   const persistence = createPersistence({ patience: () => 0.5, chanceOf: () => 0.5, strength: 1 });
   const regions = createBrain(
@@ -149,6 +162,12 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       ...(options.drives ? { drives: options.drives } : {}),
       ...(options.amygdala ? { amygdala: options.amygdala } : {}),
       ...(options.cerebellum ? { cerebellum: options.cerebellum } : {}),
+      ...(options.cortex ? { cortex: options.cortex, conditions } : {}),
+      ...(options.usualMs ? { usualMs: options.usualMs } : {}),
+      ...(options.notes ? { notes: options.notes } : {}),
+      ...(options.chunks ? { chunks: { chains, targetAsKind, learned } } : {}),
+      // With a map, the hippocampus keeps the place and the sensory area reads what is usual there.
+      ...(options.map ? { place: createPlaceKeeper({ map: options.map, trail: createTrail(), cellOf: cells.cellOf, barrier: cells.barrier, replay: 0 }), usual: options.map } : {}),
       sameTime: options.sameTime ?? false,
       // These tests are about the layers below the choice: the basal ganglia's own parts have their tests in selection-parts.test.ts.
       selection: options.selection ?? NO_SELECTION,
@@ -160,11 +179,13 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
     },
     options.only,
   );
-  const arbiter = createArbiter({ selection: options.selection ?? NO_SELECTION, sameTime: options.sameTime ?? false, scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills });
+  const arbiter = createArbiter({ ...(options.cortex ? { cortex: options.cortex } : {}), selection: options.selection ?? NO_SELECTION, sameTime: options.sameTime ?? false, scorebook, personality: DEFAULT_PERSONALITY, patience: DEFAULT_PATIENCE, skills });
   let ms = 0;
   /** Runs every region in the brain's order (the planner too), then the arbiter. */
   async function tick(patch: Patch = {}, running: string | null = null, afterMs = 500) {
     ms += afterMs;
+    // With the clock faked (the cortex's tests), it keeps step with the states.
+    if (vi.isFakeTimers()) vi.advanceTimersByTime(afterMs);
     store.update(state(patch, ms), running ? { skill: running, target: undefined, startedAt: 0 } : null);
     const candidates: Candidate[] = [];
     const traces: Record<string, Record<string, unknown>> = {};
@@ -185,7 +206,10 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
     return { winner, won, beside, candidates, traces, errors, reflexes };
   }
   const value = (name: string) => store.signals()[name]?.value;
-  return { store, calls, tick, value };
+  /** A skill event at the moment of the last tick. */
+  let events = 0;
+  const event = (skill: string, type: SkillEvent["type"], reason?: string, more: Partial<SkillEvent> = {}) => store.addEvent({ skill, type, timestamp: ms + ++events / 100, ...(reason ? { reason } : {}), ...more });
+  return { store, calls, tick, value, event, chains, learned, skills };
 }
 
 describe("the amygdala's readers through the real brain", () => {
@@ -502,8 +526,9 @@ describe("the reticular formation through the real brain", () => {
     for (let i = 0; i < 20; i++) {
       const out = await tick(inBed, "sleep");
       expect(out.won).toBe("sleep");
-      expect(out.traces.instinct).toEqual({ paused: true });
-      expect(out.traces.prefrontal).toEqual({ paused: true });
+      // (An area's trace also carries its ports.)
+      expect(out.traces.instinct).toMatchObject({ paused: true });
+      expect(out.traces.prefrontal).toMatchObject({ paused: true });
       // The gate never touches the layers below it.
       for (const region of ["reflex", "dopamine", "serotonin", "noradrenaline", "acetylcholine", "hippocampus"]) expect(Object.keys(out.traces)).toContain(region);
     }
@@ -1190,3 +1215,431 @@ describe("the cerebellum's mismatch through the real brain", () => {
     expect(shadow).toEqual(await play());
   });
 });
+
+describe("the cortex's ladder through the real brain", () => {
+  const asked = (b: ReturnType<typeof bot>) => b.calls.prompts.at(-1) ?? "";
+
+  it("the planner's goal comes down to instinct as feedback, and its detail is its ask of the thalamus", async () => {
+    const b = bot({ plan: { goal: "Find iron.", steps: ["dig down"], reason: "", detail: ["chest"] } });
+    await b.tick();
+    const { traces } = await b.tick();
+    expect(asked(b)).toContain("Current goal: Find iron. Steps: dig down.");
+    expect(traces.instinct?.ports).toMatchObject({ input: "instinct", feedback: { goal: { text: "Find iron.", setBy: "prefrontal" } }, up: null, ask: [] });
+    expect(traces["prefrontal-hold"]?.ports).toMatchObject({ ask: ["chest"], down: { goal: { text: "Find iron." } } });
+    expect(b.store.cortex().prefrontal).toMatchObject({ feedback: { goal: { text: "Find iron." } }, ask: ["chest"] });
+  });
+
+  it("a goal something else sets between two plans reaches instinct on the same tick, and so does its going", async () => {
+    const b = bot();
+    await b.tick();
+    b.store.viewFor("noradrenaline").setGoal({ text: "Get to safety.", steps: [], reason: "" });
+    // (The planner is asked again every tick in these tests, so the goal is looked for in what instinct was told.)
+    const { traces } = await b.tick();
+    expect(traces.instinct?.ports).toMatchObject({ feedback: { goal: { text: "Get to safety.", setBy: "noradrenaline" } } });
+    expect(asked(b)).toContain("Current goal: Get to safety.");
+  });
+
+  it("with the prefrontal cortex left out, instinct reads the workspace's goal as before", async () => {
+    const b = bot({ only: ["reflex", "instinct"] });
+    b.store.viewFor("noradrenaline").setGoal({ text: "Get to safety.", steps: [], reason: "" });
+    const { traces } = await b.tick();
+    expect(Object.keys(traces)).toEqual(["reflex", "instinct"]);
+    expect(traces.instinct?.ports).toMatchObject({ feedback: null });
+    expect(asked(b)).toContain("Current goal: Get to safety.");
+  });
+
+  it("an area's every-tick half goes with its area when regions are picked by name", async () => {
+    const b = bot({ only: ["instinct", "prefrontal"] });
+    expect(Object.keys((await b.tick()).traces)).toEqual(["prefrontal-hold", "instinct", "prefrontal"]);
+  });
+});
+
+describe("the motor area through the real brain", () => {
+  beforeEach(() => void vi.useFakeTimers({ now: 1_000_000 }));
+  afterEach(() => void vi.useRealTimers());
+  const asked = (b: ReturnType<typeof bot>) => b.calls.prompts.at(-1) ?? "";
+  const from = (candidates: Candidate[], region: string) => candidates.filter((c) => c.region === region).map((c) => ({ ...c.action, urgency: c.urgency }));
+  const home = { text: "go home", skill: "go_to", target: "pos:0,63,0", doneWhen: "within 2 of base" };
+  const bread = { text: "get some bread", doneWhen: "carrying 1 bread" };
+  const night = { text: "wait for night", skill: "idle", doneWhen: "time is night", giveUpWhen: "carrying 9 dirt" };
+  const errand: Plan = { goal: "Run the errand.", steps: [home, bread, night], reason: "" };
+  const away = { self: { distanceToBase: 12 } };
+
+  it("carries out a three-step plan, each step finishing on the tick its condition comes true", async () => {
+    const b = bot({ cortex: DEFAULT_CORTEX, plan: errand });
+    await b.tick(away);
+    // Step one names a skill: the motor area proposes it at the goal's priority, like any proposal.
+    const walking = await b.tick(away);
+    expect(from(walking.candidates, "motor")).toEqual([{ skill: "go_to", target: "pos:0,63,0", urgency: 0.5 }]);
+    expect(walking.traces.motor?.ports).toMatchObject({ input: "motor", feedback: { goal: { text: "Run the errand." } }, up: { step: 0, as: "skill" } });
+    expect(asked(b)).not.toContain("The step to do now");
+    // Home: step one is finished this very tick, and step two (no skill) is instinct's focus on the same tick.
+    const arrived = await b.tick({ self: { distanceToBase: 2 } });
+    expect(arrived.traces.motor).toMatchObject({ advanced: { step: 0, why: "done when: within 2 of base" }, step: { index: 1, text: "get some bread" } });
+    expect(b.store.goal()).toMatchObject({ stepsDone: 1, setBy: "prefrontal" });
+    expect(from(arrived.candidates, "motor")).toEqual([]);
+    expect(asked(b)).toContain("The step to do now: get some bread");
+    expect(arrived.traces.instinct?.ports).toMatchObject({ feedback: { step: { index: 1, text: "get some bread" } } });
+    // Bread in hand: step two is finished, and step three's skill is proposed.
+    const fed = await b.tick({ self: { inventory: { bread: 1 } } });
+    expect(b.store.goal()!.stepsDone).toBe(2);
+    expect(from(fed.candidates, "motor")).toEqual([{ skill: "idle", urgency: 0.5 }]);
+    // Night falls: the last step is finished. The planner re-planned on every one of these ticks and never moved the count itself.
+    await b.tick({ night: true });
+    expect(b.store.goal()).toMatchObject({ stepsDone: 3, steps: ["go home", "get some bread", "wait for night"] });
+    expect(b.calls.requests.every((r) => r.woken === undefined)).toBe(true);
+  });
+
+  it("an engine sure of idling does not outvote a step in hand, but anything else it chooses still competes", async () => {
+    const plan: Plan = { goal: "Go home.", steps: [home], reason: "" };
+    // The engine in these tests idles at 0.72; the step is worth 0.5. Idling uses no part of the body, as in the game.
+    const skills = SKILLS.map((s) => (s.name === "idle" ? { ...s, parts: [] } : s));
+    const b = bot({ cortex: DEFAULT_CORTEX, plan, selection: DEFAULT_SELECTION, skills });
+    await b.tick(away, "idle");
+    const idling = await b.tick(away, "idle");
+    expect(from(idling.candidates, "instinct")).toEqual([{ skill: "idle", urgency: expect.closeTo(0.72) }]);
+    expect(idling.winner).toMatchObject({ region: "motor", action: { skill: "go_to", target: "pos:0,63,0" }, urgency: 0.5 });
+    // An engine that wants to eat (not to rest) at 0.72 outvotes the step at 0.5, as any proposal would.
+    const hungry = bot({ cortex: DEFAULT_CORTEX, plan, selection: DEFAULT_SELECTION, skills, spread: { eat: 0.9 } });
+    await hungry.tick(away);
+    expect((await hungry.tick(away)).winner).toMatchObject({ region: "instinct", action: { skill: "eat" } });
+    // With the motor area off there is no step in the vote, and idling wins as before.
+    const off = bot({ cortex: { ...DEFAULT_CORTEX, motor: 0 }, plan, selection: DEFAULT_SELECTION, skills });
+    await off.tick(away, "idle");
+    expect((await off.tick(away, "idle")).winner).toMatchObject({ region: "instinct", action: { skill: "idle" } });
+  });
+
+  it("a stuck step is reported upward and the planner is told why, for each of the three causes", async () => {
+    const stuckNote = (b: ReturnType<typeof bot>) => b.calls.requests.find((r) => r.woken)?.woken;
+    // Its give-up-when comes true.
+    const gaveUp = bot({ cortex: DEFAULT_CORTEX, plan: { goal: "Wait.", steps: [night], reason: "" } });
+    await gaveUp.tick({}, null, 6000);
+    await gaveUp.tick({ self: { inventory: { dirt: 9 } } }, null, 6000);
+    expect(gaveUp.store.cortex().motor?.up).toMatchObject({ stuck: { step: 0, why: "give up when: carrying 9 dirt" } });
+    await gaveUp.tick({}, null, 6000);
+    expect(stuckNote(gaveUp)).toBe('Step 1 of the current goal ("wait for night") is stuck: give up when: carrying 9 dirt. Plan another way.');
+    // Its skill fails three times.
+    const failing = bot({ cortex: DEFAULT_CORTEX, plan: { goal: "Go home.", steps: [home], reason: "" } });
+    await failing.tick(away, null, 6000);
+    for (let i = 0; i < 3; i++) {
+      await failing.tick(away, null, 6000);
+      failing.event("go_to", "failed", "no way there");
+    }
+    await failing.tick(away, null, 6000);
+    await failing.tick(away, null, 6000);
+    expect(stuckNote(failing)).toContain("is stuck: go_to failed 3 times (no way there). Plan another way.");
+    // Its skill runs past three times the time the cerebellum has learned for it.
+    const slow = bot({ cortex: DEFAULT_CORTEX, plan: { goal: "Go home.", steps: [home], reason: "" }, usualMs: () => 4000 });
+    await slow.tick(away, null, 6000);
+    await slow.tick(away, "go_to", 6000);
+    expect(stuckNote(slow)).toBeUndefined();
+    await slow.tick(away, "go_to", 7000);
+    await slow.tick(away, "go_to", 6000);
+    expect(stuckNote(slow)).toMatch(/is stuck: go_to has run 1\d s, over 3 times its usual 4 s\. Plan another way\./);
+  });
+
+  it("the forced retreat goal survives an ordinary plan, and yields once the bot is safe", async () => {
+    const b = bot({ cortex: DEFAULT_CORTEX, plan: { goal: "Mine some stone.", steps: [], reason: "" } });
+    const hurt = { self: { health: 9 } };
+    await b.tick(hurt);
+    b.store.viewFor("noradrenaline").setGoal({ text: "Retreat to safety.", steps: [], reason: "", ...RETREAT_GOAL });
+    for (let i = 0; i < 3; i++) {
+      const { traces } = await b.tick(hurt);
+      expect(traces.prefrontal).toMatchObject({ plan: { goal: "Mine some stone." }, goalKept: expect.stringContaining("protected until: need safety below 0.5") });
+      expect(b.store.goal()).toMatchObject({ text: "Retreat to safety.", setBy: "noradrenaline", protected: true });
+    }
+    expect(asked(b)).toContain("Current goal: Retreat to safety.");
+    // Healed: the retreat is over, and the next plan takes its place.
+    const { traces } = await b.tick();
+    expect(traces.prefrontal?.goalKept).toBeUndefined();
+    expect(b.store.goal()).toMatchObject({ text: "Mine some stone.", setBy: "prefrontal" });
+  });
+
+  it("a goal to stay still does not hold the bot under water: the body's request to breathe wins", async () => {
+    const still: Plan = { goal: "Stay still at the bottom of the pool. Do not move.", steps: [{ text: "stay still", skill: "idle", doneWhen: "time is night" }], reason: "", priority: 1 };
+    const b = bot({ cortex: DEFAULT_CORTEX, plan: still, selection: DEFAULT_SELECTION });
+    const under = (air: number) => ({ self: { inWater: true, air } });
+    await b.tick(under(20), "idle");
+    const calm = await b.tick(under(20), "idle");
+    // At the highest priority its proposal is worth 0.8, never the full urgency of a hard reflex.
+    expect(from(calm.candidates, "motor")).toEqual([{ skill: "idle", urgency: 0.8 }]);
+    // Short of breath: the medulla's urge beats the motor area's idle and instinct's, by the usual rules.
+    const short = await b.tick(under(7), "idle");
+    expect(from(short.candidates, "motor")).toEqual([{ skill: "idle", urgency: 0.8 }]);
+    expect(short.winner).toMatchObject({ region: "medulla", action: { skill: "surface" } });
+    // And the hard reflex is there as ever.
+    expect((await b.tick(under(6), "idle")).winner).toMatchObject({ region: "reflex", action: { skill: "surface" }, urgency: 1 });
+  });
+
+  it("with every strength at 0 the cortex is as it was with two areas", async () => {
+    const full: Plan = { ...errand, holdBack: [{ name: "flee", strength: 0.2, until: 1 }], priority: 0.1 };
+    const b = bot({ cortex: NO_CORTEX, plan: full });
+    const plain = bot({ plan: { goal: "Run the errand.", steps: ["go home", "get some bread", "wait for night"], reason: "" }, cortex: NO_CORTEX });
+    for (const patch of [away, { self: { distanceToBase: 0, inventory: { bread: 1 } } }, { night: true }]) {
+      const [a, p] = [await b.tick(patch), await plain.tick(patch)];
+      // The motor area proposes nothing, passes nothing on and finishes nothing; instinct is asked the same question.
+      expect(from(a.candidates, "motor")).toEqual([]);
+      expect(a.traces.motor?.ports).toMatchObject({ up: null, down: null });
+      expect(asked(b)).toBe(asked(plain));
+      expect(a.candidates.map((c) => [c.region, c.action, c.urgency])).toEqual(p.candidates.map((c) => [c.region, c.action, c.urgency]));
+    }
+    expect(b.store.goal()!.stepsDone).toBe(0);
+    // The planner is not shown the conditions.
+    expect(b.calls.requests.at(-1)!.situation).not.toContain("Conditions");
+    // A protected goal is replaced by the next plan, as any goal was.
+    b.store.viewFor("noradrenaline").setGoal({ text: "Retreat to safety.", steps: [], reason: "", ...RETREAT_GOAL });
+    await b.tick({ self: { health: 9 } });
+    expect(b.store.goal()).toMatchObject({ text: "Run the errand.", setBy: "prefrontal" });
+  });
+
+  it("shows the planner the conditions, and only while something can check them", async () => {
+    const on = bot({ cortex: DEFAULT_CORTEX });
+    await on.tick();
+    expect(on.calls.requests.at(-1)!.situation).toContain("Conditions (for a step's doneWhen and giveUpWhen, and for what you expect)");
+    // The sensory area checks expectations, so the motor area alone being off does not hide them.
+    const noMotor = bot({ cortex: { ...DEFAULT_CORTEX, motor: 0 } });
+    await noMotor.tick();
+    expect(noMotor.calls.requests.at(-1)!.situation).toContain("Conditions");
+    const neither = bot({ cortex: { ...DEFAULT_CORTEX, motor: 0, sensory: 0 } });
+    await neither.tick();
+    expect(neither.calls.requests.at(-1)!.situation).not.toContain("Conditions");
+  });
+});
+
+describe("the sensory area through the real brain", () => {
+  beforeEach(() => void vi.useFakeTimers({ now: 1_000_000 }));
+  afterEach(() => void vi.useRealTimers());
+  const chest = { id: "pos:3,63,0", type: "chest", dist: 3 };
+  const pig: Mob = { ...mob("pig", 6, 9), hostile: false };
+  const home = { blocks: [chest] };
+  /** A bot that has looked about its cell twenty times by day and always found the chest there. */
+  function atHome(cortex: CortexSettings = DEFAULT_CORTEX, plan?: Plan) {
+    const map = createMap();
+    const cells = createCellReader();
+    for (let i = 0; i < 20; i++) map.at(cells.cellOf(state(home, i * 30_000 - 10_000_000))!, i * 30_000 - 10_000_000);
+    return bot({ cortex, map, thalamus: DEFAULT_THALAMUS, ...(plan ? { plan } : {}) });
+  }
+  const surprises = (b: ReturnType<typeof bot>) => ((b.store.cortex().sensory?.up as { unexpected?: { what: string; kind: string }[] } | null)?.unexpected ?? []).map((s) => `${s.what} ${s.kind}`);
+  const woken = (b: ReturnType<typeof bot>) => b.calls.requests.flatMap((r) => (r.woken ? [r.woken] : []));
+  const focusInput = (traces: Record<string, Record<string, unknown>>) => (traces.acetylcholine?.inputs as Record<string, number>).unexpected;
+  const kept = (traces: Record<string, Record<string, unknown>>) => JSON.stringify(traces.hippocampus);
+
+  it("a familiar place as it usually is: nothing is unexpected and no reader stirs", async () => {
+    const b = atHome();
+    for (let i = 0; i < 4; i++) {
+      const { traces } = await b.tick(home, null, 6000);
+      expect(b.value("unexpected")).toBe(0);
+      expect(traces.sensory?.ports).toMatchObject({ input: "sensory", up: null });
+      expect(focusInput(traces)).toBe(0);
+    }
+    expect(woken(b)).toEqual([]);
+  });
+
+  it("one thing added: the thalamus passes it on as new and focus rises, but it is not strong enough to keep or to wake the planner", async () => {
+    const b = atHome();
+    await b.tick(home, null, 6000);
+    await b.tick(home, null, 6000);
+    const seen = await b.tick({ ...home, mobs: [pig] }, null, 500);
+    expect(surprises(b)).toEqual(["new pig"]);
+    expect(b.value("unexpected")).toBeCloseTo(0.58, 2);
+    // Its readers are listed before it, so they hear of it on the next tick.
+    const next = await b.tick({ ...home, mobs: [pig] }, null, 500);
+    const told = (next.traces.thalamus?.views as Record<string, { items: { id: string; by: string[] }[] }>).prefrontal!.items.find((i) => i.id === pig.id);
+    expect(told?.by).toContain("fresh");
+    expect(focusInput(next.traces)).toBeCloseTo(0.58, 2);
+    expect(focusInput(seen.traces)).toBe(0);
+    expect(kept(next.traces)).not.toContain("Was surprised");
+    await b.tick({ ...home, mobs: [pig] }, null, 6000);
+    expect(woken(b)).toEqual([]);
+    // A few seconds on it is no longer news.
+    expect(b.value("unexpected")).toBe(0);
+  });
+
+  it("one thing removed: every reader reacts, the hippocampus keeps it and the planner is woken with the reason", async () => {
+    const b = atHome();
+    await b.tick(home, null, 6000);
+    await b.tick(home, null, 6000);
+    await b.tick({}, null, 6000);
+    expect(surprises(b)).toEqual(["missing chest"]);
+    expect(b.value("unexpected")).toBeGreaterThan(0.7);
+    const next = await b.tick({}, null, 500);
+    expect(focusInput(next.traces)).toBeGreaterThan(0.7);
+    expect(kept(next.traces)).toContain("Was surprised: No chest here, where there usually is one");
+    await b.tick({}, null, 6000);
+    expect(woken(b)).toEqual(["Something is not as expected: no chest here, where there usually is one. Plan with that in mind."]);
+    // Told once: the chest staying away is not news again.
+    await b.tick({}, null, 6000);
+    await b.tick({}, null, 6000);
+    expect(woken(b)).toHaveLength(1);
+  });
+
+  it("an expectation the planner set that breaks counts fully and wakes it", async () => {
+    const b = atHome(DEFAULT_CORTEX, { goal: "Guard the chest.", steps: [], reason: "", expect: [{ what: "not sees zombie" }] });
+    await b.tick(home, null, 6000);
+    await b.tick(home, null, 6000);
+    expect(b.store.goal()!.expect).toEqual([{ what: "not sees zombie" }]);
+    await b.tick({ ...home, mobs: [{ ...mob("zombie", 14, 4), reachable: false }] }, null, 6000);
+    expect(b.value("unexpected")).toBe(1);
+    await b.tick({ ...home, mobs: [{ ...mob("zombie", 14, 4), reachable: false }] }, null, 6000);
+    expect(woken(b).at(-1)).toBe('Something is not as expected: expected "not sees zombie", and it is not so. Plan with that in mind.');
+  });
+
+  it("a thing that just appeared and is also unexpected is counted once by focus, not twice", async () => {
+    const b = atHome();
+    await b.tick(home, null, 6000);
+    await b.tick(home, null, 6000);
+    const appeared = await b.tick({ ...home, ...appears(pig) }, null, 500);
+    const stoodOut = (appeared.traces.acetylcholine?.inputs as Record<string, number>).just_noticed!;
+    expect(stoodOut).toBeGreaterThan(0);
+    const next = await b.tick({ ...home, mobs: [pig] }, null, 500);
+    const inputs = next.traces.acetylcholine?.inputs as Record<string, number>;
+    // Focus took what stood out a tick ago; from `unexpected` it takes only what that did not already give.
+    expect(inputs.unexpected).toBeCloseTo(Math.max(0, 0.58 - stoodOut), 2);
+    expect(inputs.unexpected).toBeLessThan(0.58);
+  });
+
+  it("with the sensory area off nothing is shared and nobody is told", async () => {
+    const b = atHome({ ...DEFAULT_CORTEX, sensory: 0 });
+    await b.tick(home, null, 6000);
+    await b.tick(home, null, 6000);
+    const { traces } = await b.tick({ mobs: [pig] }, null, 6000);
+    expect(traces.sensory).toBeUndefined();
+    expect(b.value("unexpected")).toBeUndefined();
+    expect((traces.acetylcholine?.inputs as Record<string, number>).unexpected).toBeUndefined();
+    await b.tick({ mobs: [pig] }, null, 6000);
+    expect(woken(b)).toEqual([]);
+  });
+});
+
+describe("the planner's notes through the real brain", () => {
+  beforeEach(() => void vi.useFakeTimers({ now: 1_000_000 }));
+  afterEach(() => void vi.useRealTimers());
+  const ledge = { text: "walk to the ledge", skill: "go_to", target: "pos:9,72,0", doneWhen: "within 2 of pos:9,72,0" };
+  const base = { text: "walk home", skill: "go_to", target: "pos:0,63,0", doneWhen: "within 2 of base" };
+  /** A planner that tries the ledge, notes it when told it is stuck, and plans something else for as long as the note says so. */
+  const planner = (request: PlanRequest): Plan => {
+    const failed = request.notes?.find((n) => n.key === "ledge");
+    if (failed) return { goal: "Go home instead.", steps: [base], reason: `my note says: ${failed.text}`, notes: [failed] };
+    if (request.woken) return { goal: "Go home instead.", steps: [base], reason: "the ledge is out of reach", notes: [{ key: "ledge", text: "tried walking to the ledge: go_to failed, it cannot be reached" }] };
+    return { goal: "Get to the ledge.", steps: [ledge], reason: "" };
+  };
+
+  it("a plan fails, the planner notes why, and its next plans avoid the same mistake", async () => {
+    const notes = createNotes();
+    const b = bot({ cortex: DEFAULT_CORTEX, plans: planner, notes });
+    await b.tick({}, null, 6000);
+    expect(b.store.goal()!.text).toBe("Get to the ledge.");
+    for (let i = 0; i < 3; i++) {
+      await b.tick({}, null, 6000);
+      b.event("go_to", "failed", "no way there");
+    }
+    await b.tick({}, null, 6000);
+    await b.tick({}, null, 6000);
+    // Woken by the stuck step, it changed its plan and wrote the note.
+    expect(b.store.goal()!.text).toBe("Go home instead.");
+    expect(notes.list()).toEqual([{ key: "ledge", text: "tried walking to the ledge: go_to failed, it cannot be reached", unkept: 0 }]);
+    // Every plan after is shown the note, and none goes back to the ledge.
+    const before = b.calls.requests.length;
+    for (let i = 0; i < 4; i++) await b.tick({}, null, 6000);
+    const later = b.calls.requests.slice(before);
+    expect(later.every((r) => r.notes?.some((n) => n.key === "ledge"))).toBe(true);
+    expect(b.store.goal()).toMatchObject({ text: "Go home instead.", reason: expect.stringContaining("my note says") });
+    // A fresh brain with the same saved notes starts from them: the ledge is never tried.
+    const again = bot({ cortex: DEFAULT_CORTEX, plans: planner, notes: createNotes(notes.entries()) });
+    await again.tick({}, null, 6000);
+    expect(again.store.goal()!.text).toBe("Go home instead.");
+  });
+
+  it("with notes off the planner is shown none and keeps none", async () => {
+    const notes = createNotes();
+    const b = bot({ cortex: { ...DEFAULT_CORTEX, notes: 0 }, plan: { goal: "g", steps: [], reason: "", notes: [{ key: "x", text: "y" }] }, notes });
+    await b.tick();
+    await b.tick();
+    expect(b.calls.requests.every((r) => r.notes === undefined)).toBe(true);
+    expect(notes.list()).toEqual([]);
+  });
+});
+
+describe("skills the bot saves for itself, through the real brain", () => {
+  beforeEach(() => void vi.useFakeTimers({ now: 1_000_000 }));
+  afterEach(() => void vi.useRealTimers());
+  const chest = { id: "pos:3,63,0", type: "chest", dist: 3 };
+  const home = { blocks: [chest] };
+  const fed = { ...home, self: { inventory: { bread: 1 } } };
+  /** A planner that asks for bread again and again (a new step each time), until told to use what was learned. */
+  const rounds = (use: { skill?: string } = {}) => {
+    let round = 0;
+    return (request: PlanRequest): Plan => {
+      const done = request.currentGoal && request.currentGoal.stepsDone >= request.currentGoal.steps.length;
+      if (!request.currentGoal || done) round++;
+      return { goal: "Keep bread in hand.", steps: [{ text: `get bread (${round})`, ...(use.skill ? { skill: use.skill } : {}), doneWhen: "carrying 1 bread" }], reason: "" };
+    };
+  };
+  /** One round of the routine as instinct does it: walk to the chest, take from it; the medulla has the bot eat in between. */
+  async function fetchBread(b: ReturnType<typeof bot>) {
+    // (The planner is the last to run in a tick, so the step is under way from the tick after its plan.)
+    await b.tick(home, null, 6000);
+    await b.tick(home, null, 6000);
+    for (const [skill, by, target] of [["go_to", "instinct", chest.id], ["eat", "medulla", undefined], ["take_items", "instinct", chest.id]] as const) {
+      b.event(skill, "started", undefined, { by, ...(target ? { target } : {}) });
+      b.event(skill, "done", undefined, { by, ...(target ? { target } : {}) });
+    }
+    return b.tick(fed, null, 6000);
+  }
+  const fetch = [{ skill: "go_to", target: "nearest:chest" }, { skill: "take_items", target: "nearest:chest" }];
+
+  it("a routine that finishes the same kind of step three times becomes one named skill, on the menu like any other", async () => {
+    const b = bot({ cortex: DEFAULT_CORTEX, plans: rounds(), chunks: true, names: { name: "Restock", description: "Walk to the chest and take what the goal wants." } });
+    for (let i = 1; i <= 2; i++) {
+      // The targets are written as kinds, and what the medulla did (eating) is left out.
+      expect((await fetchBread(b)).traces.motor?.chain).toEqual({ doneWhen: "carrying 1 bread", links: fetch, seen: i });
+      expect(b.learned.skills()).toEqual([]);
+    }
+    await fetchBread(b);
+    // The third time it is ready; the planner, asked once at its next plan, named it.
+    await b.tick(home, null, 6000);
+    expect(b.learned.entries()).toEqual([{ name: "restock", description: "Walk to the chest and take what the goal wants.", steps: [{ primitive: "go_to", target: "nearest:chest" }, { primitive: "take_items", target: "nearest:chest" }], doneWhen: "carrying 1 bread" }]);
+    expect(b.chains.entries()).toMatchObject([{ seen: 3, skill: "restock" }]);
+    // From the next tick it is on instinct's menu and among the planner's abilities.
+    await b.tick(home, null, 6000);
+    expect(b.calls.menus.at(-1)).toContain("restock");
+    expect(b.calls.requests.at(-1)!.situation).toContain("- restock: Walk to the chest and take what the goal wants.");
+    // A fourth time round does not make a second skill.
+    await fetchBread(b);
+    await b.tick(home, null, 6000);
+    expect(b.learned.entries()).toHaveLength(1);
+  });
+
+  it("the learned skill is then chosen and run as one action, and three failures running retire it", async () => {
+    const use: { skill?: string } = {};
+    const b = bot({ cortex: DEFAULT_CORTEX, plans: rounds(use), chunks: true, names: { name: "restock", description: "d" }, selection: DEFAULT_SELECTION });
+    for (let i = 0; i < 3; i++) await fetchBread(b);
+    await b.tick(home, null, 6000);
+    use.skill = "restock";
+    await b.tick(home, null, 6000);
+    const chosen = await b.tick(home, null, 6000);
+    expect(chosen.candidates.filter((c) => c.region === "motor").map((c) => c.action)).toEqual([{ skill: "restock" }]);
+    // It ran and bread is in hand: its own test holds, so that is no failure.
+    b.event("restock", "done", undefined, { by: "motor" });
+    await b.tick(fed, null, 6000);
+    expect(b.learned.skills()[0]!.fails).toBeUndefined();
+    // It ends done twice with no bread to show for it, and fails outright once: three failures running.
+    for (const type of ["done", "done", "failed"] as const) {
+      b.event("restock", type, undefined, { by: "motor" });
+      await b.tick(home, null, 6000);
+    }
+    expect(b.learned.skills()).toEqual([]);
+    expect(b.learned.entries()).toMatchObject([{ name: "restock", retired: true, fails: 3 }]);
+    const after = await b.tick(home, null, 6000);
+    expect(b.calls.menus.at(-1)).not.toContain("restock");
+    expect(after.traces.motor?.skillProblem).toBe("restock: not one of the listed abilities");
+  });
+
+  it("with chunks off nothing is noted and nothing is saved", async () => {
+    const b = bot({ cortex: { ...DEFAULT_CORTEX, chunks: 0 }, plans: rounds(), chunks: true, names: { name: "restock", description: "d" } });
+    for (let i = 0; i < 4; i++) expect((await fetchBread(b)).traces.motor?.chain).toBeUndefined();
+    await b.tick(home, null, 6000);
+    expect([b.chains.entries(), b.learned.entries()]).toEqual([[], []]);
+  });
+});
+

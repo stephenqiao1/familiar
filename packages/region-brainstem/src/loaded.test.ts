@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Goal, IfThen } from "@familiar/contracts";
 import { createLoadedResponses } from "./loaded.js";
 
-const goal = (ifThen: IfThen[], setAt = 1): Goal => ({ text: "", steps: [], reason: "", wants: [], watchFor: [], ifThen, holdBack: [], detail: [], stepsDone: 0, stepDoneAt: null, setBy: "prefrontal", setAt });
+const goal = (ifThen: IfThen[], setAt = 1): Goal => ({ text: "", steps: [], specs: [], priority: 0.5, protected: false, doneWhen: null, reason: "", wants: [], watchFor: [], ifThen, holdBack: [], detail: [], expect: [], stepsDone: 0, stepDoneAt: null, setBy: "prefrontal", setAt });
 const creeper = { id: "entity:1", kind: "creeper" };
 const problemWith = (skill: string) => (skill === "flee" || skill === "go_to" ? null : skill === "brace" ? "a primitive, not a skill" : "unknown skill");
 

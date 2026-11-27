@@ -21,6 +21,10 @@ export interface ThalamusOptions {
   inView?(state: State): State;
   /** Takes a state apart into channels of items (the game says how). Without it there is no gate. */
   split?(state: State): Split;
+  /** Readers that are told everything the body can know of: the whole state (less what the field of view leaves out), with no gate or budget. Default: none. */
+  whole?: string[];
+  /** Whether a thing is unexpected here right now (the sensory area's word): it counts as new, as a thing that just appeared does. Default: never. */
+  unexpected?(item: Item, ws: Workspace): boolean;
   /** How much this kind of thing is wanted right now, 0 to 1. Default: 0. */
   wantOf?(kind: string, ws: Workspace): number;
   /** How far this thing has been got used to, 0 to 1. Default: 0. */
@@ -94,7 +98,10 @@ export function createThalamusRegion(options: ThalamusOptions): Region {
     const watched = ws.goal?.watchFor ?? [];
     const items = split.channels.flatMap((channel) => channel.items.map((item) => ({ item, channel })));
     const answers = (ask: string, item: Item) => ask === item.kind || ask === item.id;
-    const asked = settings.detail > 0 ? (ws.goal?.detail ?? []) : [];
+    // What its readers ask for (each area's `ask`); with no area on record, the goal's `detail`.
+    const said = readers.flatMap((reader) => ws.cortex[reader] ?? []);
+    const asking = said.length ? [...new Set(said.flatMap((ports) => ports.ask))] : (ws.goal?.detail ?? []);
+    const asked = settings.detail > 0 ? asking : [];
     const inForce = asks.active(asked, new Set(asked.filter((ask) => items.some(({ item }) => answers(ask, item)))), now);
     const facts = new Map<string, Facts>();
     for (const { item, channel } of items) {
@@ -106,7 +113,7 @@ export function createThalamusRegion(options: ThalamusOptions): Region {
         asked: inForce.some((ask) => answers(ask, item)),
         wanted: options.wantOf?.(item.kind, ws) ?? 0,
         watched: watched.includes(item.kind),
-        ...(item.fresh ? { fresh: true } : {}),
+        ...(item.fresh || options.unexpected?.(item, ws) ? { fresh: true } : {}),
         ...(item.dist === undefined ? {} : { dist: item.dist }),
         usedTo: options.usedTo?.(item, ws) ?? 0,
         feared: options.fearOf?.(item, ws) ?? 0,
@@ -120,7 +127,7 @@ export function createThalamusRegion(options: ThalamusOptions): Region {
       return { id: item.id, channel: channel.name, priority: weighed.get(item.id)!.priority, cost: item.cost, open: open.get(channel.name) !== null, must: spot || (item.threat ?? 0) >= 2 || item.vital === true, floor: (item.threat ?? 0) >= 1 };
     });
     const [focus, arousal, orienting] = [options.focusOf?.(ws) ?? 0.5, options.arousalOf?.(ws) ?? 0.5, options.orientingOf?.(ws) ?? 0];
-    const news = items.filter(({ item, channel }) => item.fresh && open.get(channel.name) === null).map(({ item }) => ({ id: item.id, source: item.place ? `${item.kind} at ${item.place}` : item.id }));
+    const news = items.filter(({ item, channel }) => facts.get(item.id)!.fresh && open.get(channel.name) === null).map(({ item }) => ({ id: item.id, source: item.place ? `${item.kind} at ${item.place}` : item.id }));
     const views: Record<string, unknown> = {};
     let strong = false;
     for (const reader of readers) {
@@ -184,7 +191,11 @@ export function createThalamusRegion(options: ThalamusOptions): Region {
     run(ws) {
       const started = performance.now();
       const trace: Record<string, unknown> = {};
-      if (settings.gate > 0 && options.split) gated(ws, options.split(settings.fieldOfView > 0 && options.inView ? options.inView(ws.state) : ws.state), trace);
+      // What the body can know of: worked out once, for the gate and for the readers told all of it.
+      const gate = settings.gate > 0 && options.split !== undefined;
+      const known = (gate || options.whole?.length) && settings.fieldOfView > 0 && options.inView ? options.inView(ws.state) : ws.state;
+      for (const reader of options.whole ?? []) ws.setView(reader, known);
+      if (gate) gated(ws, options.split!(known), trace);
       else byCount(ws, trace);
       const ms = performance.now() - started;
       trace.ms = Math.round(ms * 1000) / 1000;

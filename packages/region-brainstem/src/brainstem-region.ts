@@ -229,10 +229,11 @@ export function createBrainstemRegion(options: BrainstemOptions): Region {
       }
       if (ws.goal && ws.goal.setAt !== checkedGoal) {
         checkedGoal = ws.goal.setAt;
-        const ignored = ws.goal.holdBack.filter((n) => !options.holdable.includes(n));
+        const ignored = ws.goal.holdBack.filter((h) => !options.holdable.includes(h.name)).map((h) => h.name);
         if (ignored.length) trace.ignoredHoldBack = ignored;
-        const held = settings.holdBack > 0 ? ws.goal.holdBack.filter((n) => options.holdable.includes(n)) : [];
-        if (held.length) trace.holdingBack = held;
+        const held = settings.holdBack > 0 ? ws.goal.holdBack.filter((h) => options.holdable.includes(h.name)) : [];
+        // A hold-back in full with no end is logged by its name, as before; one with a strength or an end in full.
+        if (held.length) trace.holdingBack = held.map((h) => (h.strength === 1 && h.until === undefined ? h.name : { name: h.name, strength: h.strength, ...(h.until === undefined ? {} : { until: h.until }) }));
       }
 
       before = after;

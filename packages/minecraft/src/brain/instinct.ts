@@ -1,4 +1,4 @@
-import type { Proposal, Question, Skill, Workspace, Answer } from "@familiar/contracts";
+import type { Answer, Feedback, Goal, Proposal, Question, Skill, Workspace } from "@familiar/contracts";
 import { NORADRENALINE, PLANNER_OFFLINE_SIGNAL, PLANNER_WEIGHT_SIGNAL } from "@familiar/neuromodulators";
 import { actionProposal, buildActionQuestion, buildTargetQuestion } from "@familiar/region-instinct";
 import { PLAYER_CONTEXT, playerQuestions } from "../player-questions.js";
@@ -8,7 +8,8 @@ import { minecraftDataOf } from "./read-state.js";
 
 /** What the instinct region needs from the player (everything but the engine). */
 export interface PlayerInstinct {
-  questions(ws: Workspace): Question[];
+  /** `feedback`: what the area above says (the goal it holds). With none, the goal is read from the workspace. */
+  questions(ws: Workspace, feedback?: Feedback | null): Question[];
   toProposals(answers: Answer[], ws: Workspace): Proposal[];
 }
 
@@ -29,15 +30,16 @@ const NARROW = { maxOptions: 2, minProbability: 0.2 };
  * skills are never on the menu, and primitives only with `showPrimitives`.
  */
 export function playerInstinct<Ctx>(skills: Skill<Ctx>[], ctx: Ctx, widen: (ws: Workspace) => boolean = () => false, showPrimitives = false, narrow: (ws: Workspace) => boolean = () => false): PlayerInstinct {
-  const menu = menuSkills(skills, showPrimitives);
+  // The menu is read afresh each time: a skill the bot saves for itself is on it from then on.
+  const menuNow = () => menuSkills(skills, showPrimitives);
   const acceptsTarget = (skill: string, target: string) => skills.find((s) => s.name === skill)?.canRun(ctx, target) ?? false;
   return {
-    questions(ws) {
+    questions(ws, feedback) {
       // Jev is asked about what it is told (the thalamus's view), and offered only targets in it.
       const told = ws.view(INSTINCT);
       if (!minecraftDataOf(told)) return [];
       return playerQuestions({
-        nextAction: buildActionQuestion(menu, ctx, withCloserLook(withGoal(PLAYER_CONTEXT, ws), ws), ws.current?.skill),
+        nextAction: buildActionQuestion(menuNow(), ctx, withCloserLook(withGoal(PLAYER_CONTEXT, ws, feedback ? feedback.goal : ws.goal, feedback?.step?.text), ws), ws.current?.skill),
         target: buildTargetQuestion(thingsInView(told).map((t) => t.id)),
       });
     },
@@ -54,15 +56,15 @@ export function withCloserLook(context: string, ws: Workspace): string {
 /**
  * The context, plus the current goal and its steps. Alarm can take the planner out of charge: its
  * goal is then marked less important, or left out while the planner is offline. A goal the alarm
- * system set itself (a retreat) always counts fully.
+ * system set itself (a retreat) always counts fully. `focus` is the step the area above leaves to
+ * instinct right now (the motor area passes down a step that names no skill): it is said last.
  */
-export function withGoal(context: string, ws: Workspace): string {
-  const goal = ws.goal;
+export function withGoal(context: string, ws: Workspace, goal: Goal | null = ws.goal, focus?: string): string {
   if (!goal) return context;
   const ownGoal = goal.setBy === NORADRENALINE;
   const weight = ownGoal ? 1 : (ws.signals[PLANNER_WEIGHT_SIGNAL]?.value ?? 1);
   if (!ownGoal && (ws.signals[PLANNER_OFFLINE_SIGNAL]?.value ?? 0) > 0) return context;
   const steps = goal.steps.length ? ` Steps: ${goal.steps.join("; ")}.` : "";
   const label = weight < GOAL_COUNTS_FULLY ? "Current goal (less important right now than staying safe)" : "Current goal";
-  return `${context}\n${label}: ${goal.text}${steps}`;
+  return `${context}\n${label}: ${goal.text}${steps}${focus ? `\nThe step to do now: ${focus}` : ""}`;
 }

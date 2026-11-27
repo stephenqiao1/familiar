@@ -205,6 +205,9 @@ importers:
       '@familiar/minecraft':
         specifier: workspace:*
         version: link:../../packages/minecraft
+      '@familiar/neocortex':
+        specifier: workspace:*
+        version: link:../../packages/neocortex
       '@familiar/neuromodulators':
         specifier: workspace:*
         version: link:../../packages/neuromodulators
@@ -223,12 +226,18 @@ importers:
       '@familiar/region-instinct':
         specifier: workspace:*
         version: link:../../packages/region-instinct
+      '@familiar/region-motor':
+        specifier: workspace:*
+        version: link:../../packages/region-motor
       '@familiar/region-prefrontal':
         specifier: workspace:*
         version: link:../../packages/region-prefrontal
       '@familiar/region-reflex':
         specifier: workspace:*
         version: link:../../packages/region-reflex
+      '@familiar/region-sensory':
+        specifier: workspace:*
+        version: link:../../packages/region-sensory
       '@familiar/region-thalamus':
         specifier: workspace:*
         version: link:../../packages/region-thalamus
@@ -306,6 +315,9 @@ importers:
       '@familiar/memory':
         specifier: workspace:*
         version: link:../memory
+      '@familiar/neocortex':
+        specifier: workspace:*
+        version: link:../neocortex
       '@familiar/neuromodulators':
         specifier: workspace:*
         version: link:../neuromodulators
@@ -339,6 +351,16 @@ importers:
       vec3:
         specifier: ^0.1.10
         version: 0.1.10
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/neocortex:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       '@familiar/core':
         specifier: workspace:*
@@ -402,6 +424,9 @@ importers:
       '@familiar/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@familiar/neocortex':
+        specifier: workspace:*
+        version: link:../neocortex
     devDependencies:
       '@familiar/core':
         specifier: workspace:*
@@ -410,11 +435,27 @@ importers:
         specifier: workspace:*
         version: link:../engine-echo
 
+  packages/region-motor:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@familiar/neocortex':
+        specifier: workspace:*
+        version: link:../neocortex
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/region-prefrontal:
     dependencies:
       '@familiar/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@familiar/neocortex':
+        specifier: workspace:*
+        version: link:../neocortex
     devDependencies:
       '@familiar/core':
         specifier: workspace:*
@@ -425,6 +466,19 @@ importers:
       '@familiar/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/region-sensory:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@familiar/neocortex':
+        specifier: workspace:*
+        version: link:../neocortex
     devDependencies:
       '@familiar/core':
         specifier: workspace:*

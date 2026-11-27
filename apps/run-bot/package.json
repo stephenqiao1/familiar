@@ -16,11 +16,14 @@
     "@familiar/neuromodulators": "workspace:*",
     "@familiar/region-brainstem": "workspace:*",
     "@familiar/region-amygdala": "workspace:*",
+    "@familiar/neocortex": "workspace:*",
     "@familiar/region-cerebellum": "workspace:*",
     "@familiar/region-hypothalamus": "workspace:*",
     "@familiar/region-instinct": "workspace:*",
+    "@familiar/region-motor": "workspace:*",
     "@familiar/region-prefrontal": "workspace:*",
     "@familiar/region-reflex": "workspace:*",
+    "@familiar/region-sensory": "workspace:*",
     "@familiar/region-thalamus": "workspace:*"
   }
 }

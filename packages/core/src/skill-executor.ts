@@ -23,6 +23,10 @@ export interface SkillExecutor {
    * It is refused (silently) if they share a part, and stopped if a later main skill needs its parts.
    */
   startAlongside(name: string, target?: string): Promise<void>;
+  /** Adds a skill it can run from now on (one the bot has just saved for itself). */
+  learn(skill: Skill<unknown>): void;
+  /** Takes a skill away: it can no longer be started. */
+  forget(name: string): void;
 }
 
 interface Run extends RunningSkill {
@@ -161,6 +165,8 @@ export function createSkillExecutor<Ctx>(options: SkillExecutorOptions<Ctx>): Sk
     current() {
       return running && { skill: running.skill, target: running.target, startedAt: running.startedAt };
     },
+    learn: (skill) => void skills.set(skill.name, skill as Skill<Ctx>),
+    forget: (name) => void skills.delete(name),
   };
 }
 

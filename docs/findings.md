@@ -31,6 +31,15 @@ entries named in brackets hold the evidence.*
    bot with no goal asking for food does not want a chest of it".)*
    **Would fix:** let the planner (or a region acting for it) make proposals the arbiter can
    weigh, with a "done when" condition per step that code checks every tick.
+   **Mostly closed 2026-11-27 by the motor area (stage two of the neocortex).** A step with a
+   skill and a "done when" is now a proposal the basal ganglia weigh, at the goal's priority; the
+   step is finished on the tick its condition comes true; a stuck step wakes the planner with the
+   reason; a hold-back has a strength and an end; and the forced retreat is a protected goal that
+   no ordinary plan replaces until the bot is safe. **Still open:** a step with no condition the
+   vocabulary can say is still words for Jev, judged by the planner up to 15 seconds late; "leave
+   far threats alone" is still persuasion; a want for an item still exists only while a goal asks
+   for it; and a step's proposal at the usual priority (0.5) loses to anything else Jev is sure
+   of (see "The neocortex, stage two").
 
 3. **What the bot does depends on what Jev picks, and the live checks are not steady.** With Jev
    in, the same scene passes one run and fails the next. So the dependable checks run on
@@ -158,6 +167,416 @@ entries named in brackets hold the evidence.*
     **Would fix:** add the other dangers as vital needs, and put a time on every memory.
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
+
+## The neocortex, stage five: skills the bot saves for itself (2026-11-27)
+
+*Built and run live 2026-11-27. How it works is in [brain.md](brain.md), "Skills the bot saves
+for itself". Setting: `cortex.chunks` (0: nothing is noted, named or saved).*
+
+**Shown live** (`pnpm cortex-check skill`, five runs; the echo planner). A chest of cooked meat
+stands on the plaza. Round after round the bot is made a little hungry with empty pockets, and
+the goal's one step is left to instinct ("take meat from the chest and eat it", done when it is
+no longer hungry).
+
+Instinct in these runs is the echo engine choosing by fixed rules (`--choices`: when hungry,
+the learned skill if there is one, else take meat, then eat), so that the scene shows the
+mechanism and not what Jev happens to pick. Everything else is the real brain: the arbiter, the
+motor area, the skills and the server.
+
+| | 5 runs with fixed rules |
+|---|---|
+| The chain noted | `take_items nearest:chest > eat`, the first three rounds of every run (once a round of two meals came between: a different chain, counted apart) |
+| Became a skill | 5 of 5, 78 to 111 s in, named `take_items_then_eat` by the echo planner, written to `learned-skills.json` |
+| Chosen as one action after that | 5 of 5: it was the action on 22 to 29 ticks a run, started 4 or 5 times |
+| How it ended | 4 runs: done 3 or 4 times, never failed. 1 run: interrupted all 5 times (twice by the medulla's own urge to eat, which took over mid-chain) |
+| Retired | None in these runs. In an earlier run it was retired after three failures: see below |
+
+**With Jev choosing** (`cortex-check skilljev`, two runs of the same scene, the chest known to
+the bot beforehand). In one run Jev did the routine the same way three times, the skill was
+made 226 s in, and Jev then picked `take_items_then_eat` from its menu 5 times: it ran to the
+end all 5. In the other run only 4 rounds finished and the chains differed (`take_items >
+return_to_base` once, `take_items > eat` once): no skill. In the very first trial, before the
+bot was given the chest, Jev chose `return_to_base` on 1,334 ticks of 1,403 (no path from the
+sky plaza) and nothing was learned at all.
+
+**Found live, and fixed.**
+
+- **Inside a chain, `eat` ran before the inventory knew of the meat `take_items` had just
+  taken.** It ended "cannot run", or "done" having eaten nothing, the skill failed its own test
+  three times and was retired within three minutes of being made. A chain's later links are now
+  waited for, up to 2 seconds, when they cannot run yet. (So the retiring was seen live too.)
+- **A chain link written "nearest:chest" could not be run**: `take_items` takes only a spot. The
+  runner now turns a kind into the nearest such thing as the link comes up.
+- **The same routine was written three ways**: `take_items` with no target, with the chest's
+  spot, and (the echo engine answering "which thing?" with the first thing in view) `eat` aimed
+  at the chest. A run given no target is now written by what it says it aimed at, and the echo
+  engine with fixed rules no longer makes up an answer to a question its rules do not speak to.
+- **A round that began half way through the routine made a one-link chain**, which is not kept.
+  The scene's rounds now begin with a step that waits for hunger.
+
+**Scene 8, cost** (`pnpm cortex-check cost`: an hour of ordinary play at the base each way,
+Jev and the Claude planner, mobs off, one run each).
+
+| | Before (every cortex strength 0) | After (all on) |
+|---|---|---|
+| Planner calls | 145 (2.4 a minute), none failed | 171 (2.8 a minute), none failed; 65 of them woken at once (63 by a stuck step, 2 by a surprise) |
+| Jev calls | 3,517 (58.6 a minute) | 2,865 (47.7 a minute) |
+| Steps finished | 3, by the planner's word | 22, by their condition; none by the planner's word |
+| Skills started | `idle` 16, `sleep` 6, `take_items` 2 | `go_to` 26, `idle` 20, `return_to_base` 7, `sleep` 4, `take_items` 1 |
+| Stuck reports | | 63 |
+| Notes held at the end | | 5 (`hazard`, `chest`, `cows`, `stuck`, `plan`) |
+| Skills learned | | 0 |
+| Deaths | 0 | 0 |
+
+What it shows: with the cortex on the bot went and did things (26 walks, 7 trips home) where
+before it idled, and finished seven times as many steps. It did not make the planner cheaper:
+18% more calls, all of the extra from stuck steps.
+
+- **A walk is called stuck too soon.** 37 of the 63 reports were "has run over 3 times its usual
+  time": the cerebellum's usual time for `go_to` is that of the short walks it has seen, and a
+  long walk runs past three times that. The other 26 were a skill that had not got to run. A
+  walk should be judged by its length (the cerebellum's pace and the journey's estimate), not
+  by the usual time of the skill. **Fix later.**
+- **No skill was learned in the hour.** 22 steps finished: 8 with one ability (already a skill),
+  8 with nothing a decider chose having finished, and 6 with a walk to a bare spot, which cannot
+  be written as a kind. The planner gave every step its own skill, so no step was a routine.
+- **Jev was asked less** (47.7 a minute against 58.6), though nothing here asks it less on
+  purpose. One run each way: this may be the day and the night falling differently.
+
+**What the existing format cannot express.** The file is a list of
+`{ name, description, steps: [{ primitive, target }] }`.
+
+| It cannot say | What was done about it |
+|---|---|
+| A chain that mixes skills and primitives: a step names a `primitive`, and the loader checked the name against the primitives only | The loader is now given every ability that is not reflex-only as what a chain may be made of. The field is still called `primitive`, and now often holds a skill |
+| A target chosen at run time: a target is a fixed string | Targets are written as kinds (`nearest:chest`), and the chain runner turns one into a spot or an id as the step comes up (`aimNow`). It can say "the nearest chest", not "the chest that holds bread", "the thing I just looked at" or "where I was a moment ago" |
+| A target given to the skill itself: a learned skill takes none | Not done. "Fetch from the nearest chest" is a skill; "fetch from *that* chest" is not |
+| Its test of success | `doneWhen` was added beside the steps (the loader reads it). It is used to judge the skill after it runs, not to stop it early |
+| Repeating, waiting or choosing: no "until", no "if", no pause | Not done. A routine that needs its last two links twice some days is a different chain each way |
+| That it is retired, how often it failed | `retired` and `fails` were added; a retired skill stays in the file and keeps its name |
+| Where it came from: which chain, how often it worked | Kept beside it, in `chains.json` |
+| Links that run at the same time (a look while walking) | Not done: links run one after another |
+
+**Limits.**
+
+- **A chain is noted only for a step with a "done when"**, and only if it has 2 to 8 links. A
+  step that names its own skill is usually finished by that one skill, so chains mostly come
+  from steps left to instinct.
+- **"The same chain" is exact**: the same abilities in the same order with the same targets.
+  One extra meal, or a walk before the fetch, is another chain. Only the same link twice
+  running is counted once.
+- **What ran while the step was under way is the chain, whether or not it helped.** A look
+  around or a detour that a decider chose becomes a link.
+- **A learned skill is judged a tick after it ends.** If its "done when" comes true only later
+  (food still being digested, a door still swinging), that run counts as a failure.
+- **Three failures running retire a skill for good.** Nothing brings one back, and nothing
+  makes the same chain into a skill a second time (its count stays in `chains.json` with the
+  skill's name).
+- **The name is asked for once.** If the planner is paused (asleep, or alarm high) the skill
+  waits unnamed and unused until the planner's next plan.
+- **Naming is one more model call**, outside the "no more often than now" rule: once per skill.
+- **Who started a run is known only for the main skill.** A movement run alongside is not part
+  of a chain, and a typed command (`--manual`) counts for nothing.
+- **The skill list now changes while the bot runs.** Everything that listed the skills once at
+  start (Jev's menu, the planner's abilities, the executor, the two "risky" lookups) reads the
+  list afresh. Anything added later that copies the list at start would miss a learned skill.
+
+**What in the code made it awkward.**
+
+- A skill event did not say who started the skill, so "leave out what a reflex did" had nothing
+  to go by. The loop now hands the winning proposal to the action, and each event carries `by`.
+- The skill list was read once at start in five places.
+- `take_items` only takes a spot as its target, so a chain link written "nearest:chest" could
+  not be run as written: the runner had to learn to aim each step as it comes up.
+- The learned-skill loader took "the primitives" as what a chain may be made of, and nearly
+  every routine the bot does is made of skills.
+- Jev's choices in the first live run made no routine at all (below), so the echo engine was
+  given fixed rules of choice (`--choices`) to show the mechanism without a model.
+
+## The neocortex, stage four: the planner's notes (2026-11-27)
+
+*Built and run live 2026-11-27. How it works is in [brain.md](brain.md), "Working memory: the
+planner's notes". Setting: `cortex.notes` (0: none are kept, shown or asked for).*
+
+**Shown live** (`pnpm cortex-check notes` and `nonotes`, five runs each of three and a half
+minutes, the Claude planner and Jev). The bot is hungry with no food on the plaza in the sky:
+the way home has no path, and the only food in sight is a cow shut in a bedrock box. Whatever
+it sets out on first fails. Counted in each run: each thing (a skill at a target) that was
+reported stuck and told to the planner; whether the plan that answered wrote or changed a note;
+and whether the bot later set out on that very thing again.
+
+| | Plans | Things that failed and were told | A note written in the answering plan | Set out on the same thing again |
+|---|---|---|---|---|
+| Notes on, 5 runs | 94 (24 woken at once) | 18 | 18 of 18 | 0 |
+| Notes off, 5 runs | 91 (14 woken at once) | 10 | | 2 (`go_to nearest:cow` once, `attack nearest:cow` once) |
+
+With notes, a typical run: the planner sets out for base, `return_to_base` fails three times
+("No path to the goal!"), it is woken and writes "return_to_base failed 3x (no path) from snowy
+plateau y150; try staged go_to and find animals"; each walk that fails after that is added to
+the same note ("go_to 20,150,28 and 40,150,50 failed ... trying east"), and none is tried
+twice. The notes it kept were of three sorts: where it started and where base is, what failed,
+and the drops nearby.
+
+**What this does and does not show.** The planner uses the notes as they were meant, every
+time. That they are *why* it did not repeat itself is weak: without notes it repeated 2 failed
+things of 10, with notes 0 of 18. Without notes the planner is still told why a step is stuck
+at the moment it is woken, and is shown the last five skill events, which is often enough for
+the very next plan. Notes should matter more over longer stretches than three and a half
+minutes; that was not run. One run without notes had nothing fail at all (the planner chose
+to idle and wait).
+
+**Found live, and fixed.**
+
+- **A step that stayed stuck was reported on every tick.** With "give up when: not sees cow"
+  true, the motor area made a new report each tick, and each was a new reason to wake the
+  planner (held only by the 5-second floor). A step that goes on being stuck is now reported
+  again no sooner than 30 seconds later.
+- **The planner was woken on a report about a step it had just changed.** A plan came back, and
+  for one tick the motor area's last report still stood; the planner was called again and told
+  of the old step. It is now woken only for a report about the step the goal is at.
+
+**Limits.**
+
+- **A note is whatever the planner writes.** Nothing checks it against the world, and a wrong
+  note ("cow seen near 44,151,44") is believed until the planner changes it.
+- **The planner rewrites its notes most plans.** In the first run a "status" note was changed
+  on about half the plans. That is allowed, but it means the "not kept for three plans" rule seldom
+  fires: the planner keeps what it has.
+- **Five notes of 200 characters** is about 1,000 characters more in every prompt.
+- **Held under a protected goal** was shown in unit tests only: no live run had a retreat and
+  notes together.
+- **Only the planner reads the notes.** Jev and the motor area are not shown them.
+- **Notes are per bot and are never cleared by a death or a new place**: only by the planner.
+
+**What in the code made it awkward.**
+
+- The planner's schema is fixed when the planner is built, so "may it keep notes" is one more
+  switch chosen from the settings at start.
+- The prefrontal region knew whether its goal was kept out, but not why; whether the standing
+  goal is protected is read from the goal itself.
+- The tests of the real brain call the planner every tick and the states carry a made-up
+  clock, so "is this report newer than the goal" could not be tested by time: it goes by which
+  step the report names.
+
+## The neocortex, stage three: the sensory area (2026-11-27)
+
+*Built and run live 2026-11-27. How it works is in [brain.md](brain.md), "The sensory area: what
+is unexpected here". Setting: `cortex.sensory` (0: no sensory area, and none of its readers
+hears anything).*
+
+**Shown live** (`pnpm cortex-check surprise`, five runs, no Jev). The bot gets to know a place
+with a chest in it (it is moved in and out of the cell sixteen times; each coming in is one
+look about). Then a pig is put there, and nine seconds later the chest is taken away.
+
+| Moment | What the sensory area found | `unexpected` | Thalamus | Focus | Hippocampus | Planner |
+|---|---|---|---|---|---|---|
+| Getting to know the place | Nothing, in 5 runs of 5 | 0 | | | | |
+| A pig is added | `new pig`, 0.60, within 0.3 s | 0.60 | Passed it on as new on 7 ticks | Took it in on 4 ticks | Kept nothing (under 0.7) | Not woken |
+| The chest is taken away | `changed block`, 0.50, at once; `missing chest`, 0.76, about 5 s later | 0.76 | New on 2 ticks | Took it in on 10 ticks | Kept one memory ("Was surprised: No chest here, where there usually is one") | Woken once, told why |
+
+The same in every one of the 5 runs. The other four cortex scenes were run again with the
+sensory area on (5 runs each): all 20 runs as before. `thalamus-check`: 6 of 7 scenes; the
+unsteady `spotlight` scene failed once and then passed 3 times of 3. `selection-check` and
+`neuro-check` were not run again for this stage.
+
+**The other "something is new" signals** are listed in brain.md with what each means. In short:
+`novelty` (dopamine) is about kinds rarely met anywhere and pays a reward; `orienting` (the
+colliculus) is about something changing just now, expected or not; `unfamiliar` (the
+hippocampus) is about a place little known; `mismatch` (the cerebellum) is about the bot's own
+movement; `burst` (the thalamus) is news passed through a turned-down channel. `unexpected` does
+not replace any of them. Where it overlaps it feeds or yields: the thalamus takes it as the
+same "new" mark a sudden thing gets (one mark, not two); focus takes from it only what
+`orienting` has not already given; and in an unfamiliar place the sensory area is silent.
+
+**Found live.**
+
+- **Taking the chest away is two surprises.** The block changing is a change never seen before
+  (0.5, at once), and five seconds later the chest is missing (0.76). Only the second is strong.
+
+**Limits.**
+
+- **Every reader hears a surprise one tick late.** The sensory area reads the thalamus's view,
+  so it is listed after the thalamus, and focus, the hippocampus and the thalamus are listed
+  before it. A surprise stands for 3 seconds, so none is missed.
+- **"Usual" is by cell, "never seen" is by area.** A thing usual from one cell and out of range
+  from the next is not missed there; a kind seen once anywhere in an area is never new there
+  again.
+- **A look is counted on coming into a cell and every 30 seconds of staying.** A bot that has
+  stood in one place for an hour and one that has passed through 120 times know it equally well.
+  Under 3 looks nothing is judged.
+- **The parts of the day are day and night.** Dusk and dawn are not kept apart.
+- **Kinds, not things.** One chest of two taken away is not missed: a chest is still in view.
+  Counts are not compared.
+- **Only what the map counts**: creatures, useful blocks (chests, ripe crops, bells) and
+  players. Hazards, items on the ground and sounds are not part of the guess.
+- **With the field of view on, a thing behind the bot is "missing"** once it has been out of
+  view for longer than the field of view remembers it (10 s). The check was run with it off.
+- **The bot's own doing is only half known.** A change to what the running skill is aimed at is
+  not a surprise, but a chest the bot emptied or a crop it harvested a minute ago is missed
+  like any other.
+- **A new kind is at most 0.6**, so it never wakes the planner or leaves a memory by itself
+  (the first sight of a kind anywhere still does, through `first_sight`). A usual thing missing
+  is strong only once the cell has been looked about some 12 times.
+- **An expectation is the planner's only way to add to the guess**, and it is a condition: it
+  can say "sees chest" when "within 6 of base chest", not "three chests" or "the door shut".
+- **`unexpected` pays nothing and costs nothing**: dopamine and the amygdala do not read it.
+- **The map file grows**: each cell now keeps two small tables per part of the day.
+
+**What in the code made it awkward.**
+
+- The map kept the most of each kind seen in a cell, fading over two game days: enough to say
+  what has been there, not how often. Looks, first sightings and changes were added to it.
+- The map has no time of day, and the amygdala's four bands (day, dusk, night, dawn) are its
+  own; the map's two are a second, coarser set.
+- Regions run in the order they are listed and a view is built late in the tick, so an area
+  that reads a view cannot be heard by the regions before the thalamus in the same tick.
+- `orienting` lasts one tick, so for focus not to count an appearing surprise twice the brain's
+  wiring has to remember what stood out a moment ago.
+- The thalamus built views only for the gated readers; "told everything" is a second kind of reader.
+
+## The neocortex, stage two: the motor area (2026-11-27)
+
+*Built and run live 2026-11-27. How it works is in [brain.md](brain.md), "The neocortex": steps
+the code can check, the motor area, hold-backs with a strength and an end, the goal channel.
+Settings: the bot's `cortex` block (`motor`, `conditions`, `holdBack`, `goalGate`; all at 0 is
+stage one's behaviour).*
+
+**Shown live** (`pnpm cortex-check`, five runs a scene; the planner is the echo planner with a
+fixed plan, so only Jev is a model):
+
+| Scene | What each area did | Outcome |
+|---|---|---|
+| 1 Plan: three steps with conditions, Jev on | Motor proposed `go_to` and `idle` and finished 15 steps; the planner's word finished none; instinct asked 465 times | 5 of 5. Every step was finished on the same tick its condition first held (0 ticks, 0 ms, for all 15, checked again from the logged states) |
+| 2 Stuck: a walk to a spot in mid-air, Jev on | Motor reported stuck once a run; the planner was woken once a run and gave its second plan | 5 of 5. Stuck 91 s in ("go_to has run 90 s, over 3 times its usual 30 s"); the planner was woken 1.0 to 5.9 s later and told so; the new goal stood 0.5 to 5.4 s after that. (Before the last change to the stuck rule, also 5 of 5: four by time, one by three failures in 10 s.) |
+| 3 Stay still: a top-priority goal to stay at the bottom of a pool, Jev on | Motor proposed `idle` at 0.8 on every tick under water | 5 of 5. It surfaced at air 8 from the medulla's urge (0.78), not the hard reflex; lowest air 6; lived every time |
+| 4 Retreat: a husk one block away for a minute, then hurt with the husk gone, then healed; no Jev | The alarm system set the retreat goal at 60 s, protected. The planner offered 3 plans a run while the bot was hurt: all 15 were kept out | 5 of 5. The retreat stood throughout, and the next plan replaced it 0.5 to 0.9 s after the bot was healed |
+| The Claude planner, one run of two minutes | 9 plans, none failed; 29 steps, all naming a skill, 20 with a "done when", every condition understood; 2 steps finished by their condition; woken once by a stuck step | It wrote steps like "Walk up to the cow: `go_to nearest:cow`, done when `within 2 of cow`, give up when `not sees cow`", and after the stuck report its reason began "Attack got stuck, likely because..." |
+| 9 The existing scenes | `selection-check`, 5 runs a scene: 7 of 8 scenes pass every run. `thalamus-check`: 6 of 7 scenes pass | Bedtime fails 5 of 5 as before (Jev's `idle` outvotes bed: the open finding). The thalamus's `spotlight` scene failed 2 runs of 4 here ("the colliculus never picked the pig") and 1 run of 4 on the last commit, so it is unsteady, not broken by this. `neuro-check` (the whole-brain scenes) was not run |
+
+Not run: scene 8 (an hour of ordinary play before and after, with the planner's and Jev's calls
+a minute). It needs two hours of the Claude planner; it is left for the last stage, when "after"
+is final. Scenes 5 to 7 belong to stages three to five.
+
+**Which findings this closes.** "The forced retreat goal can be overwritten" (closed). "A
+finished step is noticed up to 15 seconds late" (closed for steps with a condition). "The echo
+planner never marks a step done" (closed for steps with a condition). Medulla: "holding back is
+all or nothing" (closed: a strength and an end). "The panic lock was not seen live": it was,
+five times. Problem 2 is mostly closed. Not closed: "the count restarts if the planner rewords
+its steps" (it matters more now), "Jev outvotes bedtime", and "holding back flee leaves an
+unarmed bot with nothing".
+
+**Found live.**
+
+- **At the usual priority a step lost to Jev's idling on every tick.** In the first run of scene
+  1 the motor area proposed `go_to` at 0.5 on 224 ticks and won none: Jev, told the goal and its
+  steps in words, said `idle` at 0.74 to 0.77, and the stay bonus put it at 0.92. No priority
+  could have won (the ceiling is 0.8). So there is one new term in the basal ganglia,
+  `rest-yields`: while a step of the goal is in the contest, a decider's choice to do nothing
+  with the body is scaled by `1 − cortex.motor`. Anything else Jev chooses (to eat, to flee, to
+  go home) still competes with the step as before, and at 0.5 the step loses to it. This is a
+  departure from "it gets no special treatment": the proposal is ordinary, but one rule is about it.
+- **`thalamus-check spotlight` is unsteady.** The colliculus sometimes never turns to the pig
+  that is moved by console commands: 2 runs of 4 with this change, 1 of 4 on the commit before.
+- **A fleeing bot digs through glass.** The first retreat cell was glass and the bot was out in
+  two seconds. The scene uses bedrock.
+- **A skill cut short by a protective reflex ends as "failed"**, so a step whose skill the body
+  keeps overruling is stuck after three: in scene 3 the planner was woken 12 times in 5 runs
+  with "idle failed 3 times (cut short by surface at ...)". That is the right thing for the
+  planner to hear, but with the echo planner the same plan came back each time.
+- **A walk to a place that cannot be reached does not fail quickly.** In 4 runs of 5 the
+  pathfinder kept trying and the step was stuck by time; in one it failed three times in 10 s
+  ("Took too long to decide a path to the goal").
+
+**Limits.**
+
+- **Only a step with a "done when" the vocabulary can say is carried out.** One with a skill and
+  no condition is left as words, as before. The vocabulary has six kinds; there is none for air,
+  health as a number, a block being placed or broken, or "and".
+- **The step's clock for being stuck is coarse.** With nothing learned about a skill its usual
+  time is taken as 30 s, so a fresh bot waits 90 s before a walk is stuck. A skill that ends
+  "done" again and again without its condition coming true is never stuck. A step that waits
+  (`idle`) is never stuck by time, only by its "give up when".
+- **A stuck step that the planner plans again unchanged is reported again every full round**,
+  and each report is one more planner call (never sooner than 5 s after the last).
+- **The goal's priority only reaches the motor area and the goal channel.** Jev is not told it.
+- **A protected goal is kept at most 10 minutes**, whatever its condition says, and the planner
+  cannot protect its own goals. The retreat is done when no need about safety reads 0.5 or more:
+  at night in the dark that includes the light, so outdoors at night it can run its 10 minutes.
+- **While a protected goal stands the planner is still called every 15 seconds**, and its plans
+  are dropped.
+- **A hold-back's end is counted from when it was first set**, and a plan that says it again with
+  the same end does not renew it. To renew one the planner has to change its end.
+- **The goal channel uses the wall clock** for a protected goal's age, and the planner's
+  5-second floor does too, as the goal's `setAt` always has. A replay has to play those back.
+- **Instinct is still asked every tick while the motor area has a step in hand**, so Jev calls
+  have not fallen. Its question does not say that a step is being carried out.
+- **The motor area reads the full state**, not a view of its own, and asks the thalamus for nothing.
+
+**What in the code made it awkward.**
+
+- A goal's steps were strings read in six places (Jev's question, memories, the report, the
+  planner's prompt, the replay, the tests). The goal now carries both: `steps` (the texts) and
+  `specs` (the steps in full).
+- `holdBack` was a list of names, read as such by the brainstem, the planner's prompt and two
+  live scripts that look for a name in the log. It is a list of records now; the two scripts
+  and the replay read both shapes.
+- Every region set the goal with `ws.setGoal`, which could not say no. It now returns why a
+  goal was kept out, and the workspace is handed the goal channel when it is made.
+- The standing-choice term keeps a silent decider's running skill in the vote by region, so
+  Jev's `idle` stood against the motor area even on ticks when Jev was not asked.
+- The planner region's tests call it every tick, so the 5-second floor needed a faked clock.
+- The Claude planner's schema is fixed at construction, so what a plan may say is chosen from
+  the bot's settings when the planner is made, not per call.
+
+## The neocortex, stage one: one design for an area (2026-11-27)
+
+`instinct` and `prefrontal` are now areas of one design (`packages/neocortex`): five named
+ports, a ladder, and a `cortex` record in the workspace that they talk through. Nothing they
+do has changed. This entry is what the change does not do, and what was awkward.
+
+**Shown.** All 3,283 unit tests pass (one existing test now allows for the `ports` an area adds
+to its trace). `pnpm replay-cortex` on six recorded runs with Jev and the Claude planner (2,166
+questions, 63 plans): the areas set the same goals, asked the same questions and made the same
+proposals as the plain regions on every one. On the five runs recorded since 24 November they
+also match the recording itself, question for question. The run of 18 November matches side to
+side but not the recording: the prompt and the goal's fields have changed since.
+
+**Limits.**
+
+- **The goal still lives in `ws.goal`.** The brainstem, focus, the thalamus (`watchFor`) and the
+  storage skills read it there. Only instinct (the goal) and the thalamus (the asks) read the
+  ports. The feedback is a copy of the goal, made every tick.
+- **An area that runs in the background is two regions.** The loop gives a region one rate, and
+  the goal can be replaced between two plans (the forced retreat), so the every-tick half
+  (`prefrontal-hold`) says the goal again each tick. It shows up in the log and in `--regions`
+  errors as a region of its own.
+- **Feedback is the goal and nothing else yet.** `up` is empty for both areas, and instinct asks
+  the thalamus for nothing. The current step and expectations come with the motor and sensory areas.
+- **The goal is logged three times a tick**: as the goal, as the hold's `down`, and as instinct's
+  `feedback`. A few hundred bytes each; the state is far larger.
+- **No recorded run has a forced retreat goal**, so the replay never exercised a goal set by
+  something other than the planner. That case is covered by unit tests through the real brain.
+- **The replay cannot rebuild the menu or the planner's situation text.** It reads the menu back
+  from the recorded question and plays the recorded situation back. Both sides read the full
+  state (no thalamus), so the target options are compared side to side only.
+
+**Live (2026-11-27).** `thalamus-check`: all 7 scenes pass, among them "the planner asks" (6
+sheep in the planner's view in full only after the goal asked, now through prefrontal's `ask`).
+Its slowest thalamus tick was 2.4 ms against a limit of 2 (one tick; pauses like it are on
+record from before). `selection-check`: 7 of 8 scenes pass 5 of 5. Bedtime failed 5 of 5, as it
+did before this change: Jev's `idle` at 0.48 to 0.63 went ahead on every tick and bed was never
+started (the open "Jev outvotes bedtime" finding). No other live check was run for this stage;
+there is no `cortex-check` yet, since stage one has no scene of its own.
+
+**What in the code made it awkward.**
+
+- A region has one rate, so an area with a slow part and a standing part had to be split in two.
+- The player's instinct read the goal from the workspace inside a helper three calls down
+  (`withGoal`); the feedback had to be threaded through `questions(ws, feedback)`.
+- The thalamus reads the goal directly for two things (`watchFor` and `detail`); only `detail`
+  is an ask of an area, so it now has two sources for what the goal wants.
+- There is a `packages/cortex` folder with old build output and no source. It is not tracked
+  and nothing uses it; the new package is `packages/neocortex`.
 
 ## The cerebellum, switched on (step two of the cerebellum work)
 
@@ -1246,7 +1665,7 @@ Also gone: the goal-hopping guard (the wait before retrying does that job), and 
   which heads search for about 0.48. That makes it a little readier to switch; not seen to
   cause hopping, and not run for long.
 - **Search does not read failed or cut-short runs directly**, only the lack of progress.
-- **Not seen live:** the rethink, wider options, the panic lock, and search with Jev running.
+- **Not seen live:** the rethink, wider options, the panic lock, and search with Jev running. (The panic lock was seen live 2026-11-27, five times: `cortex-check retreat`.)
 - **"An untried chest is never tried" is not solved by this**, though the design note said
   search might.
 - **`arousal-check hungry` fails about one run in two, with these changes and without** (two
@@ -2438,6 +2857,8 @@ decide.*
 - **With a goal that tells Jev to stay still at the bottom, the urge may never win** (Jev's
   confidence in `idle` goes to 0.98 and stays there), and only `drowning` saves the bot. The
   free-dive scene uses a goal that does not say that.
+  **Seen again 2026-11-27 with the motor area:** a top-priority goal to stay still at the bottom
+  (the motor area proposing `idle` at 0.8) and Jev on: the urge won at air 8 in 5 runs of 5.
 
 ## The medulla: limits of this first version
 
@@ -2468,7 +2889,9 @@ decide.*
   bot in a long fight does not eat.
 - **`eat` with a level stops at the first bite that reaches it**, so it can overshoot by one food's worth.
 - **Holding back is all or nothing.** A goal that names `need_air` damps it to 0.3 for as long as
-  the goal lasts; the planner cannot say "until air 8".
+  the goal lasts; the planner cannot say "until air 8". **Closed 2026-11-27** (stage two of the
+  neocortex): a hold-back has a strength from 0 to 1 and can end with the current step or after
+  a number of seconds. It still cannot end on a level of air: there is no condition for air.
 - **The pain signal is from health lost**, so absorption hearts hide pain, and a bot at half
   health reads the same pain from 2 points lost as a full one.
 - **A skill that cannot be stopped stops every reflex.** The brain does not tick again until a
@@ -2992,7 +3415,10 @@ runs again and may replace it, even if the bot has not reached safety.
 **What would fix it.** Hold the retreat goal until a "safe" condition is met (no threat, at base or
 sheltered), or tell the planner in its prompt that a retreat is in progress.
 
-**Status.** Open.
+**Status.** Closed 2026-11-27 by the goal channel (see "The neocortex, stage two"). The retreat
+is a protected goal, done when `need safety below 0.5`: plans offered before that are kept out,
+and the planner's prompt says the goal is protected and until when. With `cortex.goalGate: 0`
+it is as before.
 
 ## Search: "wider options" only offers more of Jev's picks
 
@@ -3095,7 +3521,10 @@ no condition. Then call the planner only when needed: no goal, all steps done, a
 death or shock, and a safety net every few minutes. That also cuts LLM calls by roughly 10 to 20
 times. Deferred on purpose: we chose not to optimize yet.
 
-**Status.** Open.
+**Status.** Closed 2026-11-27 for steps with a "done when" the code can read: the motor area
+finishes them on the tick the condition comes true (see "The neocortex, stage two"). A step with
+no such condition is still judged by the planner on its clock. The planner is still called every
+15 seconds: calling it only when needed was not part of this.
 
 ## Planner steps: the count restarts if the planner rewords its steps
 
@@ -3109,7 +3538,9 @@ same. If the planner rewrites them even slightly, the count goes back to 0.
 **What would fix it.** Tell the planner to repeat unchanged steps word for word, or give steps
 stable ids so a reworded step keeps its place.
 
-**Status.** Open. Matters once something reads the count itself (e.g. showing Jev the next step).
+**Status.** Open. It matters now: the motor area reads the count to know which step it is at. A
+plan that changes any part of any step (its text, skill, target or condition) starts the count
+at 0 again, so a planner that rewords a finished step has it carried out a second time.
 
 ## Planner steps: the echo planner never marks a step done
 
@@ -3122,5 +3553,6 @@ stable ids so a reworded step keeps its place.
 **What would fix it.** Nothing needed for real runs (`--planner claude`). For offline runs, the
 "done when" conditions above would work without an LLM.
 
-**Status.** Open, low priority.
+**Status.** Closed 2026-11-27 for steps with a "done when": the motor area finishes them, whatever
+the planner. A step given to the echo planner as text alone is still never marked done.
 

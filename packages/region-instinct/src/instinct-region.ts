@@ -1,12 +1,13 @@
-import type { Answer, DecisionEngine, Proposal, Question, Region, Workspace } from "@familiar/contracts";
+import type { Answer, DecisionEngine, Feedback, Proposal, Question, Region, RegionOutput, Workspace } from "@familiar/contracts";
+import type { Area } from "@familiar/neocortex";
 import { actionFor } from "./answers-to-action.js";
 import { ACTION_QUESTION_ID } from "./questions/build-action-question.js";
 
 export interface InstinctOptions {
   /** What answers the questions (Jev, echo, ...). */
   engine: DecisionEngine;
-  /** The questions to ask this tick. Read the workspace (e.g. the goal) to shape them. */
-  questions(ws: Workspace): Question[];
+  /** The questions to ask this tick, shaped by the workspace and by what the area above says (the goal). Run as a plain region, it is told nothing. */
+  questions(ws: Workspace, feedback?: Feedback | null): Question[];
   /** Turns the answers into proposals. Default: `actionProposal` with no target check. */
   toProposals?(answers: Answer[], ws: Workspace): Proposal[];
   /** True to skip this tick without asking the engine (e.g. while asleep). Default: never. */
@@ -26,23 +27,39 @@ export interface InstinctOptions {
  * questions, answers and engine time.
  */
 export function createInstinctRegion(options: InstinctOptions): Region {
-  const { engine, questions, toProposals = (answers) => actionProposal(answers), name = "instinct", layer = 1, timeoutMs } = options;
+  const { name = "instinct", layer = 1, timeoutMs } = options;
+  return { name, layer, everyMs: 0, ...(timeoutMs === undefined ? {} : { timeoutMs }), run: (ws) => ask(options, ws) };
+}
+
+/**
+ * Instinct as an area of the cortex: the same questions and proposals, with the goal read from
+ * the feedback of the area above it. It reports nothing upward and asks the thalamus for nothing.
+ */
+export function createInstinctArea(options: InstinctOptions): Area {
+  const { name = "instinct", layer = 1, timeoutMs } = options;
   return {
     name,
     layer,
     everyMs: 0,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    async run(ws) {
-      if (options.paused?.(ws)) return { proposals: [], trace: { paused: true } };
-      const asked = questions(ws);
-      const started = performance.now();
-      // The engine is shown what this reader is told (the thalamus's view), not the full state.
-      const answers = await engine.decide(ws.view(name), asked);
-      const engineMs = engine.lastTiming?.()?.totalMs ?? performance.now() - started;
-      shareSignals(ws, asked, answers);
-      return { proposals: toProposals(answers, ws), trace: { engine: engine.name, engineMs, questions: asked, answers } };
+    input: name,
+    async run({ ws, feedback }) {
+      const { proposals, trace } = await ask(options, ws, feedback);
+      return { action: proposals, ...(trace ? { trace } : {}) };
     },
   };
+}
+
+async function ask(options: InstinctOptions, ws: Workspace, feedback?: Feedback | null): Promise<RegionOutput> {
+  const { engine, questions, toProposals = (answers) => actionProposal(answers), name = "instinct" } = options;
+  if (options.paused?.(ws)) return { proposals: [], trace: { paused: true } };
+  const asked = questions(ws, feedback);
+  const started = performance.now();
+  // The engine is shown what this reader is told (the thalamus's view), not the full state.
+  const answers = await engine.decide(ws.view(name), asked);
+  const engineMs = engine.lastTiming?.()?.totalMs ?? performance.now() - started;
+  shareSignals(ws, asked, answers);
+  return { proposals: toProposals(answers, ws), trace: { engine: engine.name, engineMs, questions: asked, answers } };
 }
 
 export interface ActionProposalOptions {

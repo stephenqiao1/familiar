@@ -61,6 +61,14 @@ describe("withGoal", () => {
     expect(withGoal("ctx", store.viewFor("i"))).toBe("ctx\nCurrent goal: build a shelter Steps: gather wood; build walls.");
   });
 
+  it("takes the goal it is handed (the feedback of the area above) in place of the workspace's", () => {
+    const store = workspace(data());
+    store.viewFor("prefrontal").setGoal({ text: "build", steps: [], reason: "" });
+    const ws = store.viewFor("i");
+    expect(withGoal("ctx", ws, { ...ws.goal!, text: "hide" })).toBe("ctx\nCurrent goal: hide");
+    expect(withGoal("ctx", ws, null)).toBe("ctx");
+  });
+
   it("marks the planner's goal less important as its weight falls, and drops it while the planner is offline", () => {
     const store = workspace(data());
     store.viewFor("prefrontal").setGoal({ text: "build", steps: [], reason: "" });

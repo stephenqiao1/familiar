@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import type { Goal, ItemWant, Plan, Planner, PlanRequest } from "@familiar/contracts";
+import type { Goal, ItemWant, NameRequest, Plan, Planner, PlanRequest } from "@familiar/contracts";
+import { asHoldBack, CORTEX_ROLE, DROP_NOTES, EXPECT, fullHoldBack, NOTES, fullSteps, PRIORITY, type PlannerExtras } from "./plan-extras.js";
 import { z } from "zod";
 
 export interface ClaudePlannerOptions {
@@ -12,6 +13,8 @@ export interface ClaudePlannerOptions {
   effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** Who the agent is and how it should plan; put before every situation. */
   role?: string;
+  /** What more a plan may say: steps in full, graded hold-backs, a priority. Default: none of them (steps are text, a hold-back is a name). */
+  extras?: PlannerExtras;
 }
 
 const PlanSchema = z.object({
@@ -87,12 +90,15 @@ export class ClaudePlanner implements Planner {
   private readonly model: string;
   private readonly effort: NonNullable<ClaudePlannerOptions["effort"]>;
   private readonly role: string;
+  private readonly schema: typeof PlanSchema;
 
   constructor(options: ClaudePlannerOptions = {}) {
     this.client = options.client ?? new Anthropic();
     this.model = options.model ?? "claude-sonnet-5-5";
     this.effort = options.effort ?? "medium";
-    this.role = options.role ?? DEFAULT_ROLE;
+    const extras = options.extras ?? {};
+    this.role = options.role ?? [DEFAULT_ROLE, ...(extras.steps ? [CORTEX_ROLE.steps] : []), ...(extras.holdBack ? [CORTEX_ROLE.holdBack] : []), ...(extras.priority ? [CORTEX_ROLE.priority] : []), ...(extras.expect ? [CORTEX_ROLE.expect] : []), ...(extras.notes ? [CORTEX_ROLE.notes] : [])].join(" ");
+    this.schema = PlanSchema.extend({ ...(extras.steps ? { steps: fullSteps } : {}), ...(extras.holdBack ? { holdBack: fullHoldBack } : {}), ...(extras.priority ? { priority: PRIORITY } : {}), ...(extras.expect ? { expect: EXPECT } : {}), ...(extras.notes ? { notes: NOTES, dropNotes: DROP_NOTES } : {}) }) as unknown as typeof PlanSchema;
   }
 
   async plan(request: PlanRequest, signal?: AbortSignal): Promise<Plan> {
@@ -104,7 +110,7 @@ export class ClaudePlanner implements Planner {
         // If the model declines, the API retries on a fallback model it picks.
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
-        output_config: { effort: this.effort, format: betaZodOutputFormat(PlanSchema) },
+        output_config: { effort: this.effort, format: betaZodOutputFormat(this.schema) },
         messages: [{ role: "user", content: planPrompt(request) }],
       },
       signal ? { signal } : undefined,
@@ -112,16 +118,62 @@ export class ClaudePlanner implements Planner {
     if (response.stop_reason === "refusal") throw new Error("planner declined to plan");
     if (!response.parsed_output) throw new Error(`planner gave no plan (stop reason: ${response.stop_reason})`);
     const plan = response.parsed_output;
-    return { ...plan, wants: cleanWants(plan.wants), ifThen: plan.ifThen.filter((r) => r.when && r.skill).slice(0, 3).map(({ when, skill, onStartle }) => ({ when, skill, ...(onStartle ? { onStartle: true } : {}) })), holdBack: plan.holdBack.filter(Boolean) };
+    return { ...plan, steps: (plan.steps as Plan["steps"]).map(cleanStep), wants: cleanWants(plan.wants), ifThen: plan.ifThen.filter((r) => r.when && r.skill).slice(0, 3).map(({ when, skill, onStartle }) => ({ when, skill, ...(onStartle ? { onStartle: true } : {}) })), holdBack: (plan.holdBack as Parameters<typeof asHoldBack>[0][]).filter((h) => (typeof h === "string" ? h : h.name)).map(asHoldBack) };
+  }
+
+
+  async nameRoutine(request: NameRequest, signal?: AbortSignal): Promise<{ name: string; description: string }> {
+    const response = await this.client.beta.messages.parse(
+      { model: this.model, max_tokens: 1000, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default", output_config: { effort: "low", format: betaZodOutputFormat(NameSchema) }, messages: [{ role: "user", content: namePrompt(request) }] },
+      signal ? { signal } : undefined,
+    );
+    if (!response.parsed_output) throw new Error(`planner gave no name (stop reason: ${response.stop_reason})`);
+    return response.parsed_output;
   }
 }
 
-/** The user message: the current goal (if any), then the situation. */
-export function planPrompt({ situation, currentGoal }: PlanRequest): string {
+const NameSchema = z.object({
+  name: z.string().describe("One word, in lowercase letters (underscores allowed), that names what the routine does. Not one of the names already in use."),
+  description: z.string().describe("One short line saying what it does, as the other abilities are described."),
+});
+
+/** The message asking for a routine's name. */
+export function namePrompt({ steps, doneWhen, taken }: NameRequest): string {
+  const told = steps.map((s, i) => `${i + 1}. ${s.skill}${s.target ? ` (${s.target})` : ""}`).join("\n");
+  return `The agent has done this routine several times, and each time it brought about: ${doneWhen}\n${told}\n\nIt will be kept as one ability of its own. Names already in use: ${taken.join(", ")}.\nName it in one word and describe it in one line.`;
+}
+
+/** The user message: the current goal (if any), then the situation, then why it is asked now if that is out of turn. */
+export function planPrompt({ situation, currentGoal, woken, notes }: PlanRequest): string {
+  const noted = notes === undefined ? "" : `\n\nYour notes (${notes.length} of 5):${notes.length ? notes.map((n) => `\n- ${n.key}: ${n.text}`).join("") : " none yet."}`;
   const goal = currentGoal
-    ? `Current goal: ${currentGoal.text}\nSteps (${currentGoal.stepsDone} of ${currentGoal.steps.length} done): ${currentGoal.steps.join("; ") || "none"}\nCarry: ${formatWants(currentGoal.wants)}${formatTuning(currentGoal)}`
+    ? `Current goal: ${currentGoal.text}${formatStanding(currentGoal)}\nSteps (${currentGoal.stepsDone} of ${currentGoal.steps.length} done): ${formatSteps(currentGoal) || "none"}\nCarry: ${formatWants(currentGoal.wants)}${formatTuning(currentGoal)}`
     : "Current goal: none yet.";
-  return `${goal}\n\nSituation:\n${situation}\n\nSet the goal.`;
+  return `${goal}${noted}\n\nSituation:\n${situation}${woken ? `\n\n${woken}` : ""}\n\nSet the goal.`;
+}
+
+/** A step as the model gave it, without the fields it left empty. */
+function cleanStep(step: Plan["steps"][number]): Plan["steps"][number] {
+  if (typeof step === "string") return step;
+  const { text, skill, target, doneWhen, giveUpWhen } = step;
+  return { text, ...(skill ? { skill } : {}), ...(skill && target ? { target } : {}), ...(doneWhen ? { doneWhen } : {}), ...(giveUpWhen ? { giveUpWhen } : {}) };
+}
+
+/** The steps as text; one given in full is followed by what it says in brackets. */
+function formatSteps(goal: Pick<Goal, "steps" | "specs">): string {
+  return goal.steps
+    .map((text, i) => {
+      const { skill, target, doneWhen, giveUpWhen } = goal.specs?.[i] ?? { text };
+      const more = [skill ? `skill ${skill}${target ? ` at ${target}` : ""}` : "", doneWhen ? `done when ${doneWhen}` : "", giveUpWhen ? `give up when ${giveUpWhen}` : ""].filter(Boolean);
+      return more.length ? `${text} [${more.join("; ")}]` : text;
+    })
+    .join("; ");
+}
+
+/** What the planner should know of how the goal stands: its priority when it is not the usual one, and that it cannot be replaced yet. */
+function formatStanding(goal: Partial<Pick<Goal, "priority" | "protected" | "doneWhen">>): string {
+  const priority = goal.priority !== undefined && goal.priority !== 0.5 ? ` (priority ${goal.priority})` : "";
+  return goal.protected ? `${priority}\nThis goal is protected: it stands until "${goal.doneWhen}" is true, and your plan will wait until then.` : priority;
 }
 
 /** Whole counts above 0, one entry per item (the last one wins). */
@@ -135,10 +187,18 @@ export function cleanWants(wants: ItemWant[]): ItemWant[] {
 }
 
 /** The current goal's loaded responses and held-back reflexes, if it has any. */
-function formatTuning(goal: Pick<Goal, "ifThen" | "holdBack">): string {
+function formatTuning(goal: Pick<Goal, "ifThen" | "holdBack"> & Partial<Pick<Goal, "expect">>): string {
   const loaded = goal.ifThen.length ? `\nLoaded responses: ${goal.ifThen.map((r) => `if ${r.when} then ${r.skill}${r.onStartle ? " (also released by any fright)" : ""}`).join("; ")}` : "";
-  const held = goal.holdBack.length ? `\nHolding back: ${goal.holdBack.join(", ")}` : "";
-  return loaded + held;
+  const expected = goal.expect?.length ? `\nExpecting: ${goal.expect.map((e) => `${e.what}${e.when ? ` (when ${e.when})` : ""}`).join("; ")}` : "";
+  const held = goal.holdBack.length ? `\nHolding back: ${goal.holdBack.map(formatHeld).join(", ")}` : "";
+  return loaded + held + expected;
+}
+
+/** A hold-back in full with no end is its name alone; any other says its strength and end. */
+function formatHeld(held: Goal["holdBack"][number] | string): string {
+  if (typeof held === "string") return held;
+  const end = held.until === "step" ? ", until its step is done" : typeof held.until === "number" ? `, for ${held.until} s` : "";
+  return held.strength === 1 && !end ? held.name : `${held.name} (strength ${held.strength}${end})`;
 }
 
 function formatWants(wants: ItemWant[]): string {

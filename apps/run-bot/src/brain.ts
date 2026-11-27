@@ -1,4 +1,4 @@
-import { bodyFirst, CONFLICT_SIGNAL, createBasalGanglia, DEFAULT_SELECTION, desperateEasesRestraint, HABIT_SIGNAL, share, type SelectionSettings, type Striatum, givenUp, holdForWant, learnedValue, restraint, standingChoice, stay, switching, urgeLoosensStay } from "@familiar/basal-ganglia";
+import { bodyFirst, CONFLICT_SIGNAL, createBasalGanglia, createGoalChannel, DEFAULT_SELECTION, desperateEasesRestraint, HABIT_SIGNAL, share, type SelectionSettings, type Striatum, givenUp, holdForWant, learnedValue, restraint, restYields, standingChoice, stay, switching, urgeLoosensStay } from "@familiar/basal-ganglia";
 import { patienceOf, selectionInputs, type SelectionParts } from "./selection-inputs.js";
 import { bodyOf, partsOf } from "./body-channels.js";
 export { patienceOf } from "./selection-inputs.js";
@@ -7,12 +7,15 @@ import { BURST_SIGNAL, createThalamusRegion, DEFAULT_THALAMUS, type ThalamusSett
 import { createWantsInView } from "./wants.js";
 import { COMPETE, createHypothalamusRegion, DEFAULT_DRIVES, describeDrives, DESPERATE_SIGNAL, pressing, STRESS_SIGNAL, UNMET_SIGNAL, type DriveSettings, type Need, type TargetMemory } from "@familiar/region-hypothalamus";
 import { createDriveWatch, createReliefIndex, stressOnOutlook } from "./drives.js";
-import type { Arbiter, Candidate, DecisionEngine, NeedReading, Planner, Region, Skill, State, Workspace } from "@familiar/contracts";
+import type { Arbiter, Candidate, DecisionEngine, Goal, NeedReading, Planner, Region, Skill, State, Step, Workspace } from "@familiar/contracts";
 import { createCerebellumRegion, LARGE_MISMATCH, MISMATCH_SIGNAL, type CerebellumOptions } from "@familiar/region-cerebellum";
 import { APPEAL_SIGNAL, createAmygdalaRegion, FEAR_SIGNAL, MATTERS_SIGNAL, NO_READERS, type AmygdalaOptions } from "@familiar/region-amygdala";
 import { createMemoryRegion, memoryNotes, type MemoryStore, type Place, type PlaceKeeper } from "@familiar/memory";
 import {
   approachableThings,
+  conditionsNote,
+  playerSensory,
+  RETREAT_GOAL,
   rememberedThings,
   asleep,
   curiosity,
@@ -83,8 +86,10 @@ import {
   type AttentionBudget,
   NEUTRAL_SEARCH,
   INTERRUPT_SIGNAL,
+  NORADRENALINE,
   PATIENCE_SIGNAL,
   PLANNER_OFFLINE_SIGNAL,
+  PLANNER_WEIGHT_SIGNAL,
   planningHorizon,
   REPLAN_SIGNAL,
   RETHINK_INSTRUCTION,
@@ -133,9 +138,14 @@ import {
   type BrainstemSettings,
   type ColliculusSettings,
 } from "@familiar/region-brainstem";
-import { createInstinctRegion } from "@familiar/region-instinct";
-import { createPrefrontalRegion } from "@familiar/region-prefrontal";
+import { areaOf, areaRegions, DEFAULT_CORTEX, NO_CONDITIONS, type Conditions, type CortexSettings } from "@familiar/neocortex";
+import { createInstinctArea } from "@familiar/region-instinct";
+import { createMotorArea, type Chunks, type Stuck } from "@familiar/region-motor";
+import type { LearnedStore } from "./learned-skills.js";
+import { createPrefrontalArea, type Notes } from "@familiar/region-prefrontal";
 import { createReflexRegion, REFLEX_SIGNAL } from "@familiar/region-reflex";
+import { createSensoryArea, STRONG_SURPRISE, UNEXPECTED_SIGNAL, type Surprise, type UsualSource } from "@familiar/region-sensory";
+import { surpriseKept } from "./surprise.js";
 
 /** Alarm below this counts as calm enough to consolidate memories. */
 const CALM_ALARM = 0.2;
@@ -149,8 +159,18 @@ const FRAZZLED_NOTE = "You are badly rattled right now: keep the plan short and 
 const FEAR_ALARM = 0.5;
 /** A full mismatch (a movement that went badly wrong) raises alarm to this: a small start, not a fright. */
 const MISMATCH_ALARM = 0.2;
+/** A thing that stood out this recently and a surprise are taken for the same event. */
+const STOOD_OUT_MS = 1500;
 /** Above this search level, more of the engine's options are offered. */
 const WIDER_OPTIONS_ABOVE = 0.6;
+
+/** What the brain needs to save skills for itself. */
+export interface ChunkParts {
+  chains: Chunks;
+  /** A run's target written as a kind of thing (undefined: it has none; null: it cannot be written so). */
+  targetAsKind(target: string | undefined, state: State): string | null | undefined;
+  learned: Pick<LearnedStore, "taken" | "testOf" | "add" | "ran">;
+}
 
 /** What the regions are built from. */
 export interface BrainParts<Ctx> {
@@ -208,6 +228,18 @@ export interface BrainParts<Ctx> {
   amygdala?: AmygdalaOptions;
   /** The cerebellum: the movements it is told of and the models it has learned. Default: none. */
   cerebellum?: CerebellumOptions;
+  /** This bot's cortex: the motor area, conditions, graded hold-backs and the goal channel (from bots.json). Default: all on. */
+  cortex?: CortexSettings;
+  /** The game side's vocabulary of conditions, for a step's "done when". Default: none, so no step is one the code can judge. */
+  conditions?: Conditions;
+  /** Chunks: the chains that have finished steps, how a run is written as a link, and the skills saved from them. Default: nothing is noted or saved. */
+  chunks?: ChunkParts;
+  /** The planner's notes (its working memory between plans). Default: it keeps none. */
+  notes?: Notes;
+  /** What is usual in each place, as the hippocampus's map has it, for the sensory area. Default: nothing is known, so only a broken expectation is a surprise. */
+  usual?: UsualSource;
+  /** How long a skill usually takes, in ms, as the cerebellum has learned (null: not known yet). Default: nothing is known. */
+  usualMs?: (skill: string, now: number) => number | null;
   /** How feared a thing in the state is, 0 to 1, as the amygdala has learned (for the thalamus). Default: nothing is. */
   fearOfThing?: (kind: string, id: string) => number;
   /** For the planner: what lies on the known way from here to a place, in a few words. Default: nothing said. */
@@ -243,7 +275,8 @@ export interface BrainParts<Ctx> {
  */
 export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Region[] {
   const { engine, planner, scorebook, novelty, personality, patience, noradrenaline, focus, brainstem, memory, persistence, storage, skills, ctx } = parts;
-  const menu = menuSkills(skills, parts.showPrimitives);
+  // The menu is read afresh each time: a skill the bot saves for itself is on it from then on.
+  const menu = () => menuSkills(skills, parts.showPrimitives);
   // With the brainstem lesioned (--regions), reflex gains stay at 1 and nothing is ever paused.
   const hasBrainstem = !only || only.includes("brainstem");
   const hasColliculus = !only || only.includes("colliculus");
@@ -256,6 +289,32 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const drives = parts.drives ?? DEFAULT_DRIVES;
   const thalamus = parts.thalamus ?? DEFAULT_THALAMUS;
   const selection = parts.selection ?? DEFAULT_SELECTION;
+  const cortex = parts.cortex ?? DEFAULT_CORTEX;
+  // The motor area carries out steps the code can judge: with it or the conditions off, no step is one.
+  const hasMotor = cortex.motor > 0 && (!only || only.includes(MOTOR));
+  const conditions = hasMotor ? conditionsIn(cortex, parts.conditions) : NO_CONDITIONS;
+  const checkable = (step: Step) => conditions.parse(step.doneWhen) !== null;
+  // Chunks need the motor area (it notes the chains) and are off at 0.
+  const chunks = hasMotor && cortex.chunks > 0 ? parts.chunks : undefined;
+  // The sensory area: what is unexpected here. Left out or off, nothing is, and none of its readers hears anything.
+  const hasSensory = cortex.sensory > 0 && (!only || only.includes(SENSORY));
+  // The planner is shown the conditions while something can check them: the motor area (steps) or the sensory area (expectations).
+  const vocabulary = hasMotor || hasSensory ? conditionsIn(cortex, parts.conditions) : NO_CONDITIONS;
+  /** What the sensory area is reporting now (its report upward), strongest first. */
+  const surprises = (ws: Workspace) => (hasSensory ? [...(((ws.cortex[SENSORY]?.up as { unexpected?: Surprise[] } | null | undefined)?.unexpected) ?? [])].sort((a, b) => b.size - a.size) : []);
+  /** The strongest of them, if it is a strong one. */
+  const strongSurprise = (ws: Workspace) => surprises(ws).find((s) => cortex.sensory * s.size >= STRONG_SURPRISE) ?? null;
+  /** How strongly something stood out within the last moment (the colliculus's `orienting`, which lasts one tick; the sensory area's word comes a tick later). */
+  let stood = { value: 0, at: -Infinity };
+  const stoodOut = (ws: Workspace) => {
+    const [now, orienting] = [ws.state.timestamp, level(ws, ORIENTING_SIGNAL)];
+    if (orienting >= stood.value || now - stood.at > STOOD_OUT_MS) stood = { value: orienting, at: orienting > 0 ? now : stood.at };
+    return now - stood.at <= STOOD_OUT_MS ? stood.value : 0;
+  };
+  /** Whether a stuck report is still about the step the goal is at (a plan that just came back may have changed the step a tick before the motor area sees it). */
+  const freshStuck = (stuck: Stuck | null, ws: Workspace) => stuck !== null && ws.goal?.stepsDone === stuck.step && ws.goal.steps[stuck.step] === stuck.text;
+  /** The step the motor area says is stuck, if any (its report upward). */
+  const stuckStep = (ws: Workspace) => (ws.cortex[MOTOR]?.up as { stuck?: Stuck } | null | undefined)?.stuck ?? null;
   // How far each reader takes the amygdala's word (all 0 with no amygdala: every reader on its old source).
   const fears = parts.amygdala?.settings?.readers ?? NO_READERS;
   // How far a movement that went wrong reaches focus, alarm and habits (0 with no cerebellum).
@@ -273,8 +332,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const restIsNeed = drives.body > 0 && (!only || (only.includes("hypothalamus") && only.includes("medulla"))) && medulla.vitals > 0;
   // The brainstem sets how strongly each soft reflex and each upkeep urge fires (alarm, bravery, the goal's hold-backs).
   // The upkeep urges take a goal's hold-backs, but not alarm or bravery: needing air is no weaker for being calm.
-  const upkeepGain = hasBrainstem && brainstem.holdBack > 0 ? createReflexGain({ settings: brainstem, alarmOf: () => NEUTRAL_ALARM, leaningOf: () => null }) : undefined;
-  const gainOf = hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? createReflexGain({ settings: brainstem, alarmOf, leaningOf, threatOf: (ws) => threatLevel(ws.state) }) : undefined;
+  const upkeepGain = hasBrainstem && brainstem.holdBack > 0 ? createReflexGain({ settings: brainstem, alarmOf: () => NEUTRAL_ALARM, leaningOf: () => null, graded: cortex.holdBack }) : undefined;
+  const gainOf = hasBrainstem && (brainstem.gains > 0 || brainstem.holdBack > 0) ? createReflexGain({ settings: brainstem, alarmOf, leaningOf, threatOf: (ws) => threatLevel(ws.state), graded: cortex.holdBack }) : undefined;
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
   const up = (ws: Workspace, signal: string) => (ws.signals[signal]?.value ?? 0) > 0;
   // Over-aroused, instinct is offered fewer options (the far side of the inverted U).
@@ -287,6 +346,52 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const gates = { instinct: createRateGate(USUAL_MS.instinct), planner: createRateGate(USUAL_MS.planner) };
   // A near tie the basal ganglia are waiting on sets them to full rate too: what they say next may settle it.
   const held = (gate: keyof typeof gates, ws: Workspace, urgent: boolean) => gates[gate].hold(level(ws, UPPER_RATE_SIGNAL, 1), ws.state.timestamp, urgent || up(ws, CONFLICT_SIGNAL));
+  // The prefrontal cortex is two regions: the planning (in the background) and what it holds (every tick).
+  const [prefrontalHold, prefrontal] = areaRegions(
+    createPrefrontalArea({
+      planner,
+      describe: (ws) =>
+        describeSituation(ws, menu(), storage, [
+          ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, (parts.attentionBudget?.() ?? NEUTRAL_BUDGET).remembered, parts.wayTo),
+          ...(hasBrainstem && brainstem.holdBack > 0 ? [REFLEX_NOTE] : []),
+          ...(drives.tellPlanner > 0 ? [describeDrives(ws.needs)].filter((line) => line !== null) : []),
+          // The words a step's "done when" and an expectation can be written in.
+          ...(vocabulary.forms.length ? [conditionsNote(vocabulary, [...new Set(needs(ws).flatMap((n) => [n.name, n.kind]))])] : []),
+        ]),
+      guidance: (ws) => {
+        const horizon = planningHorizon(patienceOf(ws, patience), patience.horizon);
+        const notes = [...(up(ws, RETHINK_SIGNAL) ? [RETHINK_INSTRUCTION] : []), ...(up(ws, FRAZZLED_SIGNAL) ? [FRAZZLED_NOTE] : []), ...(horizon.instruction ? [horizon.instruction] : [])];
+        return notes.length ? { ...horizon, instruction: notes.join(" ") } : horizon;
+      },
+      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL) || held("planner", ws, up(ws, REPLAN_SIGNAL) || up(ws, BURST_SIGNAL) || freshStuck(stuckStep(ws), ws) || strongSurprise(ws) !== null),
+      wake: (ws) => up(ws, REPLAN_SIGNAL),
+      // A stuck step (the motor area's report upward) wakes the planner at once, and it is told why.
+      // So does a strong surprise (the sensory area's report upward): the place is not as it usually is, or an expectation broke.
+      urgent: (ws) => {
+        const stuck = stuckStep(ws);
+        if (stuck && freshStuck(stuck, ws)) return { key: stuck.at, note: `Step ${stuck.step + 1} of the current goal ("${stuck.text}") is stuck: ${stuck.why}. Plan another way.` };
+        const surprise = strongSurprise(ws);
+        return surprise && { key: `surprise ${surprise.at} ${surprise.kind}`, note: `Something is not as expected: ${surprise.why}. Plan with that in mind.` };
+      },
+      checkable,
+      // A routine that has worked three times is named by the planner, once, and saved as a skill.
+      ...(chunks
+        ? {
+            naming: {
+              next: () => ((chain) => (chain ? { steps: chain.links, doneWhen: chain.doneWhen, taken: chunks.learned.taken() } : null))(chunks.chains.ready()[0]),
+              named(request, given) {
+                const skill = chunks.learned.add({ doneWhen: request.doneWhen, links: request.steps }, given);
+                chunks.chains.made({ doneWhen: request.doneWhen, links: request.steps }, skill.name);
+                return skill.name;
+              },
+            },
+          }
+        : {}),
+      // Working memory: a few notes the planner keeps between plans.
+      ...(cortex.notes > 0 && parts.notes ? { notes: parts.notes } : {}),
+    }),
+    LADDER,
+  ) as [Region, Region];
   const all: Region[] = [
     createReflexRegion({
       // The lean is the colliculus's to give: with its sky and ground off (or the colliculus left out) the defence takes none.
@@ -355,7 +460,10 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createFocusRegion({
       // A thing that stood out strongly raises focus for a moment.
       // So does a near tie the basal ganglia are waiting on: look closely while the choice hangs.
-      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []), ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : []), ...(fears.focus > 0 ? [{ name: "promising", read: (ws: Workspace) => fears.focus * level(ws, APPEAL_SIGNAL) }] : []), ...(mismatch > 0 ? [{ name: "mismatch", read: (ws: Workspace) => level(ws, MISMATCH_SIGNAL) }] : [])],
+      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []), ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : []), ...(fears.focus > 0 ? [{ name: "promising", read: (ws: Workspace) => fears.focus * level(ws, APPEAL_SIGNAL) }] : []), ...(mismatch > 0 ? [{ name: "mismatch", read: (ws: Workspace) => level(ws, MISMATCH_SIGNAL) }] : []),
+        // What is unexpected here raises focus, less what a thing that just stood out has already raised it by (the same event is not counted twice).
+        ...(hasSensory ? [{ name: "unexpected", read: (ws: Workspace) => Math.max(0, level(ws, UNEXPECTED_SIGNAL) - focus.orienting * stoodOut(ws)) }] : []),
+      ],
       settings: focus,
       asleep,
       moved,
@@ -388,10 +496,13 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       settings: noradrenaline,
       // Moved somewhere else all at once, or the body now wants something of another kind: the planner should look again.
       replanWhen: (ws: Workspace) => (posture.displaced > 0 && wasDisplaced(ws.state)) || (drives.tellPlanner > 0 && driveWatch.changed(ws)),
+      // With the goal channel on, the forced retreat is a protected goal: no ordinary plan replaces it until the bot is safe.
+      ...(cortex.goalGate > 0 ? { retreatGoal: RETREAT_GOAL } : {}),
     }), //                                                                                  layer 0, every tick
     createMemoryRegion({
       memory,
-      triggers: playerMemories(parts.justLearnedHurts, parts.justLearnedBadFoods),
+      // A strong surprise is kept as a discovery (the sensory area's report, a tick old).
+      triggers: [...playerMemories(parts.justLearnedHurts, parts.justLearnedBadFoods), ...(hasSensory ? [surpriseKept(strongSurprise)] : [])],
       placeOf,
       factSupport: focus.factSupport,
       // The map: where the bot is (`ws.place`), how unfamiliar that is, and replay.
@@ -407,12 +518,17 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     // It shares `fear`, `appeal` and `matters`; each reader takes them by its own strength (amygdala.readers).
     // Left out (--regions), fear reads as 0 and the readers outside this list keep the last thing it learned.
     ...(parts.amygdala ? [createAmygdalaRegion(parts.amygdala)] : []), //                  layer 0, every tick
+    // What the prefrontal cortex holds, said again every tick: the goal (its feedback to the areas below) and
+    // what it asks the thalamus for. Before the thalamus and instinct, so both read this tick's.
+    prefrontalHold, //                                                                      layer 2, every tick
     // The thalamus: the gateway to the deciding layers. It builds what instinct and the planner are told from
     // the full state: the nearest few of each kind (the attention budget), and only what is in view if that is on.
     // Listed just before instinct, so that instinct reads this tick's view. Left out (--regions), they read the full state.
     createThalamusRegion({
       ...playerThalamus(),
       readers: DECIDERS,
+      // The sensory area is told everything the body can know of, with no budget.
+      ...(hasSensory ? { whole: [SENSORY], unexpected: (item: { id: string }, ws: Workspace) => surprises(ws).some((s) => s.ids.includes(item.id)) } : {}),
       settings: thalamus,
       nearby: () => (parts.attentionBudget?.() ?? NEUTRAL_BUDGET).nearby,
       // The modulators: what dopamine wants, what the colliculus has got used to, focus, arousal, and how strongly something just stood out.
@@ -427,45 +543,84 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       paused: (reader, ws) => up(ws, UPPER_PAUSED_SIGNAL) || (reader === PLANNER && up(ws, PLANNER_OFFLINE_SIGNAL)),
       lookSkill: LOOK_SKILL,
     }), //                                                                                  layer 0, every tick
+    // The sensory area: guesses what is in view (what was here a moment ago, what is usual here, what the goal says to
+    // expect) and reports only where it was wrong, sharing `unexpected`. Straight after the thalamus, whose view it reads.
+    ...(hasSensory
+      ? areaRegions(
+          createSensoryArea({
+            ...playerSensory(),
+            strength: cortex.sensory,
+            ...(parts.usual ? { usual: parts.usual } : {}),
+            parse: conditionsIn(cortex, parts.conditions).parse,
+            paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL),
+          }),
+          LADDER,
+        )
+      : []), //                                                                             layer 0, every tick
     // The striatum: well-worn choices become habits. Listed before instinct, which is not asked while a habit is acted on.
     ...(parts.striatum && selection.habits > 0 ? [parts.striatum.region] : []), //          layer 0, every tick
-    createInstinctRegion({
-      // Jev is asked about, and shown, only what the thalamus passes on (`ws.view("instinct")`).
-      engine,
-      questions: (ws) => instinct.questions(ws),
-      toProposals: instinct.toProposals,
-      // Asleep and undisturbed: the brainstem pauses the deciding layers, so no engine calls are made.
-      // Asleep: no engine calls. Drowsy: fewer. Anything urgent, or an alarm interrupt, goes straight through.
-      // Acting on a habit: Jev is not asked (the striatum lets a call through every few seconds).
-      paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || up(ws, HABIT_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL) || up(ws, BURST_SIGNAL)),
-    }), //                                                                                  layer 1, every tick
+    // The motor area: carries out the step the goal is at. A step with a skill is proposed like anything else, at
+    // the goal's priority; one without is passed down to instinct as its focus. Before instinct, which reads this tick's.
+    ...areaRegions(
+      createMotorArea({
+        strength: cortex.motor,
+        parse: conditions.parse,
+        // A step's skill is one the planner was shown.
+        skillProblem: (name) => (menu().some((s) => s.name === name) ? null : "not one of the listed abilities"),
+        canStart: (name, target) => skills.find((s) => s.name === name)?.canRun(ctx, target) ?? false,
+        ...(parts.usualMs ? { usualMs: parts.usualMs } : {}),
+        // Idling uses no part of the body: a step that waits has no usual length.
+        rests: (name) => skills.find((s) => s.name === name)?.parts?.length === 0,
+        // Alarm can take the planner out of charge: its goal's steps are then worth less, or nothing. The alarm's own goal counts in full.
+        weightOf: (goal: Goal, ws) => (goal.setBy === NORADRENALINE ? 1 : up(ws, PLANNER_OFFLINE_SIGNAL) ? 0 : level(ws, PLANNER_WEIGHT_SIGNAL, 1)),
+        paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL),
+        // Chunks: the chain of abilities that got a step finished is noted; three times the same, and it is ready to be a skill.
+        ...(chunks
+          ? {
+              chains: {
+                // What a reflex or an urge of the body did is left out: everything else the brain chose counts.
+                counts: (event) => event.by !== undefined && !BODY_REGIONS.includes(event.by),
+                link: (skill, target, ws) => ((kind) => (kind === null ? null : { skill, ...(kind === undefined ? {} : { target: kind }) }))(chunks.targetAsKind(target, ws.state)),
+                finished: (doneWhen, links) => chunks.chains.finished(doneWhen, links),
+                // A learned skill is judged by its own test: finished, and its "done when" true just after.
+                ended(event, ws) {
+                  const test = chunks.learned.testOf(event.skill);
+                  if (test === null || event.type === "interrupted") return;
+                  chunks.learned.ran(event.skill, event.type === "done" && (test === undefined || (conditions.parse(test)?.holds(ws) ?? true)));
+                },
+              },
+            }
+          : {}),
+      }),
+      LADDER,
+    ), //                                                                                   layer 1, every tick
+    ...areaRegions(
+      createInstinctArea({
+        // Jev is asked about, and shown, only what the thalamus passes on (`ws.view("instinct")`).
+        // The goal reaches it as the feedback of the area above (the motor area, which may add the step to attend to; else the prefrontal cortex).
+        engine,
+        questions: (ws, feedback) => instinct.questions(ws, feedback),
+        toProposals: instinct.toProposals,
+        // Asleep and undisturbed: the brainstem pauses the deciding layers, so no engine calls are made.
+        // Asleep: no engine calls. Drowsy: fewer. Anything urgent, or an alarm interrupt, goes straight through.
+        // Acting on a habit: Jev is not asked (the striatum lets a call through every few seconds).
+        paused: (ws) => up(ws, UPPER_PAUSED_SIGNAL) || up(ws, HABIT_SIGNAL) || held("instinct", ws, up(ws, INTERRUPT_SIGNAL) || up(ws, BURST_SIGNAL)),
+      }),
+      LADDER,
+    ), //                                                                                   layer 1, every tick
     createPatienceRegion({
       // The outlook is worked out from the same needs dopamine is paid for, and from the stress they do not already account for.
       needs: (ws) => [...needs(ws), ...stressOnOutlook(needs(ws), ws.signals[STRESS_SIGNAL]?.value, patience.stress)],
       settings: patience,
       effects: () => ({ persistence: persistence.status(Date.now()) }),
     }), //                                                                                  layer 0, every tick
-    createPrefrontalRegion({
-      planner,
-      describe: (ws) =>
-        describeSituation(ws, menu, storage, [
-          ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, (parts.attentionBudget?.() ?? NEUTRAL_BUDGET).remembered, parts.wayTo),
-          ...(hasBrainstem && brainstem.holdBack > 0 ? [REFLEX_NOTE] : []),
-          ...(drives.tellPlanner > 0 ? [describeDrives(ws.needs)].filter((line) => line !== null) : []),
-        ]),
-      guidance: (ws) => {
-        const horizon = planningHorizon(patienceOf(ws, patience), patience.horizon);
-        const notes = [...(up(ws, RETHINK_SIGNAL) ? [RETHINK_INSTRUCTION] : []), ...(up(ws, FRAZZLED_SIGNAL) ? [FRAZZLED_NOTE] : []), ...(horizon.instruction ? [horizon.instruction] : [])];
-        return notes.length ? { ...horizon, instruction: notes.join(" ") } : horizon;
-      },
-      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL) || held("planner", ws, up(ws, REPLAN_SIGNAL) || up(ws, BURST_SIGNAL)),
-      wake: (ws) => up(ws, REPLAN_SIGNAL),
-    }), //                                                                                  layer 2, every 15 s
+    prefrontal, //                                                                          layer 2, every 15 s
   ];
   if (!only) return all;
-  const unknown = only.filter((name) => !all.some((r) => r.name === name));
+  // An area's every-tick half goes with its area.
+  const unknown = only.filter((name) => !all.some((r) => areaOf(r.name) === name));
   if (unknown.length) throw new Error(`Unknown region(s): ${unknown.join(", ")}. Use: ${all.map((r) => r.name).join(", ")}`);
-  return all.filter((r) => only.includes(r.name));
+  return all.filter((r) => only.includes(areaOf(r.name)));
 }
 
 /**
@@ -479,7 +634,30 @@ function unanswered(needs: readonly NeedReading[]): number {
 /** The player's dopamine region: every reward rule, the situation labels and cues, tuned by personality. */
 /** The deciding layers: the only regions that read a view of the state. */
 const PLANNER = "prefrontal";
+const MOTOR = "motor";
+/** The regions whose proposals are the body's own (reflexes, urges, the turn of the head, bedtime): what they do is never part of a learned skill. */
+const BODY_REGIONS = ["reflex", "medulla", "brainstem", "colliculus", "reticular"];
+const SENSORY = "sensory";
+/**
+ * THE LADDER: the areas of the cortex, lowest first. What an area finds goes up it; what the area
+ * above expects (the goal) comes down. To add an area, write it and name it here in its place.
+ */
+export const LADDER = [SENSORY, "instinct", MOTOR, PLANNER];
+/** The areas the thalamus builds a view for. */
 export const DECIDERS = ["instinct", PLANNER];
+
+/** The conditions in force: the game side's vocabulary while the bot's `cortex.conditions` is on, else none. */
+export const conditionsIn = (cortex: CortexSettings, conditions: Conditions | undefined): Conditions => (cortex.conditions > 0 && conditions ? conditions : NO_CONDITIONS);
+
+/**
+ * THE GOAL CHANNEL: the basal ganglia's contest for what the prefrontal cortex holds. Give it to
+ * the workspace: every goal a region offers goes through it. A protected goal (the forced
+ * retreat) stands until its own "done when" is true.
+ */
+export function createGoalGate(cortex: CortexSettings, conditions?: Conditions) {
+  const known = conditionsIn(cortex, conditions);
+  return createGoalChannel({ strength: cortex.goalGate, done: (goal, ws) => known.parse(goal.doneWhen)?.holds(ws) ?? null });
+}
 /** The skill that turns the head: its target is not a task. */
 const LOOK_SKILL = "look_at";
 
@@ -574,6 +752,8 @@ export function createArbiter<Ctx>(parts: SelectionParts<Ctx>): Arbiter {
       desperateEasesRestraint({ desperateOf: read.desperateOf, most: read.desperateEases }), // on restraint: a desperate need loosens it
       // no-go: a request of the body holds back the deciders' rivals for the same body parts
       bodyFirst({ strength: selection.bodyFirst, body: (c) => c.layer === 0 && c.region !== STRIATUM, clash: (asks, option, ws) => rivals(uses(asks.action, ws), uses(option.action, ws)) }),
+      // no-go: a decider's choice to do nothing yields to a step of the goal the motor area is carrying out
+      restYields({ strength: (parts.cortex ?? DEFAULT_CORTEX).motor, step: (c) => c.region === MOTOR, rests: (c, ws) => (c.layer >= 1 || c.region === STRIATUM) && uses(c.action, ws)?.length === 0 }),
     ],
     body: bodyOf(parts.skills, { channels: selection.channels, ...(parts.sameTime === undefined ? {} : { sameTime: parts.sameTime }) }),
     wait: { strength: selection.wait, pressing: (ws) => (ws.signals[THREAT_SIGNAL]?.value ?? 0) >= ON_IT },

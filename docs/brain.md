@@ -5,7 +5,7 @@ share one **workspace** (shared memory), and the **basal ganglia** (the arbiter)
 proposals go ahead.
 
 ```
-Workspace (state · views for the deciders · goal · signals · attended · needs · place · recent events)
+Workspace (state · views for the deciders · goal · signals · attended · needs · place · cortex · recent events)
    ▲ read/write            ▲ read/write          ▲ read/write
 Spinal cord and brainstem  Instinct (layer 1)    Prefrontal cortex (layer 2)
 (layer 0, every tick)      Jev, every tick       LLM, every 15 s in the background
@@ -34,8 +34,15 @@ Basal ganglia: one contest for the body and one for the head. In each,
 Skill executor → skills → primitives (every movement) and locomotion (all travel) → Minecraft
 ```
 
+Between instinct and the prefrontal cortex sits the **motor area** (layer 1, every tick, no model): it carries out
+the step the goal is at, proposing the step's skill like any other proposal, and finishes a step the tick its
+"done when" comes true (see "The neocortex").
+
+Below instinct sits the **sensory area** (layer 0, every tick, no model): it guesses what is in view and shares
+`unexpected` when the guess is wrong (see "The neocortex").
+
 Alongside these run layer-0 regions that propose little or nothing but shape the rest:
-`hypothalamus` (the body's needs), `dopamine`, `serotonin`, `noradrenaline`, `acetylcholine` (the
+`prefrontal-hold` (what the prefrontal cortex holds, said again every tick), `hypothalamus` (the body's needs), `dopamine`, `serotonin`, `noradrenaline`, `acetylcholine` (the
 neuromodulators), `hippocampus` (memory and the map), `amygdala` (what predicts harm and good) and `cerebellum`
 (what each movement comes to; in shadow so far).
 
@@ -49,7 +56,19 @@ same tick; a signal from a region listed later is read one tick late.
 |---|---|
 | Region | One brain part. Has a `name`, a `layer` (speed rank) and `everyMs` (0 = every tick). |
 | Proposal | A region's suggestion: an action, an `urgency` from 0 to 1, and a `reason`. |
-| Workspace | Shared memory. Holds the world state, the views of it built for the deciding layers, the current goal, signals, the one thing being attended to, and recent skill events. |
+| Workspace | Shared memory. Holds the world state, the views of it built for the deciding layers, the current goal, signals, the one thing being attended to, what each area of the cortex last said (`ws.cortex`), and recent skill events. |
+| Area | One area of the neocortex: a region with five named ports (`input`, `feedback`, `up`, `action`, `ask`). `sensory`, `instinct`, `motor` and `prefrontal` are areas. |
+| Ladder | The areas in order, lowest first (`LADDER` in `apps/run-bot/src/brain.ts`). What an area finds goes up; what the area above expects comes down. |
+| Feedback | What the area above tells an area: the goal, and the step to attend to when the motor area leaves one to instinct (`{ goal, step }`). |
+| Step | One step of a goal: its text, and optionally a skill, a target, a "done when" and a "give up when" (`Step`). `goal.steps` is the texts; `goal.specs` is the steps in full. |
+| Condition | What a "done when" or "give up when" says, in a small vocabulary the game side defines (`carrying 3 bread`, `within 3 of chest`, `not sees zombie`). It is only read from the state. |
+| Hold-back | A soft reflex a goal holds back: `{ name, strength, until }`. `strength` is 0 to 1; `until` is `"step"`, a number of seconds, or left out (as long as the goal). A plain name still works. |
+| Expectation | Something the planner says to expect while its goal stands: `{ what, when }`, both conditions (`goal.expect`, at most 3). The sensory area reports one that does not hold. |
+| Surprise | One difference the sensory area found between its guess and what is in view: `{ what, kind, ids, size, why, at }`. `unexpected` is the strongest one standing. |
+| Note | One line the planner keeps between plans, under a short key (`Note`). At most five; a note no plan has kept three times running is dropped. Saved in `data/<bot>/notes.json`. |
+| Chain, link | A chain is the abilities that ran, in order, while one step was under way and that got it finished; each link is one ability and its target written as a kind of thing (`nearest:chest`). |
+| Learned skill | A chain kept as a skill of its own, as data (`LearnedSkill`: a name, a description, the steps, its `doneWhen`). Saved in `data/<bot>/learned-skills.json`. |
+| Goal channel | The basal ganglia's contest for the goal: a goal a region offers (`ws.setGoal`) replaces the standing one only if it wins there. A protected goal stands until its own "done when" is true. |
 | View | The state as one deciding layer is told it (`ws.view(reader)`): a selection of the full state, built each tick by the thalamus for instinct and for the planner. With no thalamus it is the full state. Every other region reads `ws.state`. |
 | Attended | The one thing the bot is attending to right now: `{ id, kind, bearing, salience, since, angle, elevation, field, lean }`, or null. Set by the colliculus (`ws.setAttended`); logged each tick. |
 | Needs | The body's needs as the hypothalamus read them this tick (`ws.needs`): each need's level, how hard it presses, where it is heading and its target; the need wanted most; the body clock; stress. Null with no hypothalamus. |
@@ -58,7 +77,7 @@ same tick; a signal from a region listed later is read one tick late.
 | Fear, appeal, matters | Three signals from the amygdala, each 0 to 1: the strongest harm (`fear`) and the strongest good (`appeal`) that the cues here now predict, and the larger of the two (`matters`). The thing attended to and each threat sized up also carry `harm`: what that one thing predicts. |
 | Cell, area | A cell is one cube of the world on the hippocampus's map. An area is a group of cells that connect with no door, climb or change of light between them (a cave, a house, a field). |
 | Signal | A named level from 0 to 1 that one region shares with the others (e.g. `in_danger`, `dopamine`, `patience`, `alarm`). |
-| Goal | What the prefrontal cortex wants the bot working toward: text, steps (and how many are done), what to carry (`wants`), things to watch for (`watchFor`), responses loaded in advance (`ifThen`) and reflexes to hold back (`holdBack`). Instinct reads it each tick. |
+| Goal | What the prefrontal cortex wants the bot working toward: text, steps (in full in `specs`, and how many are done), a `priority`, whether it is `protected` and until when (`doneWhen`), what to carry (`wants`), things to watch for (`watchFor`), responses loaded in advance (`ifThen`) and reflexes to hold back (`holdBack`). It lives in the workspace (`ws.goal`); a region offers one with `ws.setGoal`, and the motor area and instinct are handed it each tick as feedback. |
 | Hard reflex | A life-saving rule. Always urgency 1; nothing learned, felt or planned can stop it. |
 | Soft reflex | A tunable rule. Its base urgency is multiplied by a gain and capped at 0.95, so it competes in the arbiter. |
 | Primitive | One of the body's built-in movements (`look_at`, `step`, `break_block`, ...): small, stoppable, and reporting what it changed. Skills marked `primitive: true`. The only code that moves the bot's body. |
@@ -85,8 +104,11 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `region-hypothalamus` | Owns the body's needs: reads each once a tick and shares the reading (`ws.needs`), with moving targets, looking ahead, the body clock, slow stress and the top drive. Game-free. |
 | `region-amygdala` | Learns what predicts harm and what predicts good, by surprise, by place and by likeness, and shares `fear`, `appeal` and `matters`. Game-free; the Minecraft side offers the cues and the outcomes. |
 | `region-cerebellum` | Learns what each of the body's movements comes to (how long, how far, which changes), from the signed error between prediction and result. Game-free; the Minecraft side says what a movement is, its situation and its measures. It shares `mismatch`, and its numbers are read by the journeys, the give-up clock, the primitives' expectations and the defence, each by a strength in `cerebellum` (bots.json). |
-| `region-instinct` | Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
-| `region-prefrontal` | Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done. It can be paused, woken early, and given extra guidance. |
+| `neocortex` | The one design for a cortical area: the five ports, the ladder (`feedbackFor`), and `areaRegions`, which turns an area into the regions the loop runs. Also the cortex's settings and the reader of conditions (`createConditions`). Game-free. |
+| `region-sensory` | An area. Guesses what is in view (what was here a moment ago, what is usual here, what the goal says to expect), reports the differences upward and shares `unexpected`. No model. Game-free. |
+| `region-motor` | An area. Carries out the step the goal is at: proposes its skill, finishes it when its "done when" is true, and reports a stuck step upward. It also notes the chain of abilities that got each step finished (`chunks.ts`). No model. Game-free. |
+| `region-instinct` | An area. Asks a decision engine (Jev) questions each tick, and proposes its top 3 options. Can be paused. |
+| `region-prefrontal` | An area, the top of the ladder. Asks a planner (Claude) for a goal in the background. The goal also lists what to carry (`wants`); `take_items` and `deposit_items` follow it. The planner says how many steps are done, for steps the code cannot judge. It can be paused, woken early (by a signal, a stuck step or a strong surprise), and given extra guidance. It keeps up to five notes between plans (`notes.ts`). |
 | `neuromodulators` | Chemical dials, each a region that shares signals (see below). |
 | `memory` | The hippocampus: a store of events and places (`record`, `recall`, `knownPlaces`) and a `hippocampus` region that records moments worth remembering. Read by the planner (top memories and known places) and the state (`memory.nearby`). |
 | `engine-jev`, `engine-claude`, `engine-echo` | The models regions use. `echo` is a free offline stand-in. |
@@ -199,7 +221,8 @@ blocks known to hurt within 3 blocks.
 - **Loaded responses.** A goal's `ifThen` (up to 3, e.g. creeper → flee) fires at urgency 0.95 the
   moment the thing appears, without waiting for the planner. At most one per 3 seconds. A response
   naming an unknown skill, a primitive or a reflex-only skill is dropped and logged.
-- **Hold back.** A goal's `holdBack` names soft reflexes (or the skills they propose) to damp.
+- **Hold back.** A goal's `holdBack` names soft reflexes (or the skills they propose) to damp,
+  each in full or with a strength and an end (see "Hold-backs with a strength and an end").
   Hard reflex names are ignored and logged. A goal with `ifThen` or `holdBack` survives an alarm
   interrupt.
 - **Arousal gate.** Moved to the reticular formation (below).
@@ -643,7 +666,7 @@ is one piece of news. A burst while the colliculus's `orienting` is 0.6 or more 
 the tick, which lets the deciding layers run at once (the same urgent path an alarm interrupt
 uses).
 
-**The planner talks back** (`asks.ts`, `detail`). A goal may carry `detail`: up to five kinds or
+**The planner talks back** (`asks.ts`, `detail`). The thalamus reads each area's `ask` port (`ws.cortex`); the prefrontal cortex's ask is its goal's `detail`. A goal may carry `detail`: up to five kinds or
 ids the planner wants to be told about in full. They open their channel and are raised. One
 that matches nothing for a minute is dropped. The planner's prompt says that what it is shown
 is a selection and that it can ask.
@@ -651,6 +674,11 @@ is a selection and that it can ask.
 | Signal | Meaning | Read by |
 |---|---|---|
 | `burst` | 1 on a tick when strong news burst through a turned-down channel | The rate gate: instinct and the planner are not held back that tick |
+
+**The sensory area's view.** A reader named in `whole` (the sensory area) is told everything
+the body can know of: the full state, less what the field of view leaves out when that is on,
+with no gate and no budget. And a thing the sensory area calls unexpected counts as new
+(`unexpected` on the thalamus), exactly as one that just appeared does.
 
 **In the trace** (`thalamus`): `fullSize`, `fixed` (what is always passed whole), `focus`,
 `arousal`, `asks`, and for each reader `limit`, `spent`, `size`, `over`, each channel (`open` and
@@ -978,7 +1006,8 @@ else is built from, and the **single doorway** to the bot's body.
   pressing other keys, so the bot looks one way and walks another. `gaze.ts` decides where to
   look and which keys that takes; the locomotion controller knows whether the bot is walking
   plainly and which way, and presses them. The colliculus's look uses this.
-- **Learned skills** are chains of primitives kept as data, never code. The runner
+- **Learned skills** are chains of abilities kept as data, never code (the bot saves its own: see
+  "Skills the bot saves for itself"). A chain may use anything that is not reflex-only. The runner
   (`packages/core/src/chain.ts`) runs the steps in order, stops at the first failure, and returns
   each step's result and changes. Any chain in `data/<bot>/learned-skills.json`
   (`[{ "name", "description", "steps": [{ "primitive", "target" }] }]`) is loaded at start as a
@@ -1085,6 +1114,7 @@ one step a tick: prune, merge, generalise (a fact from 3 agreeing memories).
 | Way | Two cells walked between, the quickest crossing, how often, and what lay between (a door, a climb) | `map.ts` |
 | Area | Cells joined by plain ways and sharing a setting ("open" under the sky; "covered" where the sky's light is low, or a roof and walls are close round the body). An area keeps its name as the map grows | `map-areas.ts` |
 | Familiarity | 0 to 1 per cell: half after 4 visits (half a minute spent counts as a visit) | `map.ts` |
+| What is usual | Per cell and part of the day: how many times the bot has looked about (once on coming in, once every 30 s it stays) and on how many of those each kind was in view; when each kind was first seen; each change the first time it is seen. Read by the sensory area (`usual`, `looksIn`, `firstSeenIn`, `changeFirst`) | `map.ts` |
 | Route | The quickest known way between two cells, only along ways walked. A cell that led to harm counts as two minutes longer, so another way is taken when there is one | `map-route.ts` |
 
 Each tick the region puts the bot on the map and shares `ws.place` and the signal
@@ -1380,6 +1410,305 @@ prints the shadow report and the readers' report for any log, and with the model
 what each movement does. `pnpm brain-report` has the same under CEREBELLUM. `LIVE_OUTPUT=<file>`
 before any live check keeps what the bot printed.
 
+## The neocortex: one design for every deciding part
+
+The neocortex is one sheet built from the same small circuit. What a patch does depends on what
+it is wired to. Here that is one type, `Area` (`packages/neocortex/src/area.ts`), used for every
+deciding part of the brain. Four areas are built on it: `sensory`, `instinct`, `motor` and
+`prefrontal`. With every strength in the bot's `cortex` settings at 0, instinct and the
+prefrontal cortex do exactly what they did as plain regions, the motor area does nothing and
+there is no sensory area.
+
+**The five ports.** Every area has the same five:
+
+| Port | Direction | What it is | In the code |
+|---|---|---|---|
+| `input` | in, from the thalamus | The view of the state built for it | `Area.input` names the view; `run` is handed `view` |
+| `feedback` | in, from the area above | What that area expects of it: the goal, and the step to attend to | `run` is handed `feedback` (`{ goal, step }`), read from `ws.cortex` |
+| `up` | out, to the area above | What it found, and any surprise | `AreaOutput.up`, written to `ws.cortex[name].up` |
+| `action` | out, toward the body | Its proposals, weighed by the basal ganglia like any others | `AreaOutput.action` |
+| `ask` | out, to the thalamus | What it wants to be sent next (kinds or ids to be told of in full) | `AreaOutput.ask`, written to `ws.cortex[name].ask` |
+
+An area also says what it tells the area **below** it (`AreaOutput.feedback`, written to
+`ws.cortex[name].feedback`): that is the lower area's `feedback` port.
+
+**Areas talk only through the workspace.** `ws.cortex` is a small record, one entry per area:
+`{ up, feedback, ask, at }`. `areaRegions(area, ladder)` (`area-region.ts`) wraps an area as a
+region: each run it reads the feedback meant for the area, runs it, writes its three outward
+ports to `ws.cortex`, and adds `ports` to the area's trace (`input`, `feedback`, `up`, `action`,
+`ask`, and `down`: what it told the area below). No area holds a reference to another.
+
+**The ladder** is one list, `LADDER` in `apps/run-bot/src/brain.ts`, lowest first: `sensory`,
+`instinct`, `motor`, `prefrontal`. An
+area's feedback is what the nearest area above it on the ladder is saying (`feedbackFor`). An
+area left out with `--regions` says nothing, so the next one's feedback passes straight through.
+
+**An area that runs in the background is two regions.** The prefrontal cortex plans every 15
+seconds, but what it holds must not go stale in between (the alarm system can replace or drop
+the goal at any tick). So `areaRegions` gives a background area a second region,
+`prefrontal-hold`, which runs every tick, makes no model call, and says again what the area
+holds, read from the workspace as it stands: the goal as its feedback, and the goal's `detail`
+as its `ask`. It is listed before the thalamus and instinct, so both read this tick's. Picking
+regions by name (`--regions`) takes the `-hold` half along with its area.
+
+**What each area does now.**
+
+| Area | Layer | Input | Feedback it reads | Up | Action | Ask |
+|---|---|---|---|---|---|---|
+| `sensory` | 0, every tick, straight after the thalamus | `ws.view("sensory")`: everything the body can know of, with no budget | The goal's `expect` | The differences it found (`unexpected`: a list of surprises), or nothing | none | nothing |
+| `instinct` | 1, every tick | `ws.view("instinct")` | The goal, and the step to do now if the motor area leaves it one, for Jev's action question | nothing yet | Jev's top options | nothing |
+| `motor` | 1, every tick, before instinct | the full state (no view is built for it) | The goal and how many steps are done | The step under way and how it is carried (`skill`, `focus`, `words`); `stuck` with the reason | The step's skill, at the goal's priority | nothing |
+| `prefrontal` | 2, every 15 s (`prefrontal-hold` every tick), and at once on a stuck step | `ws.view("prefrontal")` | none (it is the top) | nothing | none: it only offers the goal | The goal's `detail` |
+
+The goal itself still lives in `ws.goal`, where the brainstem (hold-backs, loaded responses),
+focus (`watchFor`), the thalamus (`watchFor`) and the storage skills (`wants`) read it. Only
+the two cortical readers moved to the ports: instinct takes the goal from its feedback, and the
+thalamus takes the planner's asks from the areas' `ask`. With no area above it (the prefrontal
+cortex left out), instinct reads `ws.goal` as before, so a retreat goal the alarm system sets
+still reaches Jev. With no area on record at all, the thalamus reads the goal's `detail`.
+
+**Checking that nothing changed.** `pnpm replay-cortex <logs>` plays recorded runs through the
+two deciders twice, side by side: as the plain regions and as areas, with the recorded answers
+of Jev and the planner played back. It reports whether the two sides set the same goals, asked
+the same questions and made the same proposals, and how far each matches the recording.
+
+### Steps the code can check
+
+A step of a goal is text, and optionally a `skill`, a `target`, a `doneWhen` and a `giveUpWhen`
+(`Step` in `packages/contracts/src/brain.ts`). A plan may give a step as plain text or in full;
+the goal keeps both: `goal.steps` (the texts, as before) and `goal.specs` (the steps in full).
+
+**Conditions** are written in a small vocabulary. The game side defines the kinds
+(`packages/minecraft/src/brain/conditions.ts`); `createConditions` in `packages/neocortex` reads
+the text and adds "not". The planner is shown the forms, an example of each and the needs'
+names in its situation (`conditionsNote`).
+
+| Form | True when |
+|---|---|
+| `carrying <count> <item>` | The bot carries at least that many |
+| `within <blocks> of <what>` | It is that close to a spot (`pos:x,y,z`), to `base`, to a place it knows by name (`base chest`, `bed`), or to the nearest thing of a kind in the state (`chest`, `zombie`, `hostile`) |
+| `need <name> below <level>` | That need (by its name, or every need of that sort: `hunger`, `safety`) reads below the level, 0 to 1 |
+| `time is day`, `time is night` | It is |
+| `sees <kind>` | A thing of that kind is in the state |
+| `not <condition>` | The condition is false |
+
+A condition is only ever read from the workspace; it changes nothing. One the vocabulary cannot
+read gives `null`: the step is then left as it was before the motor area (words in Jev's
+question, judged by the planner), and the motor area's trace says `unread`.
+
+### The motor area
+
+`createMotorArea` (`packages/region-motor/src/motor-area.ts`). Every tick it reads the goal from
+its feedback and looks at the step the goal is at (`goal.specs[goal.stepsDone]`):
+
+| The step | What the motor area does | `up.as` |
+|---|---|---|
+| Has a `doneWhen` it can read, and a skill | Proposes the skill (with its target) at urgency = `cortex.motor` × the goal's priority (0.8 at the most) × the planner's weight | `skill` |
+| Has a `doneWhen` it can read, no skill (or one the planner was not shown) | Passes the step down as instinct's focus: Jev's question ends "The step to do now: ..." | `focus` |
+| Has no `doneWhen`, or one it cannot read | Nothing: the goal passes down as it is, and the planner judges the step | `words` |
+
+- **Finishing.** The tick `doneWhen` is true, it calls `ws.finishStep()`: `stepsDone` goes up by
+  one and `stepDoneAt` is set, and the same tick it is already on the next step. One step a
+  tick. The planner's own count (`stepsDone` in its plan) only moves the goal past steps with
+  no readable `doneWhen` (`stepsDoneAfter` in `prefrontal-region.ts`).
+- **Its proposals are ordinary.** They go to the basal ganglia like any other, from layer 1.
+  The goal's priority starts at 0.5. The ceiling is 0.8, the same as instinct's surest choice:
+  full urgency belongs to the hard reflexes, and an urge of the body can outbid any goal.
+  One term is about them (`rest-yields`, under "The basal ganglia"): a decider's choice to do
+  nothing does not outvote a step. Anything else Jev chooses competes with the step as usual.
+- **Stuck** (`step-run.ts`). A step is stuck when its `giveUpWhen` is true; when its skill has
+  failed 3 times (`MOST_FAILS`; being cut short by a protective reflex counts, as it does for
+  the scorebook); when its skill has run 3 times its usual time (`TIMES_USUAL`; the usual time
+  is the cerebellum's, or 30 s while it has learned none); or when its skill has not got to run
+  at all for that long (it cannot start, or something else keeps winning). A skill that only
+  rests (`idle`: it uses no part of the body) is never judged by time while it runs: a wait has
+  no usual length. It then reports
+  `up.stuck = { step, text, why, at }`, and starts its clocks again. The report stands for as
+  long as that step is the one under way, and a step that goes on being stuck is reported again
+  no sooner than 30 seconds later (`REPORT_AGAIN_MS`).
+- **The planner is woken.** The prefrontal region's `urgent` option reads the report: it plans
+  at the next tick, and the planner is told why (`PlanRequest.woken`: "Step 1 of the current
+  goal (...) is stuck: ... Plan another way."). Each report is answered once, and never sooner
+  than 5 seconds after the plan before (`URGENT_GAP_MS`).
+- **Alarm.** While the planner is out of charge (`planner_offline`) its steps are worth nothing,
+  and less while its weight is down; the alarm system's own goal counts in full. Asleep, the
+  motor area does nothing.
+
+### Hold-backs with a strength and an end
+
+A plan's `holdBack` may be a name (in full, for as long as the goal, as before) or
+`{ name, strength, until }`: `strength` from 0 to 1, and `until: "step"` (it ends when the step
+under way as it was set is finished) or a number of seconds. The gain of a held-back reflex is
+scaled by `1 − brainstem.holdBack × strength × 0.7` (`reflexGain` in
+`packages/region-brainstem/src/gain.ts`), so half strength is half way between free and held
+back in full. `heldBack(goal, rule, skill, now)` gives the strength in force: 0 once it has
+ended (`lapsed`). A hold-back that the next plan says again with the same end keeps the time
+and the step it started at (`heldOver` in `prefrontal-region.ts`), so planning again does not
+start it afresh. `cortex.holdBack: 0` takes every hold-back in full for as long as the goal.
+
+### The goal channel
+
+Every goal a region offers goes through `ws.setGoal`, and the workspace asks the goal channel
+(`createGoalChannel` in `packages/basal-ganglia/src/goal-channel.ts`, given to `createWorkspace`
+as `goalGate`). It keeps the standing goal, and `setGoal` returns why, unless the offered one
+wins. The rules, in order:
+
+1. A **protected** goal stands until its own `doneWhen` is true. (One with no `doneWhen` the
+   vocabulary can read cannot be protected, and none is kept longer than 10 minutes.)
+2. A finished goal (every step done, or its `doneWhen` true) gives way to anything.
+3. A region may always revise its own goal.
+4. Otherwise the offered goal's `priority` must be at least the standing one's (less
+   `1 − cortex.goalGate`).
+
+A goal has a `priority` (0 to 1, 0.5 unless the plan says) and may be `protected`, with a
+`doneWhen`. The forced retreat (`RETREAT_GOAL` in `conditions.ts`) is priority 1, protected,
+done when `need safety below 0.5`. The planner cannot protect its own goals. A plan the channel
+keeps out is dropped, and the prefrontal trace says `goalKept` with the reason; the planner is
+told in its next prompt that the standing goal is protected and until when.
+
+### The sensory area: what is unexpected here
+
+`createSensoryArea` (`packages/region-sensory/src/sensory-area.ts`). Every tick it makes a guess
+of what is in view and reports only where the guess was wrong.
+
+**The guess** has three parts:
+
+- *What was here a moment ago*: every kind in view within the last 5 seconds (`MOMENT_MS`).
+- *What is usual here*: from the hippocampus's map. The map counts a **look** each time the bot
+  comes into a cell and every 30 seconds it stays, by part of the day (day or night), and of
+  those looks how many had each kind in view (`looks`, `had` on a map cell; `map.usual(cell,
+  band)`). A kind in view on 60% of the looks or more is usual (`USUAL_SHARE`). The map also keeps
+  when each kind was first seen from each cell, and each change the first time it is seen.
+- *What the planner says to expect*: the goal's `expect`, up to three `{ what, when }` in the
+  conditions vocabulary ("sees chest" when "within 6 of base chest").
+
+**What it reports** (`Surprise`, in `surprise.ts`), each once:
+
+| What | When | Size |
+|---|---|---|
+| `new` | A kind in view that was never seen from any cell of this area, in an area looked about at least 3 times | 0.6 × how well the area is known |
+| `missing` | A kind that is usual from this cell at this time of day is not in view, and was not a moment ago (after 2 s in the cell) | 0.8 × its share of the looks × how well the cell is known |
+| `changed` | A thing changed (started moving, a block changed) in a way never seen before, and it is not what the running skill is aimed at | 0.5 |
+| `expectation` | An expectation's `what` is false while its `when` holds | 1 |
+
+"How well known" is `1 − 0.5^(looks ÷ 4)`. A surprise stands for 3 seconds (`HOLD_MS`) and goes
+up as `up.unexpected`. The area shares one signal, **`unexpected`** (0 to 1): `cortex.sensory` ×
+the strongest surprise standing. In a place it has hardly looked about it says nothing: that is
+what `unfamiliar` is for.
+
+**Who hears it.** Each reader is one line in `apps/run-bot/src/brain.ts`. All four are listed
+before the sensory area, so they hear it a tick late.
+
+| Reader | What it does | Where |
+|---|---|---|
+| Thalamus | The things a surprise names count as new (`fresh`), exactly as a thing that just appeared does: raised priority, and a burst if their channel is turned down | `unexpected:` on the thalamus |
+| Acetylcholine | A focus input, `unexpected`, less what a thing that stood out in the last 1.5 s already gave | `inputs` of the focus region |
+| Hippocampus | A surprise of 0.7 or more (`STRONG_SURPRISE`) is kept as a discovery: "Was surprised: ..." | `surpriseKept` in `apps/run-bot/src/surprise.ts` |
+| Prefrontal cortex | A surprise of 0.7 or more wakes the planner at once, and it is told what ("Something is not as expected: ...") | `urgent` on the prefrontal area, with the same 5-second floor as a stuck step |
+
+**The other "something is new" signals**, and how `unexpected` sits beside each:
+
+| Signal | From | It means | Beside `unexpected` |
+|---|---|---|---|
+| `novelty` | Dopamine | A kind of thing the bot has rarely met anywhere: a small reward for meeting it | Not the same thing: `unexpected` is about this place, and pays nothing. A pig is not novel after the first few, and is still unexpected where none has been |
+| `orienting` (suddenness) | Colliculus | Something appeared, moved or changed just now, expected or not | The same event when the new thing also appears suddenly. Focus counts it once: `unexpected` gives only what `orienting` did not already give |
+| `unfamiliar` | Hippocampus | The place itself is little known | Kept apart: in a place it has not looked about 3 times the sensory area reports nothing new or missing |
+| `mismatch` | Cerebellum | The bot's own movement came out other than predicted | Another subject (the body, not the scene). A change to what the running skill is aimed at is not a surprise |
+| `burst` | Thalamus | News was passed through a turned-down channel | `unexpected` feeds it: a surprise marks its things as new, which is what makes news. It is one mark (`fresh`), not two |
+
+### Working memory: the planner's notes
+
+The planner remembers nothing from one plan to the next except what the situation shows it. So
+the prefrontal cortex keeps up to five **notes** for it (`packages/region-prefrontal/src/notes.ts`):
+a short key and one line each (the key at most 40 characters, the line 200).
+
+- **Shown every time.** Each plan request carries the notes (`PlanRequest.notes`), and the
+  prompt lists them: "Your notes (2 of 5): - ledge: cannot be reached ...".
+- **Kept, changed, dropped.** A plan's `notes` lists the notes to have next time: the same key
+  with the same text keeps one, with new text changes it, a new key adds one. `dropNotes` names
+  keys to drop at once. A note the plan leaves out is not dropped yet: its `unkept` count goes
+  up, and at three plans in a row it is dropped (`UNKEPT_PLANS`). A sixth note is refused.
+- **The goal channel gates them.** When a protected goal keeps a plan out, that plan's word on
+  the notes is not taken either: nothing is added, dropped or counted. The trace says `held`.
+- **What they are for** is in the planner's role (`CORTEX_ROLE.notes` in `engine-claude`): what
+  it has tried and how it went, what it is waiting for, what it decided and why; that they are
+  few; and to read them before planning.
+- **Saved** in `data/<bot>/notes.json` with the rest of what the bot has learned, and loaded at start.
+- `cortex.notes: 0`: none are kept, shown or asked for.
+
+### Skills the bot saves for itself
+
+With practice a sequence that works becomes one unit. The motor area notes it; the planner
+names it; from then on it is a skill like any other.
+
+**Noting the chain** (`ChainOptions` on the motor area, `packages/region-motor/src/chunks.ts`).
+While a step with a readable "done when" is under way, the motor area follows the skill events.
+Every run that ended `done` is a link, unless one of the body's own regions started it (the
+reflexes, the medulla, the brainstem, the colliculus, the reticular formation: `BODY_REGIONS`
+in `apps/run-bot/src/brain.ts`). Each skill event now says who started it (`by`). A run given
+no target is written by what it chose to aim at, when it says (`aimedAt`). The run still under way when the step finishes is the last link. Each
+link's target is written as a kind (`targetAsKind` in `conditions.ts`): a block or creature in
+the state becomes `nearest:<kind>`; a target that is already name-free (`nearest:`, `item:`,
+`dir:`) stays; a bare spot or a player cannot be written so, and the chain is then not kept.
+The same link twice running counts once. A chain needs 2 to 8 links.
+
+**Three times the same.** `createChunks` counts each chain by the kind of step it finished (the
+step's "done when") and its links. At three (`TIMES_TO_CHUNK`) it is ready. The counts are saved
+in `data/<bot>/chains.json`.
+
+**Naming.** After its next plan the prefrontal region asks the planner once, in a short
+question of its own (`Planner.nameRoutine`), to name the routine in one word and describe it in
+one line. The name is made safe (lowercase letters, digits, `_`) and must not be taken by any
+ability or learned skill, retired ones included; if it is, or the planner gives none, the name
+is made from the links (`go_to_then_take_items`).
+
+**Saved and used.** The skill is written to `data/<bot>/learned-skills.json` in the format the
+loader reads (`{ name, description, steps: [{ primitive, target }] }`, plus `doneWhen`), added
+to the executor and to the list of skills at once: it is on Jev's menu and in the planner's
+abilities from the next tick, the scorebook learns its worth, the cerebellum its time, and the
+striatum can make it a habit. It is run as one action (`createChainSkill`): its links one after
+another, stopping at the first that cannot run or fails. As each link comes up its target is
+aimed (`aimNow`: `nearest:chest` becomes that chest's spot, which every skill accepts), and a
+link that cannot run yet is waited for up to 2 seconds (`CHAIN_RUN`): what the link before
+changed, such as an item now in hand, takes a moment to show. A link that is risky makes the whole
+skill risky. It can only do what its links can.
+
+**Its test, and retiring.** A learned skill's "done when" is its test of success. Each time one
+ends, the motor area judges it on the next tick: it succeeded if it ended `done` and its "done
+when" is true. Three failures running (`RETIRE_AFTER`) retire it: it is taken off the menu and
+marked `retired` in the file, and its name stays taken. It is never deleted.
+
+`cortex.chunks: 0`: nothing is noted, named or saved; skills already in the file still load.
+
+### Settings, trace and checks
+
+- **Settings.** `bots.json`, a `cortex` block, each 0 to 1 (`CortexSettings` in
+  `packages/neocortex/src/settings.ts`): `motor` (how much of the goal's priority a step's
+  proposal carries; 0: it carries out no step), `conditions` (above 0: conditions are read and
+  shown to the planner), `holdBack` (how far a hold-back's own strength and end count),
+  `goalGate` (the goal channel), `sensory` (how much of each surprise is shared; 0: no sensory
+  area), `notes` (above 0: the planner keeps notes), `chunks` (above 0: chains are noted and saved as
+  skills). With all at 0 the cortex is two areas that only pass the goal down.
+- **What the planner may say** follows the settings (`PlannerExtras` in `engine-claude`): steps
+  in full with `motor` and `conditions` on, graded hold-backs with `holdBack` on, a priority
+  with `motor` or `goalGate` on, expectations with `sensory` and `conditions` on, notes with `notes` on. With all off it
+  is asked exactly what it was asked before.
+- **Trace.** Every area: `ports`. Motor: `step` (the one under way), `advanced` (which step, and
+  why), `stuck`, `unread`, `skillProblem`, `cannotStart`. Prefrontal: `woken`, `goalKept`, `notes` (`kept`, `changed`, `added`, `dropped`, `lapsed`,
+  `refused`, and `now`: the keys held after the plan; or `held`), `named` (a routine, what the
+  planner called it and the name it got). Motor: `chain` (the chain a finished step is put down
+  to and how often it has been seen, or why it was not kept). Sensory: `guess` (what was here a moment ago, what is usual),
+  `unexpected` (the surprises found this tick), `unread` (an expectation it could not read).
+- **Report.** `pnpm brain-report <log>` has a CORTEX section (`scripts/cortex-report.ts`): steps
+  finished and how many ticks after their condition first held (checked again on each logged
+  state), stuck steps and causes, plans woken and kept out, Jev and planner calls a minute, the
+  surprises with who reacted, what the plans did to the notes, and the chains noted with the
+  skills learned and how often each was run.
+- **Live.** `pnpm cortex-check [--runs 5] [scene ...]`: `plan`, `stuck`, `staystill`, `retreat`,
+  `surprise`, `skill`; `skilljev` (the skill scene with Jev choosing, long); and, only when named because they call the Claude planner, `notes`, `nonotes`
+  (the same scene with notes off), `cost` (ordinary play before and after, `--minutes` each) and `claude` (one run with the Claude planner). The echo planner takes a list of plans
+  (`--plan '[{...},{...}]'`) and moves to the next each time a stuck step wakes it.
+
 ## The basal ganglia: who goes ahead
 
 One place decides which proposals go ahead: `createArbiter` in `apps/run-bot/src/brain.ts`, built
@@ -1406,6 +1735,7 @@ tick, what each term added or scaled, the go total, the no-go total and the scor
 | `restraint` | no-go | deciders | The patience brake on what has cost the bot |
 | `desperate-eases-restraint` | works on `restraint` | deciders | A desperate need takes up to half of the brake off |
 | `body-first` | no-go | deciders | A request of the body in the same contest scales rivals down (below) |
+| `rest-yields` | no-go | deciders and habits | While a step of the goal (the motor area's proposal) is in the contest, a choice to do nothing with the body (idle) is scaled by `1 − cortex.motor` |
 
 A term is a name, a kind, the layers it applies to and one function
 (`packages/basal-ganglia/src/term.ts`). A term that "works on" another scales that term's
@@ -1534,6 +1864,18 @@ in `data/<name>/`.
 | Make the bot know only what it sees | `bots.json`: `thalamus.fieldOfView: 1` (the old `colliculus.fieldOfView` still works, with a warning) |
 | Add a channel | `CHANNEL_BASE` in `packages/minecraft/src/brain/thalamus-channels.ts`, and say which items are its own in `splitState` (and how they go back in `assemble`) |
 | Change what a decider is told | The modulators' weights: `WEIGHTS` in `region-thalamus/src/priority.ts`; what opens a channel: `gate.ts`; one bot: the strengths in `bots.json` under `thalamus` |
+| Add an area of the cortex | Write a function that returns an `Area` (`packages/neocortex/src/area.ts`: a name, a layer, `everyMs`, the view it reads, and `run`, which is handed `{ ws, view, feedback }` and returns `{ action, up, feedback, ask, trace }`); name it in `LADDER` in `apps/run-bot/src/brain.ts` in its place; add `...areaRegions(area, LADDER)` to the list of regions; if it reads a view, add its name to the thalamus's `readers` |
+| Change what an area tells the one below | `Feedback` in `packages/contracts/src/brain.ts`, and the area's `feedback` (or `hold`, for a background area) |
+| Change what counts as a surprise, or how strong | `SIZE`, `USUAL_SHARE`, `MIN_LOOKS`, `MOMENT_MS`, `HOLD_MS` in `packages/region-sensory/src/surprise.ts`; `STRONG_SURPRISE` for what the hippocampus keeps and the planner is woken by |
+| Add a reader of `unexpected` | One line where the reader is built in `apps/run-bot/src/brain.ts`, reading `level(ws, UNEXPECTED_SIGNAL)` or `surprises(ws)`; say in "The sensory area" how it avoids counting what another signal already counts |
+| Change how often the map looks about a place | `LOOK_EVERY_MS` in `packages/memory/src/map.ts`; the parts of the day are `dayOrNight` in `packages/minecraft/src/brain/place.ts` |
+| Change how many notes the planner keeps, or how long | `MOST_NOTES`, `UNKEPT_PLANS`, `NOTE_LENGTH` in `packages/region-prefrontal/src/notes.ts`; what it is told they are for: `CORTEX_ROLE.notes` in `packages/engine-claude/src/plan-extras.ts` |
+| Change when a chain becomes a skill | `TIMES_TO_CHUNK` and `CHAIN_LENGTH` in `packages/region-motor/src/chunks.ts`; who counts as a decider: `counts` where the motor area is built in `apps/run-bot/src/brain.ts`; how a target is written as a kind: `targetAsKind` in `packages/minecraft/src/brain/conditions.ts` |
+| Change when a learned skill is retired | `RETIRE_AFTER` in `apps/run-bot/src/learned-skills.ts` |
+| Add a condition | Write a kind in `packages/minecraft/src/brain/conditions.ts` (how it is written, and a check read from the state) and add it to the list in `playerConditions`; give an example in `conditionsNote` |
+| Change how often the planner is woken | The usual time: `everyMs` of the prefrontal area (`USUAL_MS.planner` in `apps/run-bot/src/brain.ts`). By a stuck step or a strong surprise: `URGENT_GAP_MS` in `packages/region-prefrontal/src/prefrontal-region.ts` (the least time between such plans) and `MOST_FAILS`, `TIMES_USUAL`, `UNLEARNED_MS` in `packages/region-motor/src/step-run.ts` (when a step counts as stuck) |
+| Change what a step is worth against Jev | The plan's `priority`; `cortex.motor` in `bots.json` (one bot); `MOST_URGENCY` in `packages/region-motor/src/motor-area.ts` (the ceiling) |
+| Protect a goal | Offer it with `protected: true` and a `doneWhen` the vocabulary can read (`ws.setGoal`); the rules are in `packages/basal-ganglia/src/goal-channel.ts` |
 | Give a decider a bigger view | `bots.json`: `thalamus.limits.instinct` or `.prefrontal` (characters of JSON) |
 | Add a reader | Add its region name to `DECIDERS` in `apps/run-bot/src/brain.ts`, give it a limit in `thalamus.limits`, and have it read `ws.view("<name>")` instead of `ws.state` |
 | Change the size of a map cell | `CELL_BLOCKS` in `packages/minecraft/src/brain/place.ts` (an old `map.json` then no longer fits: delete it) |
@@ -1628,6 +1970,8 @@ in `data/<name>/`.
 
 ## Adding a new region
 
+(For a deciding part of the cortex, write an `Area` instead: see "Add an area" under Common changes.)
+
 1. Copy `packages/region-reflex` to `packages/region-<name>` and rename it in `package.json`.
 2. Write a function that returns a `Region`:
    ```ts
@@ -1657,6 +2001,8 @@ pnpm start -- --regions reflex,brainstem --manual    # reflexes only; type "do <
 pnpm start -- --engine jev --same-time               # only with selection.channels 0: let a look run alongside a skill that leaves the head free
 pnpm start -- skill break_block --target dir:forward # run one skill or primitive and print what it changed
 pnpm start -- --plan '{"goal":"Explore","ifThen":[{"when":"creeper","skill":"flee"}]}'   # a fixed plan for the echo planner
+pnpm start -- --engine echo --choices '[{"when":"carrying 1 bread","choose":"eat"}]'      # the echo engine choosing by fixed rules (conditions), with no model
+pnpm start -- --plan '{"goal":"Fetch bread","steps":[{"text":"go to the chest","skill":"go_to","target":"nearest:chest","doneWhen":"within 3 of chest"}]}'   # a step the motor area carries out
 ```
 
 `--planner claude` needs `ANTHROPIC_API_KEY` in `.env`. `--engine jev` needs `TYPESAFE_API_KEY`.

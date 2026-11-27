@@ -3,6 +3,7 @@
 // Usage: pnpm brain-report [logs/player-....jsonl]   (default: the newest player log)
 import { readersReport } from "./cerebellum-readers-report.ts";
 import { cerebellumReport } from "./cerebellum-shadow-report.ts";
+import { cortexReport, type CortexTick } from "./cortex-report.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { amygdalaReport } from "./amygdala-report.ts";
 import { join } from "node:path";
@@ -477,6 +478,9 @@ console.log(`\n${amygdalaReport(ticks).join("\n")}`);
 
 // The cerebellum: the error over time by kind of movement, what the models said, and what read them.
 console.log(`\nCEREBELLUM\n${[...cerebellumReport(ticks), "", ...readersReport(ticks)].join("\n")}`);
+
+// The cortex: what the motor area carried out, what stuck, and what the goal channel did.
+console.log(`\nCORTEX\n${cortexReport(ticks as unknown as CortexTick[]).join("\n")}`);
 
 // Planner.
 const plans = ticks.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && r.trace?.plan).map((r) => r.trace!.plan as { goal: string }));

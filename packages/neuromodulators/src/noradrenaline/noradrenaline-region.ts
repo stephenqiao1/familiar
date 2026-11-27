@@ -1,4 +1,4 @@
-import type { NeedReading, Region, Workspace } from "@familiar/contracts";
+import type { NeedReading, Region, Workspace, GoalOffer } from "@familiar/contracts";
 import { createAlarm } from "./alarm.js";
 import { createSearch, noveltyBump, type SearchInput } from "./search.js";
 import type { NoradrenalineSettings } from "./settings.js";
@@ -25,8 +25,8 @@ export interface NoradrenalineOptions {
   searchInputs?: SearchInput[];
   /** Something else that calls for planning again this tick (the body was moved somewhere else, say). Default: nothing. */
   replanWhen?(ws: Workspace): boolean;
-  /** The goal set when alarm stays very high for too long. */
-  retreatGoal?: { text: string; steps: string[] };
+  /** The goal set when alarm stays very high for too long: its words, and how it stands in the goal channel (its priority, whether it is protected and until when). Default: the usual words, an ordinary goal. */
+  retreatGoal?: Partial<Pick<GoalOffer, "text" | "steps" | "priority" | "protected" | "doneWhen">>;
   /** Default: "noradrenaline". */
   name?: string;
   /** Default: 0 (runs inside every tick). */
@@ -81,7 +81,7 @@ const JUMPY_THRESHOLD = 0.7;
  */
 export function createNoradrenalineRegion(options: NoradrenalineOptions): Region {
   const { settings, searchInputs = [], name = NORADRENALINE, layer = 0 } = options;
-  const retreatGoal = options.retreatGoal ?? { text: "Retreat to safety: get away from the danger and somewhere secure.", steps: [] };
+  const retreatGoal = { text: "Retreat to safety: get away from the danger and somewhere secure.", steps: [], ...options.retreatGoal };
   const alarm = createAlarm(settings);
   const search = createSearch(settings);
   const novelty = noveltyBump();

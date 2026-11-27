@@ -1,6 +1,6 @@
 import type { ItemWant, SkillEvent } from "@familiar/contracts";
 import { createChainSkill, createSkillExecutor } from "@familiar/core";
-import { createGut, createLocomotion, createPain, INNATE_BAD_FOODS, INNATE_HURTS, minecraftSkills, primitives, setKnownHurts, tidyBody, trackBodyEvents } from "@familiar/minecraft";
+import { createGut, createLocomotion, createPain, INNATE_BAD_FOODS, INNATE_HURTS, minecraftSkills, primitives, setKnownHurts, CHAIN_RUN, tidyBody, trackBodyEvents } from "@familiar/minecraft";
 import type { ServerArgs } from "./args.js";
 import { formatChanges, formatSkillEvent } from "./format-skill-event.js";
 import { joinWithBase } from "./join.js";
@@ -19,8 +19,10 @@ export interface SkillRun {
 
 /** Runs one skill through the executor (no decision loop), prints every event, then logs out. */
 export async function runSkill({ server, skill, target, interruptAfterMs, lingerMs, wants = [] }: SkillRun): Promise<void> {
-  const learned = await loadLearnedSkills(learnedSkillsFile(server.name), primitives.map((s) => s.name), minecraftSkills.map((s) => s.name));
-  const skills = [...minecraftSkills, ...learned.skills.map((s) => createChainSkill(s, primitives, tidyBody))];
+  // A learned skill is a chain of anything the bot can already do, less what only reflexes may use.
+  const chainable = minecraftSkills.filter((s) => !s.reflexOnly);
+  const learned = await loadLearnedSkills(learnedSkillsFile(server.name), chainable.map((s) => s.name), minecraftSkills.filter((s) => s.reflexOnly).map((s) => s.name));
+  const skills = [...minecraftSkills, ...learned.skills.map((s) => createChainSkill(s, chainable, tidyBody, CHAIN_RUN))];
   if (!skills.some((s) => s.name === skill)) {
     throw new Error(`Unknown skill "${skill}". Run "pnpm start -- skills" to list them.`);
   }

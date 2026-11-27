@@ -218,6 +218,16 @@ describe("the planner's asks", () => {
     expect(t.tick(things).trace.asks).toEqual(["chest"]);
   });
 
+  it("an area's ask is read in place of the goal's detail, and every reader's asks count once", () => {
+    const t = thalamus({ shape: 0 });
+    ask(t, ["cow3"]);
+    t.store.viewFor("prefrontal").setCortex("prefrontal", { ask: ["chest"] });
+    t.store.viewFor("instinct").setCortex("instinct", { ask: ["chest"] });
+    const out = t.tick(things);
+    expect(out.trace.asks).toEqual(["chest"]);
+    expect(out.shown("prefrontal").chest).toBe("full");
+  });
+
   it("with detail at 0 an ask does nothing", () => {
     const t = thalamus({ shape: 0, detail: 0 });
     ask(t, ["chest"]);
@@ -253,3 +263,32 @@ describe("guardrails", () => {
     expect((performance.now() - started) / 100).toBeLessThan(2);
   });
 });
+
+describe("the sensory area's part", () => {
+  const crowd = Array.from({ length: 30 }, (_, i) => cow(i));
+
+  it("a thing the sensory area calls unexpected counts as new: it bursts once like a thing that just appeared, and is not counted twice", () => {
+    const strange = new Set<string>();
+    const t = thalamus({ shape: 0 }, { unexpected: (item) => strange.has(item.id) });
+    t.tick([...crowd, cow(99, { dist: 16 })]);
+    expect(t.tick([...crowd, cow(99, { dist: 16 })]).shown().cow99).toBeUndefined();
+    strange.add("cow99");
+    const first = t.tick([...crowd, cow(99, { dist: 16 })]);
+    expect(first.shown().cow99).toBe("brief");
+    expect(first.told().new).toEqual(["cow99"]);
+    // Unexpected and just appeared at once is the same news: the priority is what either gives alone.
+    const priority = (out: { trace: Record<string, any> }, id: string) => (out.trace.views.prefrontal.items as { id: string; priority: number; by: string[] }[]).find((i) => i.id === id);
+    const [alone, both] = [thalamus({ shape: 0 }, { unexpected: () => true }), thalamus({ shape: 0 }, { unexpected: () => true })];
+    expect(priority(both.tick([cow(1, { fresh: true })]), "cow1")).toEqual(priority(alone.tick([cow(1)]), "cow1"));
+    expect(priority(alone.tick([cow(1)]), "cow1")!.by).toContain("fresh");
+  });
+
+  it("a reader told everything gets the whole state, with no gate or budget, beside the others' views", () => {
+    const t = thalamus({}, { whole: ["sensory"] });
+    const out = t.tick(crowd);
+    expect((out.view("sensory").data.things as unknown[]).length).toBe(30);
+    expect(Object.keys(out.shown("instinct")).length).toBeLessThan(30);
+    expect(Object.keys(out.trace.views)).toEqual(["instinct", "prefrontal"]);
+  });
+});
+

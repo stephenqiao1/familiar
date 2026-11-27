@@ -31,21 +31,64 @@ export interface IfThen {
   onStartle?: boolean;
 }
 
+/** One step of a goal, as the motor area carries it out. */
+export interface Step {
+  text: string;
+  /** The skill that does it: the motor area proposes it. Left out: instinct is given the step as its focus. */
+  skill?: string;
+  /** What the skill is aimed at, in the skill's own target words. */
+  target?: string;
+  /** A condition in the game side's vocabulary: the step is finished the tick it comes true. */
+  doneWhen?: string;
+  /** A condition in the same vocabulary: the step is stuck once it is true. */
+  giveUpWhen?: string;
+}
+
+/** One soft reflex a goal holds back, how strongly, and until when. */
+export interface HoldBack {
+  /** The reflex's name, or the skill it proposes. */
+  name: string;
+  /** 0 (not at all) to 1 (as far as a reflex can be held back). */
+  strength: number;
+  /** When it ends: "step" (when the step under way as it was set is finished) or a number of seconds. Left out: with the goal. */
+  until?: "step" | number;
+  /** The step that was under way when it was set, and when that was (ms). Filled in for you. */
+  step?: number;
+  since?: number;
+}
+
+/** Something the planner says to expect: `what` should hold whenever `when` does (always, with no `when`). Both are conditions in the game side's vocabulary. */
+export interface Expectation {
+  what: string;
+  when?: string;
+}
+
 /** A goal written by a planning region. Other regions read it to guide their choices. */
 export interface Goal {
   text: string;
+  /** Each step's text, in order. */
   steps: string[];
+  /** The steps in full, one for each of `steps`. */
+  specs: Step[];
   reason: string;
+  /** How much it matters, 0 to 1: what the motor area's proposals for it are worth, and what a rival goal must match to replace it. */
+  priority: number;
+  /** A protected goal is not replaced until its own `doneWhen` is true. */
+  protected: boolean;
+  /** A condition (in the game side's vocabulary) that says the whole goal is finished, or null. */
+  doneWhen: string | null;
   /** What to carry for this goal: taking from storage fetches these, storing keeps them. */
   wants: ItemWant[];
   /** Kinds of things to watch for (e.g. "chest", "villager"): spotting one is a cue to act. */
   watchFor: string[];
   /** Responses loaded in advance (at most 3), fired by the fastest layer the moment their thing appears. */
   ifThen: IfThen[];
-  /** Soft reflexes to hold back while this goal is active, by reflex name or by the skill they propose. */
-  holdBack: string[];
+  /** Soft reflexes to hold back while this goal is active. */
+  holdBack: HoldBack[];
   /** Kinds or ids of things the planner wants to be told about in full (at most 5 count): the thalamus opens their channel. */
   detail: string[];
+  /** What to expect while this goal stands (at most 3): the sensory area reports one that does not hold. */
+  expect: Expectation[];
   /** How many of `steps` the planner has judged finished. */
   stepsDone: number;
   /** When a step (of this goal or an earlier one) was last judged finished, or null if never. */
@@ -53,6 +96,29 @@ export interface Goal {
   /** The region that set it. */
   setBy: string;
   setAt: number;
+}
+
+/** What the area above tells an area of the cortex: what it is working toward and what to expect. */
+export interface Feedback {
+  /** The goal being held, or null with none. */
+  goal: Goal | null;
+  /** The step to attend to now, when the area above leaves it to the one below. Left out: none in particular. */
+  step?: { index: number; text: string } | null;
+}
+
+/** A goal as a region offers it: the fields left out take their defaults. */
+export type GoalOffer = Pick<Goal, "text" | "reason"> & { steps: (string | Step)[]; holdBack?: (string | HoldBack)[] } & Partial<Pick<Goal, "wants" | "watchFor" | "ifThen" | "detail" | "expect" | "stepsDone" | "stepDoneAt" | "priority" | "protected" | "doneWhen">>;
+
+/** What one area of the cortex last said on the ports that other regions read. */
+export interface AreaPorts {
+  /** What it reported to the area above (what it found, and any surprise), or null. */
+  up: Record<string, unknown> | null;
+  /** What it tells the area below, or null. */
+  feedback: Feedback | null;
+  /** What it wants the thalamus to send it next: kinds or ids of things to be told of in full. */
+  ask: string[];
+  /** When it last said so (ms). */
+  at: number;
 }
 
 /**
@@ -176,6 +242,8 @@ export interface Workspace {
   readonly needs: Needs | null;
   /** Where the agent is on its own map, or null with no map. */
   readonly place: PlaceNow | null;
+  /** What each area of the cortex last said to its neighbours, by area name: areas talk only through this. */
+  readonly cortex: Readonly<Record<string, AreaPorts>>;
   /** Skill lifecycle events, oldest first, at most the last 20. */
   readonly recentEvents: readonly SkillEvent[];
   /**
@@ -186,8 +254,14 @@ export interface Workspace {
   view(reader: string): State;
   /** Stores the view of the state built for one reader (null: none, so it reads the full state). */
   setView(reader: string, view: State | null): void;
-  /** Replaces the goal. `setBy` and `setAt` are filled in for you; the rest default to none. */
-  setGoal(goal: Pick<Goal, "text" | "steps" | "reason"> & Partial<Pick<Goal, "wants" | "watchFor" | "ifThen" | "holdBack" | "detail" | "stepsDone" | "stepDoneAt">>): void;
+  /**
+   * Offers a goal. `setBy` and `setAt` are filled in for you; the rest default to none (priority
+   * 0.5, not protected). It replaces the standing goal unless the goal channel keeps that one:
+   * then nothing changes and the reason is returned.
+   */
+  setGoal(goal: GoalOffer): string | void;
+  /** Marks the goal's current step finished (now), leaving the rest of the goal as it is. */
+  finishStep(): void;
   /** Drops the goal (e.g. when an alarm cancels the plan). */
   clearGoal(): void;
   setSignal(name: string, value: number): void;
@@ -195,6 +269,8 @@ export interface Workspace {
   setAttended(attended: Attended | null): void;
   /** Shares this tick's reading of the body's needs. */
   setNeeds(needs: Needs | null): void;
+  /** Writes one area's ports (the ones left out are emptied). */
+  setCortex(area: string, ports: Partial<Pick<AreaPorts, "up" | "feedback" | "ask">>): void;
   /** Shares where the agent is on its map. */
   setPlace(place: PlaceNow | null): void;
 }

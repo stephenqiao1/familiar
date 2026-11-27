@@ -55,4 +55,17 @@ describe("EchoEngine", () => {
     await new EchoEngine({ delayMs: 30 }).decide(state, []);
     expect(performance.now() - start).toBeGreaterThanOrEqual(25);
   });
+
+  it("given a fixed way of choosing, picks the first of its options a choice offers, and gives no made-up answer to a choice it has no word on", async () => {
+    const engine = new EchoEngine({ choose: (state) => ((state.data as { hungry?: boolean }).hungry ? ["feast", "eat"] : []) });
+    const question = { kind: "choice" as const, id: "next_action", prompt: "", options: ["idle", "eat"] };
+    const other = { kind: "choice" as const, id: "target", prompt: "", options: ["a", "b"] };
+    const score = { kind: "score" as const, id: "risk", prompt: "", min: 0, max: 10 };
+    const state = (hungry: boolean) => ({ schemaVersion: 1, tick: 0, timestamp: 0, data: { hungry } });
+    expect(await engine.decide(state(true), [question, other, score])).toEqual([{ kind: "choice", id: "next_action", choice: "eat", probabilities: { eat: 0.95 }, confidence: 0.95 }, { kind: "score", id: "risk", score: 5, confidence: 1 }]);
+    // Nothing to choose: it idles, as ever, and still says nothing of the target.
+    expect(await engine.decide(state(false), [question, other])).toMatchObject([{ id: "next_action", choice: "idle" }]);
+    // With no rules it answers everything, as before.
+    expect(await new EchoEngine().decide(state(true), [question, other])).toHaveLength(2);
+  });
 });

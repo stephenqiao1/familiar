@@ -59,6 +59,56 @@ describe("the map", () => {
   });
 });
 
+describe("what is usual in a place", () => {
+  const at = (map: MapStore, seen: Record<string, number>, now: number, band = "day", changes: string[] = []) => map.at(cell(0, { seen, band, changes }), now);
+
+  it("counts a look on coming in and one every half minute of staying, by part of the day, and the share each kind was in view", () => {
+    const map = createMap();
+    at(map, { chest: 1, cow: 2 }, 0);
+    at(map, { chest: 1 }, 1000);
+    expect(map.usual("w:0,0", "day")).toEqual({ looks: 1, share: { chest: 1, cow: 1 } });
+    at(map, { chest: 1 }, 30_000);
+    at(map, { chest: 1 }, 60_000);
+    at(map, { chest: 1, pig: 1 }, 90_000);
+    expect(map.usual("w:0,0", "day")).toEqual({ looks: 4, share: { chest: 1, cow: 0.25, pig: 0.25 } });
+    // By night it has looked about once, and there was a zombie.
+    at(map, { zombie: 1 }, 120_000, "night");
+    expect(map.usual("w:0,0", "night")).toEqual({ looks: 1, share: { zombie: 1 } });
+    expect(map.usual("w:0,0", "day").looks).toBe(4);
+    expect(map.usual("w:9,9", "day")).toEqual({ looks: 0, share: {} });
+  });
+
+  it("knows when each kind was first seen in an area, and how often the area has been looked about", () => {
+    const map = createMap();
+    walk(map, [cell(0, { seen: { chest: 1 }, band: "day" }), cell(1, { seen: { cow: 1 }, band: "day" })], 5000);
+    const area = map.cell("w:0,0")!.area;
+    expect(map.cell("w:1,0")!.area).toBe(area);
+    expect(map.firstSeenIn(area, "chest")).toBe(5000);
+    expect(map.firstSeenIn(area, "cow")).toBe(6000);
+    expect(map.firstSeenIn(area, "pig")).toBeNull();
+    expect(map.looksIn(area)).toBe(2);
+    expect(map.looksIn("nowhere")).toBe(0);
+  });
+
+  it("remembers each change the first time it is seen, and all of it is saved and loaded", () => {
+    const map = createMap();
+    at(map, { door: 1 }, 1000, "day", ["door:changed"]);
+    at(map, { door: 1 }, 2000, "day", ["door:changed", "cow:started_moving"]);
+    expect([map.changeFirst("door:changed"), map.changeFirst("cow:started_moving"), map.changeFirst("chest:changed")]).toEqual([1000, 2000, null]);
+    const loaded = createMap({ saved: JSON.parse(JSON.stringify(map.entries())) });
+    expect(loaded.changeFirst("door:changed")).toBe(1000);
+    expect(loaded.usual("w:0,0", "day")).toEqual({ looks: 1, share: { door: 1 } });
+    expect(loaded.firstSeenIn(loaded.cell("w:0,0")!.area, "door")).toBe(1000);
+  });
+
+  it("keeps no record of what is usual for a cell given no part of the day", () => {
+    const map = createMap();
+    map.at(cell(0, { seen: { chest: 1 } }), 0);
+    expect(map.usual("w:0,0", "day").looks).toBe(0);
+    expect(map.firstSeenIn(map.cell("w:0,0")!.area, "chest")).toBe(0);
+  });
+});
+
 describe("areas", () => {
   it("puts cells that connect plainly in one area", () => {
     const map = createMap();

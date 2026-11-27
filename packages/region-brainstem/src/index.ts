@@ -1,6 +1,6 @@
 export { arousalStartleFactor, createBrainstemRegion, type Body, type BrainstemMoment, type BrainstemOptions, type StartleDetector, type StartleHit } from "./brainstem-region.js";
 export { createDefenceWatch, type DefenceTick, type OverruledDefence } from "./defence-watch.js";
-export { createReflexGain, HELD_BACK, isHeldBack, MAX_GAIN, MIN_GAIN, reflexGain, type GainInputs, type Leaning, type ReflexGainOptions } from "./gain.js";
+export { createReflexGain, HELD_BACK, heldBack, isHeldBack, lapsed, MAX_GAIN, MIN_GAIN, reflexGain, type GainInputs, type Leaning, type ReflexGainOptions } from "./gain.js";
 export { createMedullaRegion, overall, type MedullaOptions, type Vitals } from "./medulla-region.js";
 export { createLoadedResponses, LOADED_URGENCY, type LoadedResponses, type Thing } from "./loaded.js";
 export { brainstemProblem, DEFAULT_BRAINSTEM, type BrainstemSettings } from "./settings.js";
