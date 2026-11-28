@@ -11,6 +11,10 @@ export interface AmygdalaOptions {
   store: AssociationStore;
   /** The cues around this tick. Add a kind of cue on the game's side: nothing here changes. */
   cues(ws: Workspace): Cue[];
+  /** What the learning rate (`settings.learn`) is multiplied by right now (how changeable things are). The rate that comes of it never passes 1 (learn.ts). Default: 1. */
+  rateScale?(ws: Workspace): number;
+  /** Told the size (0 to 1) of each surprise as an outcome is learned from: how far it was from what the cues predicted. Default: nobody. */
+  onSurprise?(size: number): void;
   /** What happened to the body since the last tick: harm (damage, illness, death) and good (a need dropping). */
   outcomes(ws: Workspace): Outcome[];
   /** What the bot is born believing, whether or not the cue has ever been around: cue → harm and good. Default: nothing. */
@@ -64,7 +68,8 @@ export function createAmygdalaRegion(options: AmygdalaOptions): Region {
     run(ws) {
       const started = performance.now();
       const now = ws.state.timestamp;
-      const m: Moment = { area: options.area ? options.area(ws) : (ws.place?.area ?? null), now, settings };
+      const scale = options.rateScale?.(ws) ?? 1;
+      const m: Moment = { area: options.area ? options.area(ws) : (ws.place?.area ?? null), now, settings, ...(scale === 1 ? {} : { scale: Math.max(0, scale) }) };
       // Inborn beliefs are held from the first tick, met or not.
       if (!seeded) for (const [key, born] of Object.entries(options.born ?? {})) if (!store.get(key)) store.set(key, startOf(key, born, store, undefined, 0, now));
       seeded = true;
@@ -105,6 +110,7 @@ export function createAmygdalaRegion(options: AmygdalaOptions): Region {
         // What the cues it points at were rated before it taught anything.
         const rated = outcome.sign === "harm" && outcome.points?.length ? { rated: round(Math.max(...outcome.points.map(expressed))) } : {};
         const result = learnOutcome(store, around, outcome, m);
+        options.onSurprise?.(Math.min(1, Math.abs(result.surprise)));
         if (outcome.sign === "harm") presence.harmed(now);
         const blamed = new Set(result.changes.filter((c) => c.what === outcome.sign && Math.abs(c.to - c.from) >= NOT_BLAMED).map((c) => c.cue));
         learned.push({ after: outcome.what, sign: outcome.sign, size: round(outcome.size), predicted: round(result.predicted), ...rated, changes: result.changes.map(shown), spared: around.filter((c) => !blamed.has(c.key)).length });

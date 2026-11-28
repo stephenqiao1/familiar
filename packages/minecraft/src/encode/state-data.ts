@@ -54,10 +54,10 @@ export interface MinecraftStateData {
     /**
      * What holds the bot up: the block (`on`), how it behaves (`kind`: solid; loose, a block that
      * falls when unsupported; slippery; slow; liquid; climbing; riding; none, in the air), how many
-     * of the four sides open onto a drop of 3 or more (`edges`), and the open space above the head
-     * (`headroom`, up to 3).
+     * of the four sides open onto a drop of 3 or more (`edges`). (The open space above the head
+     * used to be here as `headroom`; nothing read it, and it was taken out.)
      */
-    support: { on: string; kind: "solid" | "loose" | "slippery" | "slow" | "liquid" | "climbing" | "riding" | "none"; edges: number; headroom: number };
+    support: { on: string; kind: "solid" | "loose" | "slippery" | "slow" | "liquid" | "climbing" | "riding" | "none"; edges: number };
     /** How the body is moving, in blocks per second, and whether it is on the ground. */
     velocity: { x: number; y: number; z: number; onGround: boolean };
     /**

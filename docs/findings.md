@@ -137,6 +137,15 @@ entries named in brackets hold the evidence.*
     into the cerebellum's log, beside its own predictions. **Step two (2026-11-27):** `late` now
     goes by the learned pace, `asExpected` by learned expectations, and a movement that goes wrong
     raises `mismatch`, which focus, alarm and the striatum read.
+    **The insula (2026-11-27):** mood has one home now (`ws.feeling.mood`, kept by the insula
+    from comfort and dopamine's surprises) and a first reader: the feeling line says "in low
+    spirits" or "in good spirits" to Jev and the planner. `stuck` and `headroom` are still unread.
+    **The cingulate, switched on (2026-11-28):** `stuck` is read (one of the cingulate's signs
+    of trouble), mood is read a second time (a low mood lowers the stake), and `headroom` is
+    gone: the cingulate's cost of thinking does its job. What is left open here is `sore`.
+    **The cingulate, in shadow (2026-11-27):** `stuck` has its first reader, as one source of
+    trouble (it rose once in 30 minutes of play). Nothing acts on the cingulate yet. `headroom`
+    is still unread: it is a field of the state, not a signal.
     **Would fix:** give `stuck` and `headroom` a reader or drop them.
 
 11. **There is too little to do for the upper layers to show anything.** There are only a few
@@ -167,6 +176,328 @@ entries named in brackets hold the evidence.*
     **Would fix:** add the other dangers as vital needs, and put a time on every memory.
 
 **Status.** Open. A summary: when an entry below closes one of these, update it here too.
+
+## Looking inward at rest (stage four of the two regions that watch)
+
+*Built and run live 2026-11-28. How it works is in [brain.md](brain.md), "Looking inward".
+Setting: the bot's `cingulate.inward` (0 off, default on).*
+
+**What it is.** The cingulate shares `inward` while the reticular region's `quiet` is up,
+trouble is under 0.1 and the verdict is "carry on". The hippocampus sorts and replays its
+memories while `inward` is up (before: while `quiet` was up). Once in an inward spell, and at
+most every 10 minutes, the planner is asked for a review, not a plan: it is shown its notes,
+up to five notable memories of the day and the feeling line, and may only change its notes.
+
+**Shown live** (`pnpm monitor-check inward`, five runs of about five and a half minutes: a
+hit, five quiet minutes, a second hit; the Claude planner, with instinct and the motor area
+off so nothing carries its plans out).
+
+| Scene | Trouble | Verdict | Who acted | Outcome |
+|---|---|---|---|---|
+| 8 inward | up to 1.00 (pain, replan, uneasy); control up to 0.41 | carry on ×2,909, leave it ×431 | the hippocampus and the planner's review | 5 of 5 as expected |
+
+In every run: quiet 83 to 85 s in, inward about 131 s in, two spells (the first ended by a
+"replan" for about 49 s), memories sorted on 15 ticks and never outside `inward`, one review
+136 to 146 s in. The second hit raised trouble 105 to 509 ms after it and `inward` was down
+on that same tick. No review changed the goal.
+
+**The five reviews.** Each was shown one memory ("Took heavy damage in frozen_river (at
+60,151,40)"), the feeling "very tired, very tense", and one or three notes.
+
+| Run | Notes shown | What changed |
+|---|---|---|
+| 1 | 3 | kept `hazard`, `inventory`; added `state` ("rest at bed before any new trip"); dropped `plan` |
+| 2 | 1 | kept `plan`; added `frozen_river_danger` |
+| 3 | 3 | changed `plan`, `danger`; kept `inventory`; added `condition` |
+| 4 | 3 | changed `danger` (the place of the harm); kept `storage`, `inventory` |
+| 5 | 1 | changed `status` to name the place of the harm |
+
+**Does the review earn its cost? Not shown.** It costs one planner call (15 on the call
+counter) a spell. What it bought: in 5 of 5 runs the place of the harm went into the notes,
+and in 3 a note about how the bot is (tired, tense: rest first). But the scene has nothing to
+carry a plan out, so no run shows a later plan going better for it; a plan is already shown
+its notes and can be shown memories, so the review mostly restates what the next plan would
+see anyway. And in ordinary play it will almost never be asked for: in the 30 minutes of
+stage three, 923 of 926 quiet ticks were asleep, where the planner is paused and no review is
+made. The scene reaches it only by keeping the bot awake and idle for minutes. To judge it
+fairly it needs either a review as the bot falls asleep (one call a night) or a scene where a
+reviewed note is later used. Until then it is cheap to leave on and cheap to turn off
+(`cingulate.inward` 0 also puts consolidation back on `quiet`).
+
+**Limits and what the live runs showed.**
+
+- **Asleep, nothing changed.** Consolidation in sleep goes by the low focus of sleep, as
+  before; `inward` only replaces the `quiet` half of the rule. In ordinary play that half is
+  rare (above), so stage four changes little there.
+- **One tick late.** The hippocampus runs before the cingulate, so it reads the last tick's
+  `inward`: sorting can start and stop one tick after the signal. In the five runs no sorting
+  fell outside `inward`; an earlier run had one such tick.
+- **Trouble that is not an event keeps it out.** A "replan" kept trouble up for about 49 s in
+  every run, since with the planner reader on a replan no longer lifts the drowsy gate and the
+  plan waits its turn. The bot was quiet for 48 s before it was inward.
+- **A review goes ahead of the drowsy gate** (else it waited minutes for the planner's turn
+  and the spell could end first), never while asleep or with the planner offline.
+- **With no goal, the plan comes first** and the review waits; the review never sets a goal.
+  The spec allowed it to set one when there is none; a plan does that better.
+- **A failed review is not tried again in the spell**, and the time of the last review is not
+  kept across a restart, so a restart can bring a review sooner than 10 minutes.
+- **A review counts as a plan for a note's age**: a note it leaves out is dropped, as with a
+  plan (run 1 dropped `plan`).
+- **Plans still happen while inward** (2 of 6 in each run): `inward` does not hold the
+  planner back.
+- **Not tested through the whole brain in a unit test**: the rule, the spell, the review
+  branch and the settings are; the wiring is checked by the live scene only.
+
+**Other scenes run after the change** (five runs each unless said): monitor scenes 1, 3 and
+6: 15 of 15. `arousal-check quiet`: passed (memories consolidated on 5 ticks). `neuro-check
+calm` and `sleepgate`: passed; `night` failed "sleeping through the night is rewarded", which
+fails with the cingulate's readers at 0 too (stage three, below). `cortex-check notes`: 0 of
+5 by the check as it stood, and not from this stage (no review was made in it): since stage
+three a stuck step is told in the planner's turn, and the check counted only plans woken for
+it. The check now counts both; all five logs hold 2 to 6 plans told of a stuck step. Run again with the
+corrected check: 2 of 2, each failure noted.
+
+## The cingulate, switched on (stage three of the two regions that watch)
+
+*Built and run live 2026-11-28. How it works is in [brain.md](brain.md), "The cingulate: is
+there trouble, and is more effort worth it". Each reader has a strength from 0 to 1 in the
+bot's `cingulate.readers`; at 0 it goes by the rule from before.*
+
+**The same 30 minutes, in shadow and with the switch on** (`pnpm monitor-check shadow|switched
+--minutes 30`: ordinary play at the base, Jev and the Claude planner, mobs off, one run each).
+
+| | Shadow (every reader at 0) | Switch on |
+|---|---|---|
+| Planner calls | 109 (3.6 a minute) | 82 (2.7 a minute) |
+| Planner woken at once | 78 (76 for a stuck step) | 2 (both a stuck step) |
+| Jev calls | 2,110 (70.3 a minute) | 2,296 (76.4 a minute) |
+| Most calls in one minute (budget 200) | 273 | 204 |
+| Ticks at "carry on" because the budget was spent | 1,178 | 78 |
+| Verdicts (ticks): try harder / leave it | 974 / 41 | 23 / 270 |
+| Deciders hurried | 18 ticks | 23 ticks |
+| Give-ups | 7, all by the clock | 3: 2 "not worth more effort", 1 by the clock |
+| Goal steps finished | 19 | 24 |
+| Deaths | 0 | 0 |
+
+Also with the switch on: habits gave way on 1,808 of 3,667 ticks; learning rates ran from
+×0.50 to ×1.20 (×0.50 for the first 15 minutes); instinct's view grew up to ×1.26; the alarm
+entry reached 0.17; the give-up clock never read `leave` above 0.09.
+
+**Scenes** (`pnpm monitor-check`, 5 runs each unless said).
+
+| Scene | Trouble | Verdict | Who acted | Outcome |
+|---|---|---|---|---|
+| 1 one event, one wake | 1.00 (pain + replan), control 0.90 | try harder | the planner, once, told "pain and things have changed" | 5 of 5 |
+| 2 worth it (a near tie) | none | carry on | nobody | No near tie came up in 10 one-minute runs: shows nothing live (the unit test shows the hurry) |
+| 3 not worth it (budget spent) | 1.00, control 0.30 | carry on | nobody; told in its turn | 5 of 5 |
+| 4 leave | up | leave it | the give-up clock | Reader on: gave up 90 to 132 s after the step that cannot be done began. Reader off: never in 200 s. 5 of 5 each |
+| 5 changeable | - | - | the three learning rates | ×0.50, up to ×0.63 while things changed, back to ×0.50. 5 of 5 |
+| 6 unexplained harm | 1.00 (pain + uneasy), control 0.59 | try harder | the planner, told "no cause to be seen" in its turn | 5 of 5 |
+| 8 inward | | | | Stage four: not built |
+| 9 cost | | | | The table above: 30 minutes each, not an hour |
+| 10 the scenes from before | | | | Below |
+
+**Scene 10: what the older live checks showed, each failure run again with every reader at 0.**
+
+- **Cortex** `stuck`, `surprise`, `skill`: 5 of 5 each, after the first two were changed to
+  count "told in its turn" as well as "woken".
+- **Selection:** `bedtime` fails with the readers at 0 too (the open "Jev outvotes bedtime").
+  `look_and_walk` is flaky either way (3 of 5, then 5 of 5).
+- **Thalamus:** `hungry` fails because of the `learning` reader, and passes with it at 0 (see
+  below). The slowest tick was 2.6 ms once, against a limit of 2.
+- **Whole brain (`pnpm neuro-check`):** three checks fail, and fail the same with every reader
+  at 0 (two runs each way): `night` "sleeping through the night is rewarded", `dark` "the
+  darkness input is up", `far` "it was drawn to look". So they are not from the switch; whether
+  they are stale checks or real faults is not looked into. `night` "it is day by the end" and
+  `far` "alarm stayed low" (0.63) failed once and passed four times.
+
+**What the switch changes that you may not want.**
+
+- **A stuck step on an ordinary goal is told in the planner's turn, not at once.** Control only
+  passes 0.7 with a lot at stake: on a goal of priority 0.6 the cost of the thinking already
+  spent (ordinary play runs near the budget of 200) keeps it under. The wait is at most the
+  planner's own gap (15 s). 78 wakes became 2, and more steps were finished, in one run each.
+- **Learning runs at half speed in a steady world.** `0.5 + changeable` is ×0.5 whenever
+  `changeable` is 0, which is nearly always (the first 15 minutes of the run above). In the
+  thalamus `hungry` scene two visits to a chest no longer teach the bot to want it.
+  **Would fix:** centre the scale so a steady world is ×1 and a changing one is more, or leave
+  `learning` at 0.
+- **A surprise with nothing uncertain no longer raises focus much or wakes the planner.** The
+  chance that thought helps is then 0.3, so control stays low. It is told in the planner's turn.
+- **Habits give way on about half of all ticks**, because some trouble is up that often.
+- **"leave it" on trouble not worth more effort came on 270 ticks** against 41 in shadow, since
+  "try harder" is now rare. It only ends a skill that has run 15 s under that verdict, and
+  never rest or sleep.
+
+**Limits.**
+
+- **One run of 30 minutes each way.** The differences in Jev calls and steps finished are
+  within what two runs of the same settings could show.
+- **A failing planner is retried, and each failure counts as 15 calls.** When the API refused
+  every call the counter reached 1,507 and the verdict was "carry on" throughout.
+- **Trouble that passes before the planner's turn is kept 30 s** (`TOLD_WITHIN_MS`), then
+  dropped untold. "A new plan is wanted" by itself is not told.
+- **One telling for each event goes by when the newest event began.** A stuck step reported
+  again at a new spot counts as new; two events beginning on the same tick count as one.
+- **Sleep and rest are not judged by stay-or-leave**, so a bot that sleeps badly is never told
+  to leave its bed by the cingulate.
+- **The planner's kept note has no test through the brain** (the test harness plans every
+  tick); the live cortex `surprise` scene is the check.
+- **Scene 2 cannot be shown live** until a scene can set up a near tie.
+
+**Readers left alone, and why.** Noradrenaline's `interrupt` for danger, the thalamus's burst
+and everything a reflex reads (asked for). The medulla's hard rules and `last_stand` (they are
+reflexes in all but name). The planner's own `wake` on a replan (a new plan being wanted is its
+business, not trouble). The striatum's own reading of `mismatch` (it is about the one movement,
+and the habit reader sits beside it). Focus's orienting, and its other inputs when its reader
+is below 1.
+
+## The cingulate, in shadow (stage two of the two regions that watch)
+
+*Built and run live 2026-11-27. How it works is in [brain.md](brain.md), "The cingulate: is
+there trouble, and is more effort worth it". It changes nothing yet: it writes `ws.trouble`,
+shares no signal, and nothing reads it. Settings: the bot's `cingulate` block.*
+
+**Shadow report** (`pnpm monitor-check shadow --minutes 30`: 30 minutes of ordinary play at the
+base, Jev and the Claude planner, mobs off, one run, 3,737 ticks).
+
+| | Today | The cingulate would |
+|---|---|---|
+| Planner woken at once | 78 of 109 plans (76 for a stuck step, 2 for a surprise); its gate was lifted 85 times | 18 times |
+| Deciders hurried | 18 ticks (a near tie) | 974 ticks (control 0.5 or more) |
+| Giving up | The clock gave up 7 times, all on `go_to` | 2 occasions (`leave it`) |
+
+- **Trouble** was up on 2,233 ticks of 3,737 (60%), from 161 events: stuck step 86, mismatch
+  48, conflict 18, bad surprise 8, unexpected 6, slow progress 3, stuck 1.
+- **Events that tripped more than one alarm:** 9 of 161, each counted once: a mismatch with a
+  stuck step 6 times, something unexpected with a stuck step twice, a near tie with a mismatch
+  once.
+- **Verdicts** (ticks): carry on 2,722, try harder 974, leave it 41. Of the carry-ons, 1,178
+  were because the call budget was spent: the bot spent up to 273 calls in a minute against a
+  budget of 200.
+- **Verdicts over time:** almost all carry on in the first ten minutes; try harder on three
+  ticks in four from minute 10 to 20 (a run of stuck walks, control up to 0.83); carry on again
+  after that.
+- **`leave` against the clock:** in the half minute before the 7 times the clock gave up,
+  `leave` was 0.00, 0.12, 0.00, 0.07, 0.00, 0.00 and 0.61. It rose to 0.5 or more twice in the
+  half hour. So `leave` saw one of the seven coming.
+- **`changeable`:** 0 for the first 15 minutes, up to 0.32 between minutes 15 and 25, back to 0
+  by minute 30. Above 0 on 885 ticks.
+
+**What this says before the switch.**
+
+- **The planner would be woken about a quarter as often** (18 against 78). Nearly all of
+  today's wakes are stuck steps, and the stuck-step clock calls a long walk stuck too soon (see
+  "The neocortex, stage five", scene 8). The cingulate gathers the same reports but weighs
+  them: by minute 20 the budget was spent and it said carry on.
+- **The call budget of 200 is under what the bot spends today** when it is in trouble (273).
+  With the switch on, the budget will hold thinking down in exactly those minutes. Whether 200
+  is the right number is not known.
+- **"Hurry the deciders" would fire fifty times as often** as today's near-tie rule. Today that
+  only matters when the bot is drowsy (the gate it lifts is the drowsy one), so the cost is
+  small, but it is a large change in how often the question is asked.
+- **`leave` and the give-up clock do not see the same thing.** The clock goes by time without
+  progress on one skill; `leave` by what an activity pays against the last ten minutes. A walk
+  that gets nowhere still covers ground, which counts as pay.
+
+**Limits.**
+
+- **What a source concerns is thin.** Most sources can only say "the running skill and its
+  target"; dopamine's bad surprise says nothing, so it joins any event under a second old.
+- **Two events about different things in the same second stay two.** A hit (the body) as a
+  thing appears (that thing) is not one event.
+- **The stake is at least the goal's priority** (0.5 unless the plan says), so with any goal
+  standing something is always at stake.
+- **"How little the leading option is known" is the running skill's runs anywhere**, not the
+  options the basal ganglia are weighing: the cingulate cannot see those.
+- **The background for `leave` is the cingulate's own**, in the same units as the activity's
+  pay. Dopamine's slow level tracks reward only, squashed into 0 to 1, so the two could not be
+  compared; it is not used.
+- **Ground covered counts as progress whichever way the bot goes.**
+- **A plan counts as 15 calls of Jev**, a guess at their relative cost.
+- **`changeable` has no usual to go by in a bot's first minutes**: it compares with the life so
+  far, so it reads 0 until there has been a quieter spell to compare with.
+- **The trace's `would.wakePlanner` keeps its own five-second gap**, which is not the planner's.
+
+**What in the code made it awkward.**
+
+- Nothing counted the thinking the bot does, so the engine and the planner are wrapped where
+  the brain is built.
+- The amygdala's surprise was not shared at all; it now tells whoever asks.
+- The signs of trouble live in five kinds of place: signals, the cortex's ports, `ws.feeling`,
+  a callback, and the motor area's report. Each source is one entry that knows where to look.
+- The basal ganglia's choice is made after every region has run, so "how close the options
+  are" is last tick's.
+
+## The insula: how the bot feels (stage one of the two regions that watch)
+
+*Built and run live 2026-11-27. How it works is in [brain.md](brain.md), "The insula: how the
+bot feels". Settings: the bot's `insula` block (`feeling`, `uneasy`, `mood`, `tell`; with
+`feeling` at 0, or `tell` at 0, the deciders are told what they were before).*
+
+**Shown live** (`pnpm monitor-check`).
+
+*Ten minutes of ordinary play at the base, Jev on* (`line`). The line was "Feels: a little
+hungry." from the first tick to the last: it did not change once, the bot was never uneasy,
+comfort stayed at 0.75 and mood rose from 0 to 0.20. Nothing happened to the body in ten
+minutes with mobs off, and the bot had nothing to eat. In a trial of the feeling scene the line
+moved as the body did: "at ease", "sick" (the hunger effect), "hungry, sick", "very hungry,
+tense", "very hurting, very tense, very hungry" (after a fall), and back through "tense, a
+little hurting" to "at ease" 20 seconds on, once it had eaten and healed.
+
+*The same scene told three ways* (`feeling`, scene 7: hungry and a little hurt on the plaza
+with nothing to eat, a few animals about; 20 seconds; five runs each way). In every run the
+bot felt "very hungry, very tense, hurting".
+
+| Jev was told | What Jev picked | How sure it was (mean of the 5 runs) |
+|---|---|---|
+| The numbers alone | `idle` 100% | 0.55 (0.27 to 0.65) |
+| The feeling line alone | `idle` 100% | 0.42 (0.21 to 0.57) |
+| Both | `idle` 100% | 0.50 (0.45 to 0.56) |
+
+The line did not change what Jev picked: it idled in all 15 runs, and no skill was started.
+Without the numbers it was less sure of idling, but still chose it. So in this scene the
+feeling line tells Jev nothing it acts on. Whether the planner uses it was not run.
+
+**Found live.**
+
+- **The last point of food lost to the hunger effect arrived on the tick the effect ended**, and
+  the bot was "a little uneasy" about its food for ten seconds. A cause now explains a change
+  for 2 seconds after it was last there.
+
+**Limits.**
+
+- **The feeling only restates.** Every feeling is a reading another region already shares, so
+  the insula adds no knowledge: it adds one place to read it and one way to say it.
+- **Only health, food and breath are watched for an unexplained change.** Cold, tiredness and
+  illness are not, and neither is what the bot carries.
+- **"Explained" is a list of causes by hand.** A hit with an attacker or a named kind (a fall,
+  fire, a cactus) explains health falling; damage of the kinds `generic` and `magic` does not.
+  A cause the list does not know (a new effect, a mod) leaves the bot uneasy for 30 seconds.
+- **Unease stands for as long as the change is in its half-minute window**, then goes, whether
+  or not anything was done about it. Nothing reads it yet but the line.
+- **Mood has two halves that are not the same kind of thing.** Comfort is averaged over time,
+  surprises are averaged over their number; the mood is the mean of the two. A bot that is
+  comfortable and often disappointed reads as even.
+- **The line alone hides seven numbers from Jev** (health, food, saturation, air, freezing,
+  time awake, healing). Jev was trained on states that have them.
+- **The line adds about 40 to 70 characters to every view**, after the thalamus has filled the
+  view to its limit: instinct's view was already at its limit of 1,500.
+- **Told the line alone, the planner loses "what the body wants most"** (the needs as numbers),
+  which also said that nothing known relieves a need.
+- **Every reader hears the feeling the tick it is read** except the hypothalamus and the
+  amygdala, which run before the insula and do not read it.
+
+**What in the code made it awkward.**
+
+- Mood was a private number inside dopamine, kept from surprises alone and stamped with the
+  time of the episode, not of the tick.
+- The thalamus could only select and shorten what is in the state; the feeling is not in the
+  state (the insula runs after the state is made), so views needed a last word of their own.
+- The planner's situation text reads health and food straight out of its view, so leaving the
+  numbers out meant teaching that text to do without them.
+- A cause and its effect do not always share a tick: the last point of food lost to the hunger
+  effect arrives on the tick the effect is gone.
 
 ## The neocortex, stage five: skills the bot saves for itself (2026-11-27)
 

@@ -39,6 +39,14 @@ describe("the amygdala region", () => {
     expect((traces[1]!.learned as { after: string }[])[0]!.after).toBe("lost 8 health to wolf");
   });
 
+  it("learns faster or slower by `rateScale`, and never by more than the whole of what happened", () => {
+    const learnt = (scale?: number) => play([{ cues: [wolf] }, { cues: [wolf], outcomes: [bite] }, { cues: [wolf] }], scale === undefined ? {} : { rateScale: () => scale }).store.get("kind:wolf")!.harm;
+    expect(learnt(1)).toBe(learnt());
+    expect(learnt(0.5)).toBeLessThan(learnt(1));
+    expect(learnt(1.5)).toBeGreaterThan(learnt(1));
+    expect(learnt(1000)).toBeLessThanOrEqual(bite.size + 1e-9);
+  });
+
   it("blames a cue seen a few seconds before, not one long gone", () => {
     const quiet = { cues: [] };
     const soon = play([{ cues: [wolf] }, ...Array(8).fill(quiet), { cues: [], outcomes: [bite] }]);

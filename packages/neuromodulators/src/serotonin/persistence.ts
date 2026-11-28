@@ -13,6 +13,9 @@ export const PROGRESS_WINDOW_MS = 10_000;
 /** Guardrail: after this many times the base time on one skill with no success or progress, patience is ignored. */
 const OVER_PERSISTING_FACTOR = 3;
 
+/** How much of the give-up time a full `leave` takes off. */
+export const LEAVE_SHORTENS = 0.5;
+
 /** Giving up on a skill counts as this many unfinished tries already: the first wait before trying it again is 8 s, then 16, 32, up to a minute. */
 const GIVING_UP_COUNTS_AS = 3;
 
@@ -71,6 +74,12 @@ export function createPersistence(options: {
   baseOf?(skill: string, now: number): number;
   /** The most `baseOf` may answer, for the backstop. Default: `baseMs`. */
   mostBaseMs?: number;
+  /** How far what is running is paying worse than things have in general, 0 to 1 (the cingulate's `leave`): it loosens the stay bonus and shortens the give-up time. Default: 0. */
+  leaveOf?(): number;
+  /** True when the verdict is to leave what is running: it is given up on, once for each time the verdict comes. Default: never. */
+  leaveIt?(): boolean;
+  /** The verdict is about what has been kept at this long: a younger streak is not given up on for it (it is once it has lasted this long, if the verdict still stands). Default: 0. */
+  leaveAfterMs?: number;
 }): Persistence {
   const { patience, chanceOf, strength, baseMs = 120_000 } = options;
   let running: { skill: string; clockFrom: number } | null = null;
@@ -79,6 +88,8 @@ export function createPersistence(options: {
   /** The skill a give-up was just called on, and each skill given up on: how often in a row, and until when it waits. */
   let givingUpOn: string | null = null;
   const waiting = new Map<string, { times: number; until: number }>();
+  /** Whether the verdict to leave was already there last time it was asked (it acts as it arrives, not for as long as it stands). */
+  let wasLeaving = false;
 
   function status(now: number): PersistenceStatus | null {
     if (!running) return null;
@@ -87,7 +98,8 @@ export function createPersistence(options: {
     const overPersisting = streak.ms + waited > OVER_PERSISTING_FACTOR * base;
     const p = overPersisting ? 0.5 : patience();
     const chance = chanceOf(running.skill);
-    const giveUpMs = base * giveUpFactor(p, chance, strength);
+    const leave = Math.min(1, Math.max(0, options.leaveOf?.() ?? 0));
+    const giveUpMs = base * giveUpFactor(p, chance, strength) * (1 - LEAVE_SHORTENS * leave);
     const progress = Math.max(0, 1 - waited / (PROGRESS_WINDOW_MS * (0.5 + p)));
     return {
       skill: running.skill,
@@ -97,7 +109,7 @@ export function createPersistence(options: {
       baseSeconds: base / 1000,
       patience: p,
       chanceOfPayoff: chance,
-      stayBonus: strength * MAX_STAY_BONUS * progress,
+      stayBonus: strength * MAX_STAY_BONUS * progress * (1 - leave),
       overPersisting,
     };
   }
@@ -130,6 +142,14 @@ export function createPersistence(options: {
     },
     giveUpReason(now) {
       const s = status(now);
+      const leaving = options.leaveIt?.() ?? false;
+      const left = leaving && !wasLeaving && s !== null && s.waitedSeconds * 1000 >= (options.leaveAfterMs ?? 0);
+      // The verdict counts as taken once it has ended a streak, or with nothing running; while a streak is still too young for it, it waits.
+      wasLeaving = leaving && (left || wasLeaving || s === null);
+      if (left) {
+        givingUpOn = s!.skill;
+        return `gave up after ${Math.round(s!.waitedSeconds)} s (not worth more effort)`;
+      }
       if (strength <= 0 || !s || s.waitedSeconds < s.giveUpSeconds) return null;
       givingUpOn = s.skill;
       const why = s.overPersisting ? "kept at it too long with no progress" : `patience ${s.patience.toFixed(2)}, chance ${s.chanceOfPayoff.toFixed(2)}`;

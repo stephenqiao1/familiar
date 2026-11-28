@@ -25,6 +25,14 @@ export interface ThalamusOptions {
   whole?: string[];
   /** Whether a thing is unexpected here right now (the sensory area's word): it counts as new, as a thing that just appeared does. Default: never. */
   unexpected?(item: Item, ws: Workspace): boolean;
+  /**
+   * A last word on every view built for a reader: what is always passed with the body, whatever
+   * the budget (the game says what; the feeling, for one). It may add to a view or leave part of
+   * the body out, never change a value. Default: the view as built.
+   */
+  dress?(view: State, ws: Workspace, reader: string): State;
+  /** What a reader's size limit is multiplied by right now (a harder moment gets a little more). Default: 1. */
+  enlarge?(reader: string, ws: Workspace): number;
   /** How much this kind of thing is wanted right now, 0 to 1. Default: 0. */
   wantOf?(kind: string, ws: Workspace): number;
   /** How far this thing has been got used to, 0 to 1. Default: 0. */
@@ -85,7 +93,7 @@ export function createThalamusRegion(options: ThalamusOptions): Region {
     let view = full;
     if (options.trim && nearby !== undefined) view = options.trim(view, nearby);
     if (settings.fieldOfView > 0 && options.inView) view = options.inView(view);
-    for (const reader of readers) ws.setView(reader, view);
+    for (const reader of readers) ws.setView(reader, options.dress ? options.dress(view, ws, reader) : view);
     const size = sizeOf(view);
     Object.assign(trace, { ...(nearby === undefined ? {} : { nearby }), fullSize: view === full ? size : sizeOf(full), views: Object.fromEntries(readers.map((reader) => [reader, { size }])) });
   }
@@ -135,7 +143,9 @@ export function createThalamusRegion(options: ThalamusOptions): Region {
         views[reader] = { paused: true };
         continue;
       }
-      const limit = limitFor(settings.limits[reader] ?? DEFAULT_LIMIT, arousal, settings.size);
+      const usual = limitFor(settings.limits[reader] ?? DEFAULT_LIMIT, arousal, settings.size);
+      const grown = options.enlarge?.(reader, ws) ?? 1;
+      const limit = grown === 1 ? usual : Math.round(usual * grown);
       const filled = fill({ items: candidates, limit, fixed: split.fixed, fullShare: fullShare(focus, settings.shape), shaped: settings.shape > 0, most: mostItems(arousal, settings.size) });
       // The burst: news in a turned-down channel is passed this once, marked as new. If it was only counted it is
       // given its brief form whatever the budget, the lowest full item giving way if there is no room.
@@ -156,7 +166,7 @@ export function createThalamusRegion(options: ThalamusOptions): Region {
       }
       if (burst.length && orienting >= STRONG_BURST) strong = true;
       const view = split.assemble(filled.forms, { heldBack: filled.heldBack, new: burst });
-      ws.setView(reader, view);
+      ws.setView(reader, options.dress ? options.dress(view, ws, reader) : view);
       // How many items of each channel got each form, in one pass.
       const tally = new Map<string, Record<Form, number>>();
       for (const c of candidates) {

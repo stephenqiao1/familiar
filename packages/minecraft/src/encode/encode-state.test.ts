@@ -111,7 +111,7 @@ describe("encodeState", () => {
         pushed: null,
         motion: null,
         gaze: { id: "entity:43", yaw: 0, pitch: 0 },
-        support: { on: "stone", kind: "solid", edges: 0, headroom: 3 },
+        support: { on: "stone", kind: "solid", edges: 0 },
         velocity: { x: 0, y: 0, z: 0, onGround: true },
         landing: null,
         displaced: false,

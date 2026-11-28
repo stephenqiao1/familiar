@@ -44,6 +44,8 @@ export interface Moment {
   area: string | null;
   now: number;
   settings: AmygdalaSettings;
+  /** What each learning rate is multiplied by right now (how changeable things are). A rate still never passes 1. Default: 1. */
+  scale?: number;
 }
 
 export const LEARNING = {
@@ -102,7 +104,7 @@ export function learnOutcome(store: AssociationStore, cues: readonly CueNow[], o
   const around = cues.filter((c) => (!c.through || c.through === outcome.through) && (outcome.sign !== "harm" || !c.direct || pointed.has(c.key)));
   const predicted = predict(store, around, outcome.sign, m);
   const surprise = outcome.size - predicted;
-  const rate = m.settings.learn <= 0 ? 0 : outcome.final ? 1 : Math.min(1, m.settings.learn * (LEARNING.slowest + (1 - LEARNING.slowest) * outcome.size));
+  const rate = m.settings.learn <= 0 ? 0 : outcome.final ? 1 : Math.min(1, m.settings.learn * (m.scale ?? 1) * (LEARNING.slowest + (1 - LEARNING.slowest) * outcome.size));
   const anyPointed = around.some((c) => pointed.has(c.key));
   // Long familiar and harmless: slow to be blamed for harm (unless the harm points straight at it).
   const novelty = (c: CueNow) => (outcome.sign === "harm" ? 1 / (1 + LEARNING.familiar * (store.get(c.key)?.met ?? 0)) : 1);
@@ -151,7 +153,7 @@ export function learnOutcome(store: AssociationStore, cues: readonly CueNow[], o
 export function learnHarmless(store: AssociationStore, met: { key: string; ms: number; salience: number }, others: readonly CueNow[], m: Moment): Change[] {
   const { key } = met;
   const a = store.get(key);
-  const rate = m.settings.learn * LEARNING.harmless * Math.min(1, met.ms / LEARNING.fullMeetingMs);
+  const rate = Math.min(1, m.settings.learn * (m.scale ?? 1) * LEARNING.harmless * Math.min(1, met.ms / LEARNING.fullMeetingMs));
   if (!a || rate <= 0) return [];
   a.met = Math.min(LEARNING.metMost, (a.met ?? 0) + Math.min(1, met.ms / LEARNING.fullMeetingMs));
   const changes: Change[] = [];

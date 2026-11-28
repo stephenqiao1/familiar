@@ -4,6 +4,7 @@ export {
   FACT_SUPPORT,
   feelingNear,
   memoryNotes,
+  notableMemories,
   STARTING_STRENGTH,
   STRONG,
   type ConsolidationPhase,

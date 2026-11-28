@@ -72,6 +72,8 @@ same tick; a signal from a region listed later is read one tick late.
 | View | The state as one deciding layer is told it (`ws.view(reader)`): a selection of the full state, built each tick by the thalamus for instinct and for the planner. With no thalamus it is the full state. Every other region reads `ws.state`. |
 | Attended | The one thing the bot is attending to right now: `{ id, kind, bearing, salience, since, angle, elevation, field, lean }`, or null. Set by the colliculus (`ws.setAttended`); logged each tick. |
 | Needs | The body's needs as the hypothalamus read them this tick (`ws.needs`): each need's level, how hard it presses, where it is heading and its target; the need wanted most; the body clock; stress. Null with no hypothalamus. |
+| Feeling | How the bot feels (`ws.feeling`), as the insula read it this tick: `{ feelings, comfort, mood, uneasy, line }`. A list of named feelings with a strength each, how good the body's state is overall, a slow mood, whether the body did something nothing explains, and all of it as one line of words. Null with no insula. |
+| Trouble | The cingulate's reading (`ws.trouble`): `{ level, events, control, verdict, leave, changeable, inward? }`. How much trouble there is and the events behind it, whether more effort is worth it, whether to stay or leave, and (while it is looking inward) when that spell began. Null with no cingulate. Read by the planner's waking, the deciders' gate, instinct's view, focus, alarm, the give-up clock, habits and the three learning rates, each by its own strength (`cingulate.readers`). |
 | Place | Where the bot is on its own map (`ws.place`): `{ cell, area, familiarity }`, or null with no map. Set by the hippocampus. |
 | Cue, association | A cue is a name for something around (`kind:zombie`, `block:cactus`, `area:a3`). An association is what the amygdala has learned of one cue: how much harm and good it predicts, how sure, and where it is safe. |
 | Fear, appeal, matters | Three signals from the amygdala, each 0 to 1: the strongest harm (`fear`) and the strongest good (`appeal`) that the cues here now predict, and the larger of the two (`matters`). The thing attended to and each threat sized up also carry `harm`: what that one thing predicts. |
@@ -102,6 +104,8 @@ All of these types live in one file: `packages/contracts/src/brain.ts`.
 | `region-brainstem` | Supplies the reflex gains, the defence circuit's choice of defence, a `brainstem` region (startle, loaded responses, the defence signals), a `reticular` region (arousal, bedtime, waking and the graded gate), a `medulla` region (vital signs and the graded urges of upkeep) and a `colliculus` region (the map of where things are and how sudden; it turns the head). |
 | `region-thalamus` | The gateway to the deciding layers: builds a view of the state for instinct and for the planner (`ws.view(reader)`), by channel, priority and a size limit. Game-free; the Minecraft side says what the channels are. |
 | `region-hypothalamus` | Owns the body's needs: reads each once a tick and shares the reading (`ws.needs`), with moving targets, looking ahead, the body clock, slow stress and the top drive. Game-free. |
+| `region-insula` | Turns the body's readings into one statement of how the bot feels (`ws.feeling`): named feelings, comfort, mood, and unease at a change nothing explains. Game-free; the Minecraft side supplies the table from reading to word. |
+| `region-cingulate` | Gathers every sign of trouble into one reading, one event counted once, and decides whether more effort is worth it (control = trouble × stake × chance − cost, and a verdict). Also keeps `leave` and `changeable`. Game-free. In shadow so far. |
 | `region-amygdala` | Learns what predicts harm and what predicts good, by surprise, by place and by likeness, and shares `fear`, `appeal` and `matters`. Game-free; the Minecraft side offers the cues and the outcomes. |
 | `region-cerebellum` | Learns what each of the body's movements comes to (how long, how far, which changes), from the signed error between prediction and result. Game-free; the Minecraft side says what a movement is, its situation and its measures. It shares `mismatch`, and its numbers are read by the journeys, the give-up clock, the primitives' expectations and the defence, each by a strength in `cerebellum` (bots.json). |
 | `neocortex` | The one design for a cortical area: the five ports, the ladder (`feedbackFor`), and `areaRegions`, which turns an area into the regions the loop runs. Also the cortex's settings and the reader of conditions (`createConditions`). Game-free. |
@@ -420,7 +424,7 @@ The band changes at most once in 3 seconds, except upward for danger.
 | Colliculus | The threshold falls as arousal rises (as before) | `colliculus.topDown` |
 | Startle | × 0.8 when drowsy, × 1.1 when over-aroused | `brainstem.arousalStartle` |
 | Locomotion | Speed − 0.15 when fully drowsy; nothing above the resting level | `locomotion.slowWhenDrowsy` |
-| Memory | `quiet` (drowsy, safe and still for 60 seconds) counts as rest: memories are consolidated, as in sleep | `arousal.quietRest` |
+| Memory | `quiet` (drowsy, safe and still for 60 seconds) counts as rest: memories are consolidated, as in sleep. With the cingulate's inward mode on, the hippocampus goes by `inward` instead (quiet rest with no trouble) | `arousal.quietRest`, `cingulate.inward` |
 | Instinct | `frazzled` (over-aroused, above 0.9): at most 2 options are proposed, none under 0.2 | `arousal.frazzled` |
 | Planner | While `frazzled` it is told in one line to keep the plan short and put safety first | `arousal.frazzled` |
 
@@ -872,7 +876,7 @@ block in `bots.json` (`brain/posture.ts`).
 
 | Field | What it says |
 |---|---|
-| `self.support` | What holds the bot up: `on` (the block), `kind`, `edges` (how many of the four sides open onto a drop of 3 or more) and `headroom` (open blocks above the head, up to 3) |
+| `self.support` | What holds the bot up: `on` (the block), `kind`, and `edges` (how many of the four sides open onto a drop of 3 or more) |
 | `kind` | `solid`; `loose` (falls when unsupported); `slippery`; `slow`; `liquid`; `climbing` (ladder, vine, scaffolding); `riding`; `none` (in the air) |
 | `self.velocity` | Blocks per second on each axis, and `onGround` |
 | `self.landing` | Only in the air: how far down the fall ends (`blocks`), onto what (`onto`, a block name or "void"), whether it would cost health (`hurts`), and a better landing within 2 blocks if there is one (`steer`) |
@@ -1410,6 +1414,194 @@ prints the shadow report and the readers' report for any log, and with the model
 what each movement does. `pnpm brain-report` has the same under CEREBELLUM. `LIVE_OUTPUT=<file>`
 before any live check keeps what the bot printed.
 
+## The insula: how the bot feels
+
+Most of the brain does things. The insula watches the body from within and says, in one place,
+how it feels. `createInsulaRegion` (`packages/region-insula`), layer 0, every tick, listed after
+the hypothalamus and the amygdala and before the thalamus. It proposes nothing and calls no
+model. It only **restates readings the body already has**: it never makes up a state.
+
+**The feeling** is written to the workspace as data (`ws.feeling`), like the needs:
+
+| Part | What it is | File |
+|---|---|---|
+| `feelings` | Named feelings with a strength each (0 to 1), strongest first, each with the reading it comes from. A feeling appears when its reading reaches 0.25 and goes only when it falls under 0.15, so the list does not flicker | `felt.ts` |
+| `comfort` | How good the body's state is overall, 0 to 1: `1 − the strongest feeling − 0.25 × the sum of the rest` | `felt.ts` |
+| `mood` | −1 to 1: half comfort (recentred) and half the surprises dopamine felt, both averaged over about five minutes. This is the mood dopamine used to work out and only log | `mood.ts` |
+| `uneasy` | `{ level, about }`: the body changed in a way nothing explains (below) | `unease.ts` |
+| `line` | All of it as words: "very hungry, a little hurting, uneasy". Under 0.45 "a little", from 0.7 "very"; "at ease" when nothing is felt; "in low spirits" or "in good spirits" when mood is beyond ±0.3 | `line.ts` |
+
+**The table from reading to word** is the Minecraft side's (`FEELINGS` in
+`packages/minecraft/src/brain/insula.ts`). Each row uses the signal a region already shares, and
+the body's own number where that region is left out.
+
+| Word | From |
+|---|---|
+| hungry | The medulla's `hunger` |
+| hurting | The stronger of `hurt` (health lost), `pain` (the fresh sting) and half of `sore` |
+| tired | `tired` |
+| cold | `cold` |
+| sick | `sick` |
+| short of breath | `air` |
+| afraid | The amygdala's `fear` |
+| tense | The stronger of the hypothalamus's `stress` and arousal above 0.7 |
+
+**The body doing something unexpected** (`unease.ts`). The insula watches three raw readings,
+each 0 to 1: health, food and breath (`playerBody`). For each it keeps what the reading has
+been doing lately (its drift, over about five minutes) and how far it has moved in the last 30
+seconds. A move more than 0.08 beyond the drift, with no known cause, is unease: the level
+grows to 1 at 0.2 beyond that, and the reading is named. A known cause explains a change and
+raises nothing (`playerExplains`): for health, a hit that could be seen, a fall, fire,
+drowning, starving, an illness, and any healing; for food, the hunger effect on the way down and
+a meal on the way up; for breath, water. A cause still explains a change that shows up to 2
+seconds after it ended.
+
+**Telling the deciders.** The thalamus gives every view it builds a last word (`dress`), and
+the feeling goes there with the body, which is always passed whole: `self.feels` in Jev's view,
+and "Feels: ..." as the first line about the body in the planner's situation. The `tell`
+setting chooses what they are told:
+
+| `insula.tell` | Jev and the planner are told |
+|---|---|
+| 0 | The numbers alone, as before |
+| between (0.5 by default) | The feeling line and the numbers |
+| 1 | The line alone: health, food, saturation, air, freezing, time awake and healing are left out of the views, and the planner is not given the needs as numbers |
+
+Only the views change. The brain's own regions always read the full state.
+
+**Settings** (`insula` in `bots.json`, each 0 to 1): `feeling` (above 0: the feeling is read),
+`uneasy` (how strongly an unexplained change is felt), `mood` (above 0: mood is kept), `tell`.
+With `feeling` at 0 there is no insula.
+
+**In the trace** (`insula`): `feelings` (each with `from`), `comfort`, `mood`, `uneasy`, `line`.
+`pnpm brain-report` has an INSULA section: time in each feeling, comfort and mood, what it was
+uneasy about, and how often the line changed. Live: `pnpm monitor-check [line feeling]`.
+
+## The cingulate: is there trouble, and is more effort worth it
+
+The second region that watches. `createCingulateRegion` (`packages/region-cingulate`), layer 0,
+every tick, listed after the cerebellum, the sensory and motor areas and the insula, and before
+instinct. It proposes no action and calls no model. It supplies one reading, one verdict and a
+few numbers, written to the workspace as data (`ws.trouble`).
+
+Its one signal is `inward` (below). Its **readers** take `ws.trouble` straight from the workspace, each by its
+own strength in `cingulate.readers` (0 to 1). At 0 a reader keeps the rule it had before the
+cingulate; with every reader at 0 the cingulate is in shadow and the brain behaves as if it
+were not there. The wiring is in one place: `reads(reader)` in `apps/run-bot/src/brain.ts`
+(and, for the give-up clock and the habits, `apps/run-bot/src/loop-mode.ts`).
+
+| Reader (`readers.`) | What it does with the reading | The rule it replaces (used at 0) |
+|---|---|---|
+| `planner` | The planner is woken when the verdict is "try harder" and control is above 0.7 (`WAKE_ABOVE`), once for each event, at least 5 s after the plan before, and told what the trouble is (`troubleNote`: every face of the event, and for a stuck step or a surprise the reporter's own words). Trouble of 0.4 or more that is not worth a wake is told with the next plan in its turn (the trace says `told`, not `woken`), even if it has passed by then, for up to 30 s (`TOLD_WITHIN_MS`). A new plan being wanted (`replan`) with no other face is not told: it says nothing the planner does not know | The four reasons in the planner's gate (`replan`, the thalamus's burst, a stuck step, a strong surprise) and the two notes (stuck step, surprise) |
+| `gate` | The reticular gate lets the deciders through at full rate while control is 0.5 or more | A direct read of `conflict` |
+| `view` | Instinct's view grows by up to 30% with control (`VIEW_GROWS`, the thalamus's `enlarge`) | Nothing: the view kept its size |
+| `focus` | Acetylcholine has one input, `control` | Its three inputs `near_tie`, `mismatch` and `unexpected` (orienting and the rest are kept) |
+| `alarm` | Noradrenaline's needs list has an entry `control`, worth a fifth of control at most (`CONTROL_ALARM`) | The `mismatch` entry in that list |
+| `patience` | Serotonin's give-up clock: `leave` takes up to half off the limit (`LEAVE_SHORTENS`), and a verdict of "leave it" ends the run with the reason "not worth more effort", once the bot has kept at it for 15 seconds without progress (`leaveAfterMs`: the verdict is about what has been kept at, not what has just begun); not for rest or sleep | Nothing: the clock alone |
+| `habit` | A habit gives way while trouble is 0.3 or more (`HABIT_YIELDS_AT`) | Nothing. (The striatum's own read of `mismatch` is kept beside it: the cingulate's reading is a tick old when the striatum runs) |
+| `learning` | The scorebook's step, the cerebellum's `settledRate` and the amygdala's learning rate are each multiplied by `0.5 + changeable` (`rateScale`), inside the bounds each package sets (`STEP_BOUNDS`, `SETTLED_RATE_BOUNDS`, a rate of 1 for the amygdala) | The settings alone |
+
+**Left alone on purpose:** noradrenaline's `interrupt` for danger, the thalamus's burst (it
+still interrupts the tick; it only no longer wakes the planner by itself), everything a reflex
+reads, the medulla's hard rules and `last_stand`. None of them reads the insula or the
+cingulate. The planner's `wake` on `replan` is also kept (a forced retreat, a move by the
+server and a goal that is not paying must be answered whatever the stake); `replan` is a source
+of trouble as well, so the planner is told about it once.
+
+**One reading of trouble** (`trouble.ts`). Each source gives a strength (0 to 1) and what it
+concerns. The sources are one list, `troubleSources` in `apps/run-bot/src/cingulate.ts`:
+
+| Source | From | Concerns |
+|---|---|---|
+| `conflict` | The basal ganglia's `conflict` (a near tie being waited on) | The running skill and its target |
+| `mismatch` | The cerebellum's `mismatch` | The running skill and its target |
+| `unexpected` | The sensory area's `unexpected` | The things and kinds its surprises name |
+| `stuck step` | The motor area's report that the goal's step is stuck | The running skill and its target |
+| `bad surprise` | Dopamine's `bad_surprise` (a skill ended worse than expected) | Nothing in particular |
+| `pain` | `pain` | The body |
+| `uneasy` | The insula's `uneasy` | The body |
+| `replan` | Noradrenaline's `replan` (moved by the server, what it wants most changed, a goal that is not paying) | Nothing in particular |
+| `stuck` | The brainstem's `stuck` (the legs are stuck): its first reader | The running skill and its target |
+| `slow progress` | The cingulate's own `leave` (below) | The running activity |
+
+One event counts once. A source that rises within a second of an event's latest sign, and
+concerns the same thing (or says nothing of what it concerns), is one more **face** of that
+event. An event is as strong as its strongest face now; a face goes when its source does, and
+the event when its last face has. The level is the one event's strength, or for several events
+`1 − Π(1 − strength)`, so two events are more trouble than one and never more than 1.
+
+**Is more effort worth it?** (`control.ts`, plain numbers in and out.)
+
+`control = trouble × stake × chance − cost`, kept between 0 and 1.
+
+| Part | What it is | From |
+|---|---|---|
+| `stake` | How much is riding on it: the most of the strongest pressing need (by the weight the hypothalamus gives it: being fully short of torches counts a quarter of being fully hungry), the goal's priority and what the running skill is worth here. A low mood takes up to 20% off (`cingulate.mood`) | `ws.needs`, `ws.goal`, the scorebook, `ws.feeling.mood` |
+| `chance` | How likely more thought is to help: `0.3 + 0.7 ×` the most of how close the options are (`conflict`), how little the running skill is known (under 5 runs) and how unfamiliar the place is. Cut to a fifth while a hard reflex or a strong urge is already dealing with it | `conflict`, the scorebook, `unfamiliar`, `reflex`, `urge` |
+| `cost` | What has been spent: `0.6 × (calls ÷ budget)³`, plus `0.2 ×` tiredness, plus `0.2 ×` stress above half. A call of Jev counts 1, a plan 15; the budget is `cingulate.callBudget` a minute (200) | A counter round the engine and the planner (`createCallCounter`) |
+
+**The verdict**, one each tick (`verdictOf`):
+
+| Verdict | When |
+|---|---|
+| carry on | The call budget is spent (always, and the trace says why); or none of the below |
+| try harder | Control is 0.5 or more |
+| leave it | `leave` is 0.8 or more; or trouble has been 0.4 or more for 15 seconds with control under 0.1 |
+
+**Stay or leave** (`leave.ts`). A rate of progress is kept for what is running: reward, plus
+0.5 for each step finished and 0.02 for each block of ground, a minute. It is compared with the
+same rate averaged over about ten minutes of everything the bot did. An activity is judged
+after 20 seconds. When it pays more than 30% under the background, `leave` rises (full at 80%
+under), growing over a minute of staying worse. Paying as well or better, or at rest, it is 0.
+Rest is `idle` (a skill that uses no part of the body) and sleep: a night in bed covers no
+ground and finishes no step, and is not to be left for that.
+
+**How changeable things are** (`changeable.ts`). Each surprise is counted as it rises: an
+outcome dopamine did not expect, a movement the cerebellum did not, a scene the sensory area
+did not, a harm or good the amygdala did not. How many a minute over the last two minutes is
+compared with the last half hour (or the life so far, while that is shorter). `changeable` is 0
+until recent surprises run 1.5 times the usual and 0.2 a minute beyond it.
+
+**Looking inward** (`inward.ts`). A mind at rest turns to what it already holds. The cingulate
+shares the signal `inward` (1 or 0) while three things hold: the reticular region's `quiet` is
+up, trouble is under 0.1 (`INWARD_UNDER`), and the verdict is "carry on". It is worked out
+afresh each tick, so any event that raises trouble ends it on that tick. `ws.trouble.inward` is
+when the spell began, which tells one spell from the next. Two things happen while it lasts:
+
+- **The hippocampus sorts memories and replays the map** (its `resting` rule in
+  `apps/run-bot/src/brain.ts`). This replaces its own reading of `quiet`; sleep still counts as
+  rest as before. The hippocampus runs before the cingulate, so it goes by last tick's signal.
+- **The planner reviews, once.** In place of one plan in its turn, it is shown its notes, the
+  strongest memories of the last game day (`notableMemories`, 20 minutes, at most five) and the
+  feeling line, and answers with notes alone (`Planner.review`; the prefrontal region's `review`
+  option). The goal and everything else stay as they are. The drowsy gate does not hold it back
+  (at rest plans are minutes apart); asleep there is none. One review for each spell, and no
+  sooner than ten minutes after the last (`REVIEW_EVERY_MS`). With no goal standing, the plan
+  comes first and the review takes the next turn. A review costs the same as a plan against the
+  call budget. A planner with no `review` (or a bot that keeps no notes) is never asked.
+
+With `cingulate.inward` at 0 there is no inward mode: no signal, no review, and the hippocampus
+goes by `quiet` as before.
+
+**Settings** (`cingulate` in `bots.json`): `gather`, `control`, `leave`, `changeable`, `mood`,
+`inward` (each 0 to 1; `inward` is off at 0 and on above it), `callBudget` (calls a minute) and `readers` (one strength for each reader in the
+table above; a reader left out keeps 1). With `gather` at 0 there is no cingulate.
+
+**In the trace** (`cingulate`): `trouble` (level and events, each with `kinds`, `about`,
+`strength`, `age`), `stake`, `chance`, `cost`, `control`, `verdict`, `why`, `calls`, `leave`
+(with the two rates), `changeable` (with the two rates), `readBy` (what each reader above
+strength 0 took this tick), `inward` (`{ since }`, while looking inward), and for comparison
+`would` and `today` (what the rules from before would do). The planner's trace says `woken` or
+`told` with the note it was given; a review's trace is `review` (`shown`, `said`, and what
+changed in the `notes`) with no `plan`.
+`pnpm brain-report` has a CINGULATE section (trouble by kind, verdicts, the planner's wakes by
+the reason given, calls a minute, give-ups by cause, who read what, inward spells and reviews,
+learning rates over time).
+Live: `pnpm monitor-check [--runs 5] [scene ...]` with `one`, `worth`, `spent`, `harm`,
+`feeling`, and when named `leave`, `changeable`, `inward` (Claude planner), `line`, and the two
+long comparisons
+`shadow --minutes 30` (every reader at 0) and `switched --minutes 30`.
+
 ## The neocortex: one design for every deciding part
 
 The neocortex is one sheet built from the same small circuit. What a patch does depends on what
@@ -1529,7 +1721,11 @@ its feedback and looks at the step the goal is at (`goal.specs[goal.stepsDone]`)
 - **The planner is woken.** The prefrontal region's `urgent` option reads the report: it plans
   at the next tick, and the planner is told why (`PlanRequest.woken`: "Step 1 of the current
   goal (...) is stuck: ... Plan another way."). Each report is answered once, and never sooner
-  than 5 seconds after the plan before (`URGENT_GAP_MS`).
+  than 5 seconds after the plan before (`URGENT_GAP_MS`). That is the rule with
+  `cingulate.readers.planner` at 0. With the cingulate read, a stuck step is one source of
+  trouble: the planner is woken at once only when more effort is worth it (a goal of high
+  priority, or a need pressing), and otherwise told with its next plan in turn, in the same
+  words. See the cingulate.
 - **Alarm.** While the planner is out of charge (`planner_offline`) its steps are worth nothing,
   and less while its weight is down; the alarm system's own goal counts in full. Asleep, the
   motor area does nothing.
@@ -1604,7 +1800,7 @@ before the sensory area, so they hear it a tick late.
 | Thalamus | The things a surprise names count as new (`fresh`), exactly as a thing that just appeared does: raised priority, and a burst if their channel is turned down | `unexpected:` on the thalamus |
 | Acetylcholine | A focus input, `unexpected`, less what a thing that stood out in the last 1.5 s already gave | `inputs` of the focus region |
 | Hippocampus | A surprise of 0.7 or more (`STRONG_SURPRISE`) is kept as a discovery: "Was surprised: ..." | `surpriseKept` in `apps/run-bot/src/surprise.ts` |
-| Prefrontal cortex | A surprise of 0.7 or more wakes the planner at once, and it is told what ("Something is not as expected: ...") | `urgent` on the prefrontal area, with the same 5-second floor as a stuck step |
+| Prefrontal cortex | A surprise of 0.7 or more wakes the planner at once, and it is told what ("Something is not as expected: ...") | `urgent` on the prefrontal area, with the same 5-second floor as a stuck step. With `cingulate.readers.planner` above 0 the surprise is one source of the cingulate's trouble, and the cingulate decides whether it is worth a wake |
 
 **The other "something is new" signals**, and how `unexpected` sits beside each:
 
@@ -1633,6 +1829,9 @@ a short key and one line each (the key at most 40 characters, the line 200).
 - **What they are for** is in the planner's role (`CORTEX_ROLE.notes` in `engine-claude`): what
   it has tried and how it went, what it is waiting for, what it decided and why; that they are
   few; and to read them before planning.
+- **Reviewed at rest.** While the bot is looking inward the planner is asked once to look back
+  and change its notes alone (see "Looking inward" under the cingulate). Its word on them counts
+  exactly as a plan's does, the `unkept` count included.
 - **Saved** in `data/<bot>/notes.json` with the rest of what the bot has learned, and loaded at start.
 - `cortex.notes: 0`: none are kept, shown or asked for.
 
@@ -1748,8 +1947,9 @@ reflex at 0.3 is still easily overridden. The striatum's habit does not count as
 
 **Waiting on a near tie.** A conflict is: the top two in a contest are different actions and
 their scores are within `0.05 × wait`. Then whatever is running is kept, and `conflict` (0 to 1,
-by how close) is shared. The reticular gate lets the deciders through at full rate and focus
-rises while it is up. If the tie is still there after 300 ms it is settled: the faster layer
+by how close) is shared. It is a source of the cingulate's trouble: the reticular gate lets the
+deciders through at full rate and focus rises when the cingulate finds more effort worth it
+(with those readers at 0, whenever `conflict` is up). If the tie is still there after 300 ms it is settled: the faster layer
 wins; on the same layer the one already running; with neither running the higher go total. The
 settlement stands while the same two stay that close. The loop is asked for a tick in time
 (`againInMs`), so a wait ends on time.
@@ -1872,8 +2072,17 @@ in `data/<name>/`.
 | Change how many notes the planner keeps, or how long | `MOST_NOTES`, `UNKEPT_PLANS`, `NOTE_LENGTH` in `packages/region-prefrontal/src/notes.ts`; what it is told they are for: `CORTEX_ROLE.notes` in `packages/engine-claude/src/plan-extras.ts` |
 | Change when a chain becomes a skill | `TIMES_TO_CHUNK` and `CHAIN_LENGTH` in `packages/region-motor/src/chunks.ts`; who counts as a decider: `counts` where the motor area is built in `apps/run-bot/src/brain.ts`; how a target is written as a kind: `targetAsKind` in `packages/minecraft/src/brain/conditions.ts` |
 | Change when a learned skill is retired | `RETIRE_AFTER` in `apps/run-bot/src/learned-skills.ts` |
+| Add a feeling | Add a row to `FEELINGS` in `packages/minecraft/src/brain/insula.ts`: the word, the reading it restates and how strong that is now (0 to 1) |
+| Change what the deciders are told of the body | `insula.tell` in `bots.json` (0 the numbers, 1 the feeling line, between both); which numbers the line stands in for: `RESTATED` in `packages/minecraft/src/brain/insula.ts` |
+| Change what counts as an unexplained change | `MARGIN`, `SPAN`, `WINDOW_MS` in `packages/region-insula/src/unease.ts`; what explains one: `playerExplains` in `packages/minecraft/src/brain/insula.ts` |
+| Add a source of trouble | One entry in `troubleSources` in `apps/run-bot/src/cingulate.ts`: a name, a strength from 0 to 1, and what it concerns |
+| Make a bot think more or less | `cingulate.callBudget` in `bots.json` (the thinking it may spend in a minute); `TRY_HARDER_AT` and `COST` in `packages/region-cingulate/src/control.ts` for every bot |
+| Change when it gives up | What `leave` is: `WORSE`, `JUDGED_AFTER_MS` and the weights of progress in `packages/region-cingulate/src/leave.ts`; when the verdict is "leave it": `LEAVE_AT`, `LEAVE_IT` in `control.ts`; how far `leave` shortens the clock: `LEAVE_SHORTENS` in `packages/neuromodulators/src/serotonin/persistence.ts`; one bot: `cingulate.readers.patience` in `bots.json` (0: the clock alone) |
+| Change when the bot looks inward, or how often it reviews | `INWARD_UNDER` and `inwardNow` in `packages/region-cingulate/src/inward.ts`; `REVIEW_EVERY_MS` in `packages/region-prefrontal/src/prefrontal-region.ts`; what the review is shown: the `review` option where the planner is built in `apps/run-bot/src/brain.ts`; what it is asked: `reviewPrompt` in `packages/engine-claude/src/claude-planner.ts`; off: `cingulate.inward: 0` |
+| Add a reader of control | Give the reader a strength in `CingulateReaders` (`packages/region-cingulate/src/settings.ts`), read `reads("<name>") * control(ws)` where the region is built in `apps/run-bot/src/brain.ts` and keep its old rule for strength 0, and add it to `readBy` there so the trace says what it took |
+| Change what is at stake, or when thought is likely to help | `stake` and `chance` in `playerCingulate` (`apps/run-bot/src/cingulate.ts`) |
 | Add a condition | Write a kind in `packages/minecraft/src/brain/conditions.ts` (how it is written, and a check read from the state) and add it to the list in `playerConditions`; give an example in `conditionsNote` |
-| Change how often the planner is woken | The usual time: `everyMs` of the prefrontal area (`USUAL_MS.planner` in `apps/run-bot/src/brain.ts`). By a stuck step or a strong surprise: `URGENT_GAP_MS` in `packages/region-prefrontal/src/prefrontal-region.ts` (the least time between such plans) and `MOST_FAILS`, `TIMES_USUAL`, `UNLEARNED_MS` in `packages/region-motor/src/step-run.ts` (when a step counts as stuck) |
+| Change how often the planner is woken | With the cingulate read (`cingulate.readers.planner`): `WAKE_ABOVE` in `packages/region-cingulate/src/cingulate-region.ts` (control above which it is woken) and `LEAVE_IT.trouble` (trouble told with the next plan in turn). The usual time: `everyMs` of the prefrontal area (`USUAL_MS.planner` in `apps/run-bot/src/brain.ts`). By a stuck step or a strong surprise: `URGENT_GAP_MS` in `packages/region-prefrontal/src/prefrontal-region.ts` (the least time between such plans) and `MOST_FAILS`, `TIMES_USUAL`, `UNLEARNED_MS` in `packages/region-motor/src/step-run.ts` (when a step counts as stuck) |
 | Change what a step is worth against Jev | The plan's `priority`; `cortex.motor` in `bots.json` (one bot); `MOST_URGENCY` in `packages/region-motor/src/motor-area.ts` (the ceiling) |
 | Protect a goal | Offer it with `protected: true` and a `doneWhen` the vocabulary can read (`ws.setGoal`); the rules are in `packages/basal-ganglia/src/goal-channel.ts` |
 | Give a decider a bigger view | `bots.json`: `thalamus.limits.instinct` or `.prefrontal` (characters of JSON) |

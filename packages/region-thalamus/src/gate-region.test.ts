@@ -292,3 +292,28 @@ describe("the sensory area's part", () => {
   });
 });
 
+describe("what always goes with the body", () => {
+  it("every view built for a reader is given the last word, with the gate on or off, and the full state is left alone", () => {
+    const dress = (view: State, _ws: unknown, reader: string): State => ({ ...view, data: { ...view.data, feels: `fine (${reader})` } });
+    for (const settings of [{}, { gate: 0 }]) {
+      const t = thalamus(settings, { dress, whole: ["sensory"] });
+      const out = t.tick([cow(1)]);
+      expect(out.view("instinct").data.feels).toBe("fine (instinct)");
+      expect(out.view("prefrontal").data.feels).toBe("fine (prefrontal)");
+      // A reader told everything is told the state as the body has it.
+      expect(out.view("sensory").data.feels).toBeUndefined();
+      expect(t.store.viewFor("x").state.data.feels).toBeUndefined();
+    }
+  });
+});
+
+describe("a harder moment gets a little more", () => {
+  it("a reader's limit is enlarged by what it is told, and the others' are left as they were", () => {
+    const herdOf30 = Array.from({ length: 30 }, (_, i) => cow(i));
+    const plain = thalamus({}).tick(herdOf30);
+    const grown = thalamus({}, { enlarge: (reader) => (reader === "instinct" ? 1.3 : 1) }).tick(herdOf30);
+    expect(grown.trace.views.instinct.limit).toBe(Math.round(plain.trace.views.instinct.limit * 1.3));
+    expect(grown.trace.views.prefrontal.limit).toBe(plain.trace.views.prefrontal.limit);
+    expect(Object.keys(grown.shown("instinct")).length).toBeGreaterThan(Object.keys(plain.shown("instinct")).length);
+  });
+});

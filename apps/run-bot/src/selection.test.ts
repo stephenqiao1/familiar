@@ -50,7 +50,7 @@ function state(p: Patch, seconds: number): State {
       inBlock: false,
       pushed: null,
       motion: null,
-      support: { on: "stone", kind: "solid", edges: 0, headroom: 3 },
+      support: { on: "stone", kind: "solid", edges: 0 },
       velocity: { x: 0, y: 0, z: 0, onGround: true },
       landing: null,
       displaced: false,

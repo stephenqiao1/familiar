@@ -43,6 +43,9 @@
     },
     {
       "path": "../neocortex"
+    },
+    {
+      "path": "../region-insula"
     }
   ]
 }

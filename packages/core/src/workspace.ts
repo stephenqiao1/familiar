@@ -1,4 +1,4 @@
-import type { AreaPorts, Attended, Goal, GoalOffer, HoldBack, Needs, PlaceNow, RunningSkill, Signal, SkillEvent, State, Workspace } from "@familiar/contracts";
+import type { AreaPorts, Attended, Feeling, Goal, Trouble, GoalOffer, HoldBack, Needs, PlaceNow, RunningSkill, Signal, SkillEvent, State, Workspace } from "@familiar/contracts";
 
 const MAX_EVENTS = 20;
 
@@ -15,6 +15,8 @@ export interface WorkspaceStore {
   attended(): Attended | null;
   needs(): Needs | null;
   place(): PlaceNow | null;
+  feeling(): Feeling | null;
+  trouble(): Trouble | null;
   cortex(): Record<string, AreaPorts>;
 }
 
@@ -48,6 +50,8 @@ export function createWorkspace(options: WorkspaceOptions = {}): WorkspaceStore 
   let attended: Attended | null = null;
   let needs: Needs | null = null;
   let place: PlaceNow | null = null;
+  let feeling: Feeling | null = null;
+  let trouble: Trouble | null = null;
   const views = new Map<string, State>();
   const cortex: Record<string, AreaPorts> = {};
 
@@ -82,6 +86,12 @@ export function createWorkspace(options: WorkspaceOptions = {}): WorkspaceStore 
         },
         get place() {
           return place;
+        },
+        get feeling() {
+          return feeling;
+        },
+        get trouble() {
+          return trouble;
         },
         get cortex() {
           return { ...cortex };
@@ -118,6 +128,12 @@ export function createWorkspace(options: WorkspaceOptions = {}): WorkspaceStore 
         setCortex(area, { up = null, feedback = null, ask = [] }) {
           cortex[area] = { up, feedback, ask: [...ask], at: Date.now() };
         },
+        setTrouble(next) {
+          trouble = next && { ...next, events: next.events.map((e) => ({ ...e, kinds: [...e.kinds], about: [...e.about] })) };
+        },
+        setFeeling(next) {
+          feeling = next && { ...next, feelings: next.feelings.map((f) => ({ ...f })), uneasy: { level: next.uneasy.level, about: [...next.uneasy.about] } };
+        },
         setPlace(next) {
           place = next && { ...next };
         },
@@ -129,6 +145,8 @@ export function createWorkspace(options: WorkspaceOptions = {}): WorkspaceStore 
     attended: () => attended,
     needs: () => needs,
     place: () => place,
+    feeling: () => feeling,
+    trouble: () => trouble,
     cortex: () => ({ ...cortex }),
   };
 }

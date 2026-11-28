@@ -66,6 +66,12 @@
     },
     {
       "path": "packages/region-sensory"
+    },
+    {
+      "path": "packages/region-insula"
+    },
+    {
+      "path": "packages/region-cingulate"
     }
   ]
 }

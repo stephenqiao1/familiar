@@ -1,4 +1,4 @@
-export { createCerebellumRegion, type CerebellumOptions, type MeasureTrace } from "./cerebellum-region.js";
+export { createCerebellumRegion, SETTLED_RATE_BOUNDS, type CerebellumOptions, type MeasureTrace } from "./cerebellum-region.js";
 export { bounded, kept, learnChanges, learnMeasure, shareOf, sureOf, type Lesson } from "./learn.js";
 export { createModels, isModel, modelId, type Estimate, type Model, type Models, type ModelStore, type Movement } from "./model.js";
 export { expectedChanges, predict, trustedModel, type Prediction } from "./predict.js";

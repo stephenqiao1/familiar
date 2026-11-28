@@ -53,6 +53,7 @@ import {
   type MinecraftCtx,
   type MinecraftStateData,
   type RememberedLookup,
+  asleep,
 } from "@familiar/minecraft";
 import {
   ALARM_SIGNAL,
@@ -73,6 +74,7 @@ import { loadBotConfig } from "./bot-config.js";
 import { playerAmygdala } from "./amygdala.js";
 import { NO_READERS } from "@familiar/region-amygdala";
 import { NO_READERS as NO_MODEL_READERS, READERS } from "@familiar/region-cerebellum";
+import { LEAVE_IT } from "@familiar/region-cingulate";
 import { createArbiter, createBrain, createGoalGate, patienceOf } from "./brain.js";
 import { createLearnedStore } from "./learned-skills.js";
 import { createPlayerStriatum } from "./habits.js";
@@ -151,7 +153,7 @@ const GAME_DAY_MS = 1_200_000;
  */
 export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise<void> {
   // Read the settings first, so a bad bots.json stops the bot before it joins.
-  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, selection, memory: memorySettings, amygdala: amygdalaSettings, cerebellum: cerebellumConfig, cortex } = await loadBotConfig(server.name);
+  const { personality, patience, noradrenaline, focus: focusSettings, brainstem, locomotion: locomotionSettings, reflexes, medulla, posture: postureSettings, colliculus, defence, arousal, drives, thalamus, selection, memory: memorySettings, amygdala: amygdalaSettings, cerebellum: cerebellumConfig, cortex, insula, cingulate } = await loadBotConfig(server.name);
   const { bot, base } = await joinWithBase(server);
   // The echo engine may be given fixed rules of choice (conditions, read once the vocabulary exists further down).
   let chooser: ((state: State) => string[]) | undefined;
@@ -328,6 +330,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     log: (msg) => console.log(`    ${msg}`),
   };
   const storage = { chests: believedChests, baseChest: posId(base.chest) };
+  const cingulateRead = cingulate.gather > 0 && (!brainArgs.regions || brainArgs.regions.includes("cingulate"));
+  const leaveStrength = cingulateRead ? cingulate.readers.patience : 0;
   const persistence = createPersistence({
     patience: () => patienceOf(view, patience),
     chanceOf: (skill) => chanceOfPayoff(scorebook.get(situationOf(view.state), skill)),
@@ -335,12 +339,21 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
     // The clock starts from how long the skill usually takes, once the cerebellum knows.
     baseOf: cerebellum.giveUpBaseMs,
     mostBaseMs: cerebellum.mostBaseMs,
+    // The cingulate's word, as far as this reader goes by it: paying worse than the background loosens the hold and shortens
+    // the clock, and a verdict to leave ends the streak (for a skill that uses the body, awake: rest is not an activity to leave).
+    ...(leaveStrength > 0
+      ? {
+          leaveOf: () => leaveStrength * (view.trouble?.leave ?? 0),
+          leaveIt: () => view.trouble?.verdict === "leave it" && !asleep(view) && skills.find((s) => s.name === view.current?.skill)?.parts?.length !== 0,
+          leaveAfterMs: LEAVE_IT.afterMs,
+        }
+      : {}),
   });
   // The striatum: the bot's habits, learned from who wins and how it ends.
   const habits = createHabits(await loadHabits(habitsFile(server.name)));
   // The planner's notes: its working memory between plans.
   const notes = await loadNotes(notesFile(server.name));
-  const striatum = createPlayerStriatum({ habits, selection, skills, mismatch: cerebellumSettings.mismatch, log: (msg) => console.log(`    ${msg}`) });
+  const striatum = createPlayerStriatum({ habits, selection, skills, mismatch: cerebellumSettings.mismatch, trouble: cingulateRead ? cingulate.readers.habit : 0, log: (msg) => console.log(`    ${msg}`) });
   const regions = createBrain(
     {
       amygdala: amygdala.options,
@@ -381,6 +394,8 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
       thalamus,
       selection,
       cortex,
+      insula,
+      cingulate,
       conditions,
       usualMs: cerebellum.usualMs,
       ...(map ? { usual: map } : {}),
@@ -416,6 +431,9 @@ export async function runLoop(server: ServerArgs, brainArgs: BrainArgs): Promise
   console.log(`Cerebellum: ${models.ids().length} models held; ${reading.length ? `read for ${reading.join(", ")}` : "in shadow (every reader on its fixed rule)"}.`);
   console.log(`Brainstem: bravery ${brainstem.bravery}, reflex gains ${brainstem.gains}, hold-back ${brainstem.holdBack}.`);
   console.log(`Selection: body first ${selection.bodyFirst}, wait ${selection.wait}, channels ${selection.channels > 0 ? "on" : "off"}, habits ${selection.habits} (${Object.values(habits.entries()).reduce((n, skills) => n + Object.keys(skills).length, 0)} known, blind ${selection.habit.blind}).`);
+  console.log(`Insula: feeling ${insula.feeling}, uneasy ${insula.uneasy}, mood ${insula.mood}; the deciding layers are told ${insula.feeling > 0 && insula.tell >= 1 ? "the feeling line alone" : insula.feeling > 0 && insula.tell > 0 ? "the feeling line and the numbers" : "the numbers alone"}.`);
+  const cingulateReaders = Object.entries(cingulate.readers).filter(([, strength]) => strength > 0).map(([reader, strength]) => `${reader} ${strength}`);
+  console.log(`Cingulate: gather ${cingulate.gather}, control ${cingulate.control}, leave ${cingulate.leave}, changeable ${cingulate.changeable}, inward ${cingulate.inward}, a budget of ${cingulate.callBudget} calls a minute; ${cingulateReaders.length ? `read by ${cingulateReaders.join(", ")}` : "in shadow (no reader goes by it)"}.`);
   console.log(`Cortex: motor ${cortex.motor}, conditions ${cortex.conditions}, graded hold-backs ${cortex.holdBack}, goal channel ${cortex.goalGate}, sensory ${cortex.sensory}, notes ${cortex.notes > 0 ? `on (${notes.list().length} held)` : "off"}, chunks ${cortex.chunks > 0 ? `on (${chains.entries().length} chains noted)` : "off"}.`);
   console.log(`Arousal: resting ${arousal.resting}, bedtime ${arousal.bedtime}, wake threshold ${arousal.wakeThreshold}, gate ${arousal.gate}.`);
   if (learned.skills.length || learned.retired.length) console.log(`Learned skills: ${learned.skills.map((s) => s.name).join(", ") || "none in use"}${learned.retired.length ? `; retired: ${learned.retired.map((s) => s.name).join(", ")}` : ""}.`);

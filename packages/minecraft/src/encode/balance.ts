@@ -15,7 +15,6 @@ const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec
 const LIQUIDS = new Set(["water", "lava"]);
 /** Blocks the body climbs instead of standing on. (The game's own list; a body knows what it can hold on to.) */
 const CLIMBABLE = new Set(["ladder", "vine", "scaffolding", "twisting_vines", "twisting_vines_plant", "weeping_vines", "weeping_vines_plant", "cave_vines", "cave_vines_plant"]);
-const MAX_HEADROOM = 3;
 const TICKS_PER_SECOND = 20;
 /** A fall of more than this many blocks costs health. */
 const HARMLESS_FALL = 3;
@@ -35,15 +34,13 @@ export function isClimbable(name: string): boolean {
   return CLIMBABLE.has(name);
 }
 
-/** What holds the bot up: the block, how it behaves, how many sides fall away, and the room above the head. */
+/** What holds the bot up: the block, how it behaves, and how many sides fall away. */
 export function supportOf(bot: EncodableBot): Support {
   const pos = bot.entity.position;
   const feet = pos.floored();
   const here = bot.blockAt(feet)?.name ?? "unknown";
   const edges = SIDES.filter((side) => isDropAt(bot, feet.plus(side))).length;
-  let headroom = 0;
-  while (headroom < MAX_HEADROOM && bot.blockAt(feet.offset(0, 2 + headroom, 0))?.boundingBox === "empty") headroom++;
-  const rest = { edges, headroom };
+  const rest = { edges };
   if (bot.vehicle) return { on: bot.vehicle.name ?? "vehicle", kind: "riding", ...rest };
   if (LIQUIDS.has(here)) return { on: here, kind: "liquid", ...rest };
   if (CLIMBABLE.has(here)) return { on: here, kind: "climbing", ...rest };

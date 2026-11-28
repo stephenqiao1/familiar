@@ -1,6 +1,8 @@
 import { DEFAULT_AMYGDALA } from "@familiar/region-amygdala";
 import { DEFAULT_CEREBELLUM } from "@familiar/region-cerebellum";
 import { DEFAULT_CORTEX } from "@familiar/neocortex";
+import { DEFAULT_INSULA } from "@familiar/region-insula";
+import { DEFAULT_CINGULATE } from "@familiar/region-cingulate";
 import { DEFAULT_SELECTION } from "@familiar/basal-ganglia";
 import { DEFAULT_THALAMUS } from "@familiar/region-thalamus";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -13,7 +15,7 @@ import { DEFAULT_AROUSAL, DEFAULT_BRAINSTEM, DEFAULT_COLLICULUS } from "@familia
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_MEMORY, loadBotConfig } from "./bot-config.js";
 
-const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, thalamus: DEFAULT_THALAMUS, selection: DEFAULT_SELECTION, memory: DEFAULT_MEMORY, amygdala: DEFAULT_AMYGDALA, cerebellum: DEFAULT_CEREBELLUM, cortex: DEFAULT_CORTEX };
+const REST = { noradrenaline: DEFAULT_NORADRENALINE, focus: DEFAULT_FOCUS, brainstem: DEFAULT_BRAINSTEM, locomotion: DEFAULT_LOCOMOTION, reflexes: DEFAULT_REFLEXES, medulla: DEFAULT_MEDULLA, posture: DEFAULT_POSTURE, colliculus: DEFAULT_COLLICULUS, defence: DEFAULT_DEFENCE, arousal: DEFAULT_AROUSAL, drives: DEFAULT_DRIVES, thalamus: DEFAULT_THALAMUS, selection: DEFAULT_SELECTION, memory: DEFAULT_MEMORY, amygdala: DEFAULT_AMYGDALA, cerebellum: DEFAULT_CEREBELLUM, cortex: DEFAULT_CORTEX, insula: DEFAULT_INSULA, cingulate: DEFAULT_CINGULATE };
 
 let dir: string;
 let file: string;
@@ -42,6 +44,20 @@ describe("loadBotConfig", () => {
     expect((await loadBotConfig("Calm", file)).patience).toEqual({ ...DEFAULT_PATIENCE, resting: 0.8, brake: 0 });
     await writeFile(file, JSON.stringify({ Calm: { patience: { resting: 2 } } }));
     await expect(loadBotConfig("Calm", file)).rejects.toThrow(/bot "Calm": patience.resting/);
+  });
+
+  it("reads the insula block: a strength left out keeps its default, and a bad one stops the bot", async () => {
+    await writeFile(file, JSON.stringify({ Plain: { insula: { tell: 0 } }, Odd: { insula: { mood: -1 } } }));
+    expect((await loadBotConfig("Plain", file)).insula).toEqual({ ...DEFAULT_INSULA, tell: 0 });
+    await expect(loadBotConfig("Odd", file)).rejects.toThrow('bot "Odd": insula.mood must be a number from 0 to 1, got -1');
+  });
+
+  it("reads the cingulate block: a strength left out keeps its default, and a bad one stops the bot", async () => {
+    await writeFile(file, JSON.stringify({ Plain: { cingulate: { leave: 0, callBudget: 90, readers: { planner: 0, focus: 0.5 } } }, Odd: { cingulate: { control: 3 } }, Broke: { cingulate: { callBudget: 0 } }, Loud: { cingulate: { readers: { gate: 2 } } } }));
+    expect((await loadBotConfig("Plain", file)).cingulate).toEqual({ ...DEFAULT_CINGULATE, leave: 0, callBudget: 90, readers: { ...DEFAULT_CINGULATE.readers, planner: 0, focus: 0.5 } });
+    await expect(loadBotConfig("Loud", file)).rejects.toThrow("cingulate.readers.gate must be a number from 0 to 1, got 2");
+    await expect(loadBotConfig("Odd", file)).rejects.toThrow('bot "Odd": cingulate.control must be a number from 0 to 1, got 3');
+    await expect(loadBotConfig("Broke", file)).rejects.toThrow("cingulate.callBudget must be a number above 0, got 0");
   });
 
   it("reads the cortex block: a strength left out keeps its default, and a bad one stops the bot", async () => {

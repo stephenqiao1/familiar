@@ -9,6 +9,8 @@ import { createMap, createMemory, createPlaceKeeper, createTrail, type MapStore 
 import { createCellReader, createChestMemory, DEFAULT_DEFENCE, playerConditions, targetAsKind, RETREAT_GOAL, SCHEMA_VERSION, type DefenceSettings, type MinecraftStateData } from "@familiar/minecraft";
 import { DEFAULT_CORTEX, NO_CORTEX, type CortexSettings } from "@familiar/neocortex";
 import { createNotes, type Notes } from "@familiar/region-prefrontal";
+import { DEFAULT_INSULA, NO_INSULA, type InsulaSettings } from "@familiar/region-insula";
+import { DEFAULT_CINGULATE, NO_CINGULATE, SHADOW_CINGULATE, type CingulateSettings } from "@familiar/region-cingulate";
 import { createChunks } from "@familiar/region-motor";
 import { createLearnedStore } from "./learned-skills.js";
 import {
@@ -77,7 +79,7 @@ function state(p: Patch, ms: number): State {
       inBlock: false,
       pushed: null,
       motion: null,
-      support: { on: "stone", kind: "solid", edges: 0, headroom: 3 },
+      support: { on: "stone", kind: "solid", edges: 0 },
       velocity: { x: 0, y: 0, z: 0, onGround: true },
       landing: null,
       displaced: false,
@@ -107,7 +109,7 @@ const SKILLS = [
 ];
 
 /** The whole brain on one workspace, one tick at a time. The engine prefers the running skill, else idles. */
-function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[]; amygdala?: AmygdalaOptions; cerebellum?: CerebellumOptions; cortex?: CortexSettings; plans?: (request: PlanRequest) => Plan; usualMs?: (skill: string) => number | null; map?: MapStore; notes?: Notes; chunks?: boolean; names?: { name: string; description: string } } = {}) {
+function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Partial<ColliculusSettings>; thalamus?: Partial<ThalamusSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: DriveSettings; only?: string[]; spread?: Record<string, number>; engineFails?: boolean; plan?: Plan; sameTime?: boolean; selection?: SelectionSettings; skills?: Skill<null>[]; amygdala?: AmygdalaOptions; cerebellum?: CerebellumOptions; cortex?: CortexSettings; plans?: (request: PlanRequest) => Plan; usualMs?: (skill: string) => number | null; map?: MapStore; notes?: Notes; insula?: InsulaSettings; cingulate?: CingulateSettings; chunks?: boolean; names?: { name: string; description: string } } = {}) {
   // A list of its own: it grows when the bot saves a skill for itself.
   const skills = [...(options.skills ?? SKILLS)];
   const chains = createChunks();
@@ -165,6 +167,9 @@ function bot(options: { brainstem?: Partial<BrainstemSettings>; colliculus?: Par
       ...(options.cortex ? { cortex: options.cortex, conditions } : {}),
       ...(options.usualMs ? { usualMs: options.usualMs } : {}),
       ...(options.notes ? { notes: options.notes } : {}),
+      ...(options.insula ? { insula: options.insula } : {}),
+      // Unless a test says otherwise the cingulate is in shadow: these tests are about each region's own rule, and the readers have their own tests below.
+      cingulate: options.cingulate ?? SHADOW_CINGULATE,
       ...(options.chunks ? { chunks: { chains, targetAsKind, learned } } : {}),
       // With a map, the hippocampus keeps the place and the sensory area reads what is usual there.
       ...(options.map ? { place: createPlaceKeeper({ map: options.map, trail: createTrail(), cellOf: cells.cellOf, barrier: cells.barrier, replay: 0 }), usual: options.map } : {}),
@@ -778,7 +783,7 @@ describe("the colliculus through the real brain", () => {
 });
 
 describe("balance and posture through the real brain", () => {
-  const ledge = { support: { on: "stone", kind: "solid" as const, edges: 2, headroom: 3 }, balance: 0.5 };
+  const ledge = { support: { on: "stone", kind: "solid" as const, edges: 2 }, balance: 0.5 };
   const pushedToDrop = { pushed: { blocks: 1, toward: { x: 0, z: -1 }, danger: { what: "drop", blocks: 1 } } };
 
   it("shares unsteady (1 − balance) and traces what holds the bot up", async () => {
@@ -1643,3 +1648,220 @@ describe("skills the bot saves for itself, through the real brain", () => {
   });
 });
 
+describe("the insula through the real brain", () => {
+  type Shown = MinecraftStateData["self"] & { feels?: string };
+  const shown = (b: ReturnType<typeof bot>) => (b.calls.shown.at(-1)!.data as unknown as MinecraftStateData).self as Shown;
+  const situation = (b: ReturnType<typeof bot>) => b.calls.requests.at(-1)!.situation;
+  const worn = { self: { food: 4, health: 13 } };
+
+  it("the feeling is read each tick and both deciders are told it in one line, beside the numbers", async () => {
+    const b = bot({ insula: DEFAULT_INSULA });
+    const { traces } = await b.tick(worn);
+    expect(b.store.feeling()).toMatchObject({ feelings: [{ word: "hungry", from: "hunger" }, { word: "hurting" }], line: "very hungry, a little hurting" });
+    expect(traces.insula).toMatchObject({ line: "very hungry, a little hurting" });
+    expect(shown(b)).toMatchObject({ feels: "very hungry, a little hurting", food: 4, health: 13 });
+    expect(situation(b)).toContain("Feels: very hungry, a little hurting.\nHealth 13/20, food 4/20");
+    // A bot with nothing the matter says so.
+    const well = bot({ insula: DEFAULT_INSULA });
+    await well.tick();
+    expect(shown(well).feels).toBe("at ease");
+  });
+
+  it("told the line alone, neither decider is given the numbers the line restates", async () => {
+    const b = bot({ insula: { ...DEFAULT_INSULA, tell: 1 }, drives: DEFAULT_DRIVES });
+    await b.tick(worn);
+    expect(shown(b).feels).toBe("very hungry, a little hurting");
+    expect("food" in shown(b) || "health" in shown(b)).toBe(false);
+    expect(situation(b)).toContain("Feels: very hungry, a little hurting.");
+    expect(situation(b)).not.toMatch(/Health \d|Your body:/);
+    // The brain itself still reads the body as it is.
+    expect((b.store.viewFor("x").state.data as unknown as MinecraftStateData).self).toMatchObject({ food: 4, health: 13 });
+  });
+
+  it("told the numbers alone, or with the insula off or left out, the deciders are told what they were before", async () => {
+    const asBefore = bot({ insula: NO_INSULA, drives: DEFAULT_DRIVES });
+    await asBefore.tick(worn);
+    for (const b of [bot({ insula: { ...DEFAULT_INSULA, tell: 0 }, drives: DEFAULT_DRIVES }), bot({ insula: NO_INSULA, drives: DEFAULT_DRIVES })]) {
+      await b.tick(worn);
+      expect(b.calls.shown.at(-1)).toEqual(asBefore.calls.shown.at(-1));
+      expect(situation(b)).toBe(situation(asBefore));
+      expect(situation(b)).toContain("Your body:");
+    }
+    expect(asBefore.store.feeling()).toBeNull();
+    expect((await asBefore.tick(worn)).traces.insula).toBeUndefined();
+    // With it told the numbers alone the feeling is still read, for whoever else reads it.
+    const quiet = bot({ insula: { ...DEFAULT_INSULA, tell: 0 } });
+    await quiet.tick(worn);
+    expect(quiet.store.feeling()!.line).toBe("very hungry, a little hurting");
+  });
+
+  it("health falling with nothing to see makes it uneasy; a hit that was seen does not", async () => {
+    const b = bot({ insula: DEFAULT_INSULA });
+    await b.tick();
+    await b.tick({ self: { health: 14 } });
+    expect(b.store.feeling()).toMatchObject({ uneasy: { level: 1, about: ["health"] } });
+    // (The loss stings too, so it is hurting as well: the unease is what says nothing explains it.)
+    expect(shown(b).feels).toMatch(/hurting.*very uneasy$/);
+    const hit = bot({ insula: DEFAULT_INSULA });
+    await hit.tick();
+    await hit.tick({ self: { health: 14, lastHurt: { msAgo: 300, by: "zombie", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } });
+    expect(hit.store.feeling()!.uneasy.level).toBe(0);
+  });
+
+  it("no reflex waits on the feeling: a hard reflex wins on the same tick whatever the insula says", async () => {
+    for (const insula of [DEFAULT_INSULA, NO_INSULA]) {
+      const b = bot({ insula });
+      expect((await b.tick({ self: { inLava: true, health: 6 } })).winner).toMatchObject({ region: "reflex", action: { skill: "escape_hazard" }, urgency: 1 });
+    }
+  });
+});
+
+describe("the cingulate through the real brain, in shadow", () => {
+  beforeEach(() => void vi.useFakeTimers({ now: 1_000_000 }));
+  afterEach(() => void vi.useRealTimers());
+  const pig: Mob = { ...mob("pig", 6, 9), hostile: false };
+  /** A few minutes of a life with trouble in it: a thing appears, health is lost with and without a cause, it is hungry. */
+  const life: Patch[] = [{}, {}, appears(pig), { mobs: [pig] }, { self: { health: 14 } }, { self: { health: 14, food: 6 } }, { self: { health: 9, lastHurt: { msAgo: 200, by: "zombie", kind: "mob_attack", at: { x: 0, y: 63, z: 0 } } } }, {}, {}];
+
+  it("changes nothing: with it on, off or left out, the same life gives the same proposals, winners, questions and plans", async () => {
+    const lived = async (cingulate: CingulateSettings) => {
+      const b = bot({ cingulate, cortex: DEFAULT_CORTEX, insula: DEFAULT_INSULA, selection: DEFAULT_SELECTION });
+      const out: unknown[] = [];
+      for (const patch of life) {
+        const { candidates, winner } = await b.tick(patch, null, 3000);
+        out.push([candidates.map((c) => [c.region, c.action, c.urgency]), winner && [winner.region, winner.action], b.calls.prompts.at(-1), b.calls.requests.at(-1)?.situation, b.calls.requests.at(-1)?.woken, b.store.goal()?.text, b.store.signals().focus?.value, b.store.signals().alarm?.value]);
+      }
+      return { out, b };
+    };
+    const [on, off] = [await lived(SHADOW_CINGULATE), await lived(NO_CINGULATE)];
+    expect(on.out).toEqual(off.out);
+    expect(off.b.store.trouble()).toBeNull();
+    // It shares no signal of its own.
+    expect(Object.keys(on.b.store.signals()).sort()).toEqual(Object.keys(off.b.store.signals()).sort());
+  });
+
+  it("gathers what the other regions report into one reading, and says what it would do", async () => {
+    const b = bot({ cingulate: SHADOW_CINGULATE, insula: DEFAULT_INSULA });
+    await b.tick();
+    expect(b.store.trouble()).toEqual({ level: 0, events: [], control: 0, verdict: "carry on", leave: 0, changeable: 0 });
+    // Health lost with nothing to see: it hurts, nothing explains it, and the alarm system asks for another plan. One event, three faces.
+    const { traces } = await b.tick({ self: { health: 13 } });
+    const trouble = b.store.trouble()!;
+    expect(trouble.events).toHaveLength(1);
+    expect(trouble.events[0]!.kinds.sort()).toEqual(["pain", "replan", "uneasy"]);
+    expect(trouble.events[0]!.about).toEqual(["body"]);
+    expect(trouble.level).toBe(trouble.events[0]!.strength);
+    expect(traces.cingulate).toMatchObject({ trouble: { level: expect.any(Number) }, verdict: expect.any(String), would: { wakePlanner: expect.any(Boolean) }, today: { plannerWoken: expect.any(Boolean), decidersHurried: false } });
+    expect(traces.cingulate!.stake).toBeGreaterThan(0);
+  });
+
+  it("counts the thinking spent: one for each question put to the engine, fifteen for each plan", async () => {
+    const b = bot({ cingulate: DEFAULT_CINGULATE });
+    await b.tick();
+    await b.tick();
+    // (In these tests the planner plans every tick; the count is of the minute before this tick.)
+    expect((await b.tick()).traces.cingulate!.calls).toBe(2 * (1 + 15));
+  });
+});
+
+
+describe("the cingulate's readers through the real brain", () => {
+  beforeEach(() => void vi.useFakeTimers({ now: 1_000_000 }));
+  afterEach(() => void vi.useRealTimers());
+  /** A goal with a lot riding on it, carried out by a skill the bot has never tried: more thought is likely to help. */
+  const plan: Plan = { goal: "Get wood.", steps: [{ text: "go", skill: "go_to", doneWhen: "time is night" }], reason: "", priority: 0.9 };
+  /** (In these tests the planner plans every tick, which would spend any real budget.) */
+  const ROOMY: CingulateSettings = { ...DEFAULT_CINGULATE, callBudget: 100_000 };
+  const only = (...on: (keyof CingulateSettings["readers"])[]): CingulateSettings => ({ ...ROOMY, readers: { ...SHADOW_CINGULATE.readers, ...Object.fromEntries(on.map((r) => [r, 1])) } });
+  const legsStuck = { locomotion: { moving: true, pattern: null, gait: "walk" as const, stuck: true } };
+
+  it("one event wakes the planner once, and it is told what the trouble is, however long the event lasts and however its faces change", async () => {
+    const b = bot({ cingulate: ROOMY, cortex: DEFAULT_CORTEX, insula: DEFAULT_INSULA, plan, drives: DEFAULT_DRIVES });
+    // Health is lost three times with nothing to explain it: one event, with pain at first and unease to the end.
+    for (const health of [20, 20, 20, 12, 11, 10, 10, 10]) await b.tick({ self: { health } }, "go_to", 6000);
+    const woken = b.calls.requests.map((r) => r.woken).filter(Boolean);
+    expect(woken).toEqual(["There is trouble: pain and the body changed with no cause to be seen and things have changed. Plan with that in mind."]);
+    expect(b.store.trouble()).toMatchObject({ verdict: "try harder" });
+  });
+
+  it("with little at stake the same trouble wakes nobody and hurries nothing", async () => {
+    const b = bot({ cingulate: ROOMY });
+    await b.tick();
+    const { traces } = await b.tick({ self: legsStuck }, "go_to");
+    // (No goal, no pressing need of the body, and a skill it has no reason to think is worth much.)
+    expect(b.store.trouble()).toMatchObject({ level: 1, verdict: "carry on" });
+    expect(b.store.trouble()!.control).toBeLessThan(0.5);
+    expect(traces.cingulate!.readBy).toMatchObject({ planner: "not woken", gate: "not hurried" });
+  });
+
+  it("the deciders' gate: drowsy, instinct is asked every tick while control is high, and by the old rule it is not", async () => {
+    const asked = async (cingulate: CingulateSettings) => {
+      const b = bot({ cingulate, arousal: { bedtime: 0 }, cortex: DEFAULT_CORTEX, plan });
+      const tiredNight = { night: true, self: { sinceSleepMinutes: 2000 } };
+      for (let i = 0; i < 120; i++) await b.tick(tiredNight, "idle");
+      expect(b.value("upper_rate")).toBeLessThan(0.4);
+      const before = b.calls.engine;
+      for (let i = 0; i < 20; i++) await b.tick({ ...tiredNight, self: { ...tiredNight.self, ...legsStuck } }, "idle");
+      expect(b.store.trouble()!.control).toBeGreaterThan(0.5);
+      return b.calls.engine - before;
+    };
+    expect(await asked(only("gate"))).toBe(20);
+    expect(await asked(only())).toBeLessThan(10);
+  });
+
+  it("focus and alarm each take control as one input; with their strengths at 0 neither moves", async () => {
+    const lived = async (cingulate: CingulateSettings) => {
+      const b = bot({ cingulate, cortex: DEFAULT_CORTEX, plan });
+      for (let i = 0; i < 4; i++) await b.tick({}, "go_to");
+      let last = await b.tick({ self: legsStuck }, "go_to");
+      for (let i = 0; i < 6; i++) last = await b.tick({ self: legsStuck }, "go_to");
+      return { b, last };
+    };
+    const [read, unread] = [await lived(only("focus", "alarm")), await lived(only())];
+    const control = read.b.store.trouble()!.control;
+    expect(control).toBeGreaterThan(0.5);
+    // One input, and it is the cingulate's control: the near tie, the mismatch and the unexpected scene are no longer read apart.
+    expect(read.last.traces.acetylcholine!.inputs).toMatchObject({ control: expect.closeTo(control, 2) });
+    expect(Object.keys(read.last.traces.acetylcholine!.inputs as object)).not.toEqual(expect.arrayContaining(["near_tie", "mismatch", "unexpected"]));
+    expect(Object.keys(unread.last.traces.acetylcholine!.inputs as object)).not.toContain("control");
+    // A small rise in alarm, a fifth of control at most.
+    expect(unread.b.value("alarm")).toBe(0);
+    expect(read.b.value("alarm")).toBeGreaterThan(0.1);
+    expect(read.b.value("alarm")).toBeLessThanOrEqual(0.2);
+    // Never enough to interrupt.
+    expect(read.b.value("interrupt")).toBe(0);
+  });
+
+  it("the trace says who read what, and leaves out a reader at strength 0", async () => {
+    const b = bot({ cingulate: only("planner", "view", "learning"), cortex: DEFAULT_CORTEX, plan });
+    await b.tick({}, "go_to");
+    const { traces } = await b.tick({ self: legsStuck }, "go_to");
+    expect(traces.cingulate!.readBy).toEqual({ planner: "woken", view: expect.closeTo(1 + 0.3 * b.store.trouble()!.control, 2), learning: 0.5 });
+  });
+
+  it("with the budget spent the verdict is to carry on, the trace says why, and no reader acts", async () => {
+    // (The planner plans every tick here: 16 calls a tick against a budget of 200 a minute.)
+    const b = bot({ cingulate: DEFAULT_CINGULATE, cortex: DEFAULT_CORTEX, plan });
+    for (let i = 0; i < 20; i++) await b.tick({}, "go_to");
+    const { traces } = await b.tick({ self: legsStuck }, "go_to");
+    expect(traces.cingulate).toMatchObject({ verdict: "carry on", why: "the call budget is spent", readBy: { planner: "not woken" } });
+    // The planner is not woken for it; the trouble goes with its next plan in turn, which costs no call.
+    expect(traces.prefrontal!.woken).toBeUndefined();
+    expect(traces.prefrontal).toMatchObject({ told: expect.stringContaining("There is trouble: the legs are stuck") });
+  });
+
+  it("danger is untouched: a hard reflex wins on the same tick and the danger interrupt fires the same, whatever the cingulate says", async () => {
+    const lived = async (cingulate: CingulateSettings) => {
+      const b = bot({ cingulate, cortex: DEFAULT_CORTEX, plan, drives: DEFAULT_DRIVES });
+      const out: unknown[] = [];
+      for (const patch of [{}, { self: legsStuck }, { self: { ...legsStuck, health: 8 }, mobs: [mob("zombie", 3)] }, { self: { inLava: true, health: 6 } }, { self: { health: 6 }, mobs: [mob("creeper", 4, 2)] }]) {
+        const { winner, reflexes } = await b.tick(patch, "go_to");
+        out.push([b.value("interrupt"), reflexes.map((r) => r.rule), winner?.region === "reflex" ? [winner.action, winner.urgency] : null]);
+      }
+      return out;
+    };
+    const [on, off] = [await lived(ROOMY), await lived(NO_CINGULATE)];
+    expect(on).toEqual(off);
+    expect(on[3]).toMatchObject([expect.any(Number), expect.any(Array), [{ skill: "escape_hazard" }, 1]]);
+  });
+});

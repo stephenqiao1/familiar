@@ -21,6 +21,7 @@
     "@familiar/region-cerebellum": "workspace:*",
     "@familiar/region-hypothalamus": "workspace:*",
     "@familiar/region-instinct": "workspace:*",
+    "@familiar/region-insula": "workspace:*",
     "@familiar/region-reflex": "workspace:*",
     "@familiar/region-thalamus": "workspace:*",
     "mineflayer": "^4.39.0",

@@ -11,6 +11,8 @@ export interface CerebellumOptions {
   /** The movements that ended since the last tick. Add a kind of movement or a measure on the game's side: nothing here changes. */
   movements(ws: Workspace, now: number): Movement[];
   settings?: CerebellumSettings;
+  /** What the settled learning rate is multiplied by right now (how changeable things are). The rate stays inside SETTLED_RATE_BOUNDS. Default: 1. */
+  rateScale?(ws: Workspace): number;
   /** How far behind its predicted pace the movement under way is, in spreads (0: on time, or nothing under way). Default: never behind. */
   behind?(ws: Workspace, now: number): number;
   /** More for the log (what is due soon). Default: nothing. */
@@ -35,6 +37,9 @@ export interface MeasureTrace {
   error: number | null;
 }
 
+/** The settled learning rate is kept within these, whatever scales it. */
+export const SETTLED_RATE_BOUNDS = { least: 0.02, most: 0.5 };
+
 /**
  * The cerebellum: for each movement the body makes, it learns what that movement comes to in
  * that situation (how long, how far, which changes), from the signed error between what it
@@ -43,7 +48,10 @@ export interface MeasureTrace {
  * `mismatch`, for a movement that came out far from what it predicted.
  */
 export function createCerebellumRegion(options: CerebellumOptions): Region {
-  const { store, settings = DEFAULT_CEREBELLUM, name = "cerebellum" } = options;
+  const { store, name = "cerebellum" } = options;
+  const set = options.settings ?? DEFAULT_CEREBELLUM;
+  /** The settings in force this tick: as set, with the settled rate scaled (inside its bounds). */
+  let settings = set;
   let worstMs = 0;
   /** The last movement that came out far from its prediction. */
   let felt = { size: 0, at: 0 };
@@ -90,6 +98,8 @@ export function createCerebellumRegion(options: CerebellumOptions): Region {
     layer: 0,
     everyMs: 0,
     run(ws) {
+      const scale = options.rateScale?.(ws) ?? 1;
+      settings = scale === 1 ? set : { ...set, settledRate: Math.min(SETTLED_RATE_BOUNDS.most, Math.max(SETTLED_RATE_BOUNDS.least, set.settledRate * scale)) };
       const started = performance.now();
       const now = ws.state.timestamp;
       const runs = options.movements(ws, now).map(take);

@@ -25,8 +25,11 @@ export function describeSituation<Ctx>(ws: Workspace, skills: Skill<Ctx>[], stor
   const lines = [ROLE];
   if (data) {
     const { self, time, nearby, current } = data;
+    // With the feeling line alone, the body's numbers are not in the view: the line says how it is.
+    const feels = (self as { feels?: string }).feels;
     lines.push(
-      `Health ${self.health}/20, food ${self.food}/20 (${self.foodItems} food items).`,
+      ...(feels ? [`Feels: ${feels}.`] : []),
+      self.health === undefined ? `Carrying ${self.foodItems} food items.` : `Health ${self.health}/20, food ${self.food}/20 (${self.foodItems} food items).`,
       `Holding ${self.heldItem ?? "nothing"}; best weapon ${self.bestWeapon ?? "none"}.`,
       `At ${self.position.x},${self.position.y},${self.position.z} in ${self.dimension}. Inventory ${self.inventoryFullPct}% full, ${self.distanceToBase} blocks from base.`,
       `Carrying: ${counts(self.inventory)}.`,

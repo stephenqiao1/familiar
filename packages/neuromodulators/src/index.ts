@@ -1,5 +1,5 @@
 export { aimAt, MAX_CUE_URGENCY, type Cue, type Thing } from "./dopamine/cues.js";
-export { createDopamineRegion, DEATH_OUTCOME, SITUATION } from "./dopamine/dopamine-region.js";
+export { createDopamineRegion, DEATH_OUTCOME, SITUATION, STEP_BOUNDS } from "./dopamine/dopamine-region.js";
 export { skillValue } from "./dopamine/effort.js";
 export { needChangeReward } from "./dopamine/need-change.js";
 export { createNoveltyMemory, createNoveltyRule, type NoveltyMemory } from "./dopamine/novelty.js";
@@ -13,7 +13,7 @@ export { BAD_SURPRISE_SIGNAL, DOPAMINE_SIGNAL, NOVELTY_SIGNAL, REWARD_SIGNAL, SU
 export { brakeFactor, giveUpFactor, planningHorizon, type PlanningHorizon } from "./serotonin/effects.js";
 export { PATIENCE_SIGNAL } from "./serotonin/patience.js";
 export { createPatienceRegion } from "./serotonin/patience-region.js";
-export { createPersistence, type Persistence } from "./serotonin/persistence.js";
+export { createPersistence, LEAVE_SHORTENS, type Persistence } from "./serotonin/persistence.js";
 export { DEFAULT_PATIENCE, patienceProblem, type PatienceSettings } from "./serotonin/settings.js";
 export { createAlarm } from "./noradrenaline/alarm.js";
 export { createNoradrenalineRegion, NORADRENALINE } from "./noradrenaline/noradrenaline-region.js";

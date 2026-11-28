@@ -349,6 +349,16 @@ export function feelingNear(memory: MemoryStore, place: Place, now: number): { n
   return close ? { nearby: close.outcome.feeling as "good" | "bad", kind: close.kind } : null;
 }
 
+/** What stands out from a stretch of time, for looking back: the strongest memories made since `since`, strongest first, one line each. */
+export function notableMemories(memory: MemoryStore, since: number, limit = 5): string[] {
+  return memory
+    .entries()
+    .memories.filter((m) => m.time >= since)
+    .sort((a, b) => b.strength - a.strength)
+    .slice(0, limit)
+    .map((m) => `${m.summary} (at ${m.place.x},${m.place.y},${m.place.z})`);
+}
+
 /** For a planner: the most relevant memories as short sentences, the top general facts, and the known places. Counts as recalling. */
 export function memoryNotes(memory: MemoryStore, place: Place | null, now: number, limit = 5, wayTo?: (to: Place) => string | null): string[] {
   const at = (p: Place) => `${p.x},${p.y},${p.z}${place && p.dimension !== place.dimension ? ` in ${p.dimension}` : ""}`;

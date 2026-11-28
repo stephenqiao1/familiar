@@ -9,6 +9,7 @@ export { placeOf, playerMemories } from "./memories.js";
 export { CELL_BLOCKS, cellKey, changesIn, createCellReader, dayOrNight, dimensionOf, playerSensory, thingsCounted, type CellReader } from "./place.js";
 export { createMapRoutes, type MapRoutes, type MapRoutesOptions } from "./map-routes.js";
 export { playerInstinct } from "./instinct.js";
+export { FEELING_WORDS, playerBody, playerExplains, playerInsula, playerReadings, withFeeling } from "./insula.js";
 export { conditionsNote, playerConditions, RETREAT_GOAL, targetAsKind, type NamedPlace } from "./conditions.js";
 export { DEFAULT_REFLEXES, REFLEX_SKILLS, reflexesProblem, type ReflexSettings } from "./protective-reflexes.js";
 export { createPlayerReflexes, playerReflexes } from "./reflexes.js";

@@ -33,6 +33,8 @@ import {
 import { DEFAULT_SELECTION, selectionProblem, type SelectionSettings } from "@familiar/basal-ganglia";
 import { DEFAULT_DRIVES, drivesProblem, type DriveSettings } from "@familiar/region-hypothalamus";
 import { DEFAULT_THALAMUS, thalamusProblem, type ThalamusSettings } from "@familiar/region-thalamus";
+import { cingulateProblem, DEFAULT_CINGULATE, type CingulateReaders, type CingulateSettings } from "@familiar/region-cingulate";
+import { DEFAULT_INSULA, insulaProblem, type InsulaSettings } from "@familiar/region-insula";
 import { cortexProblem, DEFAULT_CORTEX, type CortexSettings } from "@familiar/neocortex";
 import { cerebellumProblem, DEFAULT_CEREBELLUM, type CerebellumSettings } from "@familiar/region-cerebellum";
 import { amygdalaProblem, DEFAULT_AMYGDALA, type AmygdalaReaders, type AmygdalaSettings } from "@familiar/region-amygdala";
@@ -82,6 +84,10 @@ export interface BotConfig {
   cerebellum: CerebellumSettings;
   /** The cortex: the motor area, conditions, graded hold-backs and the goal channel (0 = two areas that only pass the goal down). */
   cortex: CortexSettings;
+  /** The insula: how the bot feels, and whether the deciding layers are told the feeling line, the numbers or both. */
+  insula: InsulaSettings;
+  /** The cingulate: how trouble is gathered and weighed, and the budget for thinking. */
+  cingulate: CingulateSettings;
 }
 
 export interface MemorySettings {
@@ -113,7 +119,7 @@ function memoryProblem(memory: MemorySettings): string | null {
 export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Promise<BotConfig> {
   const bots = await readBots(file);
   const entry = bots[name] as
-    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings> & { arousalGate?: number }; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings> & { fieldOfView?: number }; thalamus?: Partial<ThalamusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: Partial<DriveSettings>; selection?: Partial<SelectionSettings>; memory?: Partial<MemorySettings>; amygdala?: Partial<Omit<AmygdalaSettings, "readers">> & { readers?: Partial<AmygdalaReaders> }; cerebellum?: Partial<Omit<CerebellumSettings, "bounds">>; cortex?: Partial<CortexSettings> }
+    | { personality?: Partial<DopaminePersonality>; patience?: Partial<PatienceSettings>; noradrenaline?: Partial<NoradrenalineSettings>; focus?: Partial<FocusSettings>; brainstem?: Partial<BrainstemSettings> & { arousalGate?: number }; locomotion?: Partial<LocomotionSettings>; reflexes?: Partial<ReflexSettings>; medulla?: Partial<MedullaSettings>; colliculus?: Partial<ColliculusSettings> & { fieldOfView?: number }; thalamus?: Partial<ThalamusSettings>; posture?: Partial<PostureSettings>; defence?: Partial<DefenceSettings>; arousal?: Partial<ArousalSettings>; drives?: Partial<DriveSettings>; selection?: Partial<SelectionSettings>; memory?: Partial<MemorySettings>; amygdala?: Partial<Omit<AmygdalaSettings, "readers">> & { readers?: Partial<AmygdalaReaders> }; cerebellum?: Partial<Omit<CerebellumSettings, "bounds">>; cortex?: Partial<CortexSettings>; insula?: Partial<InsulaSettings>; cingulate?: Partial<Omit<CingulateSettings, "readers">> & { readers?: Partial<CingulateReaders> } }
     | undefined;
   const personality = { ...DEFAULT_PERSONALITY, ...entry?.personality };
   const patience = { ...DEFAULT_PATIENCE, ...entry?.patience };
@@ -144,9 +150,12 @@ export async function loadBotConfig(name: string, file = DEFAULT_BOTS_FILE): Pro
   const amygdala = { ...DEFAULT_AMYGDALA, ...entry?.amygdala, readers: { ...DEFAULT_AMYGDALA.readers, ...entry?.amygdala?.readers } };
   const cerebellum = { ...DEFAULT_CEREBELLUM, ...entry?.cerebellum, bounds: DEFAULT_CEREBELLUM.bounds };
   const cortex = { ...DEFAULT_CORTEX, ...entry?.cortex };
-  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? arousalProblem(arousal) ?? drivesProblem(drives) ?? thalamusProblem(thalamus) ?? selectionProblem(selection) ?? memoryIssue ?? amygdalaProblem(amygdala) ?? cerebellumProblem(cerebellum) ?? cortexProblem(cortex);
+  const insula = { ...DEFAULT_INSULA, ...entry?.insula };
+  // A bot may give only some of the readers; the rest keep their defaults.
+  const cingulate = { ...DEFAULT_CINGULATE, ...entry?.cingulate, readers: { ...DEFAULT_CINGULATE.readers, ...entry?.cingulate?.readers } };
+  const problem = personalityProblem(personality) ?? patienceProblem(patience) ?? noradrenalineProblem(noradrenaline) ?? focusProblem(focus) ?? brainstemProblem(brainstem) ?? locomotionProblem(locomotion) ?? reflexesProblem(reflexes) ?? medullaProblem(medulla) ?? postureProblem(posture) ?? colliculusProblem(colliculus) ?? defenceProblem(defence) ?? arousalProblem(arousal) ?? drivesProblem(drives) ?? thalamusProblem(thalamus) ?? selectionProblem(selection) ?? memoryIssue ?? amygdalaProblem(amygdala) ?? cerebellumProblem(cerebellum) ?? cortexProblem(cortex) ?? insulaProblem(insula) ?? cingulateProblem(cingulate);
   if (problem) throw new Error(`${file}: bot "${name}": ${problem}`);
-  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, arousal, drives, thalamus, selection, memory, amygdala, cerebellum, cortex };
+  return { personality, patience, noradrenaline, focus, brainstem, locomotion, reflexes, medulla, posture, colliculus, defence, arousal, drives, thalamus, selection, memory, amygdala, cerebellum, cortex, insula, cingulate };
 }
 
 /** The file's bots by name; none if the file is missing. Throws if it exists but is not valid. */

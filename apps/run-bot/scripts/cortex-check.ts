@@ -276,14 +276,18 @@ async function surpriseRun(): Promise<Run> {
     const { found } = surpriseReport(window);
     const most = Math.max(0, ...window.map((t) => (t as unknown as Tick).signals.unexpected?.value ?? 0));
     const fresh = window.filter((t) => ((trace(t as unknown as Tick, "thalamus").views ?? {}) as Record<string, { items?: { id: string; by: string[] }[] }>).prefrontal?.items?.some((i) => i.by.includes("fresh"))).length;
-    const focus = window.filter((t) => (trace(t as unknown as Tick, "acetylcholine").inputs?.unexpected ?? 0) > 0).length;
+    // (With the cingulate read, focus takes a surprise in through `control`: what is unexpected, by what is at stake.)
+    const focus = window.filter((t) => ((inputs) => (inputs?.unexpected ?? 0) > 0 || (inputs?.control ?? 0) > 0)(trace(t as unknown as Tick, "acetylcholine").inputs)).length;
     const keptBy = window.filter((t) => JSON.stringify(trace(t as unknown as Tick, "hippocampus")).includes("Was surprised")).length;
-    const woken = window.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && String(r.trace?.woken ?? "").startsWith("Something is not as expected"))).length;
-    return { found, most, woken, keptBy, focus, fresh, text: `${name}: ${found.map((f) => `${f.what} ${f.kind} ${f.size.toFixed(2)} ${sec(f.at - (window[0]?.timestamp ?? f.at))} s in`).join(", ") || "nothing found"}; unexpected up to ${most.toFixed(2)}; thalamus passed something as new on ${fresh} ticks, focus took it in on ${focus}, the hippocampus kept ${keptBy}, the planner woken ${woken}×` };
+    const about = (said: unknown) => /^Something is not as expected|Not as expected:/.test(String(said ?? ""));
+    const woken = window.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && about(r.trace?.woken))).length;
+    // Told with a plan in its turn (the cingulate's rule when the surprise is not worth a call of its own).
+    const told = window.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && about(r.trace?.told))).length;
+    return { found, most, woken, told, keptBy, focus, fresh, text: `${name}: ${found.map((f) => `${f.what} ${f.kind} ${f.size.toFixed(2)} ${sec(f.at - (window[0]?.timestamp ?? f.at))} s in`).join(", ") || "nothing found"}; unexpected up to ${most.toFixed(2)}; thalamus passed something as new on ${fresh} ticks, focus took it in on ${focus}, the hippocampus kept ${keptBy}, the planner woken ${woken}×, told in its turn ${told}×` };
   };
   const before = surpriseReport(part(0, added)).found;
   const [add, remove] = [tell("pig added", part(added, removed)), tell("chest removed", part(removed, Infinity))];
-  const ok = before.length === 0 && add.found.some((f) => f.what === "new" && f.kind === "pig") && add.focus > 0 && add.woken === 0 && remove.found.some((f) => f.what === "missing" && f.kind === "chest") && remove.keptBy > 0 && remove.woken > 0;
+  const ok = before.length === 0 && add.found.some((f) => f.what === "new" && f.kind === "pig") && add.focus > 0 && add.woken === 0 && remove.found.some((f) => f.what === "missing" && f.kind === "chest") && remove.keptBy > 0 && remove.woken + remove.told > 0;
   return { ticks, ok, note: `getting to know the place: ${before.length ? before.map((f) => `${f.what} ${f.kind}`).join(", ") : "nothing unexpected"}. ${add.text}. ${remove.text}` };
 }
 
@@ -294,6 +298,8 @@ interface Planned {
   notes: Record<string, string[]>;
   given: { key: string; text: string }[];
   woken?: string;
+  /** What it was told with a plan in its turn, when it was not woken for it. */
+  told?: string;
 }
 /** Every plan of a run, with what it said of the notes. */
 const plansOf = (ticks: Tick[]): Planned[] =>
@@ -302,7 +308,7 @@ const plansOf = (ticks: Tick[]): Planned[] =>
       .filter((r) => r.region === "prefrontal" && r.trace?.plan)
       .map((r) => {
         const plan = r.trace!.plan as { goal: string; steps: (string | Planned["steps"][number])[]; notes?: Planned["given"] };
-        return { at: t.timestamp, goal: plan.goal, steps: plan.steps.map((s) => (typeof s === "string" ? { text: s } : s)), notes: (r.trace!.notes ?? {}) as Record<string, string[]>, given: plan.notes ?? [], ...(r.trace!.woken ? { woken: String(r.trace!.woken) } : {}) };
+        return { at: t.timestamp, goal: plan.goal, steps: plan.steps.map((s) => (typeof s === "string" ? { text: s } : s)), notes: (r.trace!.notes ?? {}) as Record<string, string[]>, given: plan.notes ?? [], ...(r.trace!.woken ? { woken: String(r.trace!.woken) } : {}), ...(r.trace!.told ? { told: String(r.trace!.told) } : {}) };
       }),
   );
 /**
@@ -327,9 +333,9 @@ async function notesRun(notes: number): Promise<Run> {
   );
   const plans = plansOf(ticks);
   const doing = (t: Tick) => ((step) => (step?.skill ? `${step.skill} ${step.target ?? ""}`.trim() : null))(trace(t, "motor").step as { skill?: string; target?: string } | undefined);
-  // Each stuck report the planner was told of: what was being tried, and the plan that answered.
+  // Each stuck report the planner was told of, woken for it or told in its turn: what was being tried, and the plan that answered.
   const failed = new Map<string, { toldAt: number; noted: boolean; again: number }>();
-  for (const plan of plans.filter((p) => p.woken?.includes("is stuck"))) {
+  for (const plan of plans.filter((p) => (p.woken ?? p.told)?.includes("stuck"))) {
     const report = [...ticks].reverse().find((t) => t.timestamp <= plan.at && trace(t, "motor").stuck);
     const thing = report && doing(report);
     if (thing && !failed.has(thing)) failed.set(thing, { toldAt: plan.at, noted: (plan.notes.added?.length ?? 0) + (plan.notes.changed?.length ?? 0) > 0, again: 0 });
@@ -453,7 +459,8 @@ async function stuckRun(): Promise<Run> {
   // The walk to a spot in mid-air does not fail: it keeps trying. With nothing learned about go_to yet, it is stuck after three times 30 s.
   const ticks = await play(async () => void (await sleep(135_000)), { whole: true, plan: plans, settings: STILL });
   const stuck = ticks.find((t) => trace(t, "motor").stuck);
-  const woken = ticks.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && r.trace?.woken).map((r) => ({ at: t.timestamp, trace: r.trace as Record<string, any> })))[0];
+  // Woken at once, or (the cingulate's rule when the step is not worth a call of its own) told with the next plan in its turn.
+  const woken = ticks.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && /is stuck/.test(String(r.trace?.woken ?? r.trace?.told ?? ""))).map((r) => ({ at: t.timestamp, trace: r.trace as Record<string, any> })))[0];
   const first = goalOf(ticks.find((t) => goalOf(t))!)?.text;
   const changed = stuck && ticks.find((t) => t.timestamp > stuck.timestamp && goalOf(t) && goalOf(t)!.text !== first);
   const plansAfter = stuck ? ticks.filter((t) => t.timestamp >= stuck.timestamp).flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && r.trace?.plan)).length : 0;
@@ -462,7 +469,7 @@ async function stuckRun(): Promise<Run> {
   return {
     ticks,
     ok: stuck !== undefined && woken !== undefined && changed !== undefined,
-    note: `stuck ${stuck ? `${sec(stuck.timestamp - ticks[0]!.timestamp)} s in (${why})` : "never"}; the planner woken ${woken && stuck ? `${sec(woken.at - stuck.timestamp)} s later, told "${String(woken.trace.woken).slice(0, 90)}"` : "never"}; new goal ${changed ? `"${goalOf(changed)!.text.slice(0, 70)}" ${sec(changed.timestamp - stuck!.timestamp)} s after` : "none"}; ${plansAfter} plans after the report; steps of the new plan finished: ${finished.length}`,
+    note: `stuck ${stuck ? `${sec(stuck.timestamp - ticks[0]!.timestamp)} s in (${why})` : "never"}; the planner ${woken && stuck ? `${woken.trace.woken ? "woken" : "told in its turn"} ${sec(woken.at - stuck.timestamp)} s later: "${String(woken.trace.woken ?? woken.trace.told).slice(0, 90)}"` : "never told"}; new goal ${changed ? `"${goalOf(changed)!.text.slice(0, 70)}" ${sec(changed.timestamp - stuck!.timestamp)} s after` : "none"}; ${plansAfter} plans after the report; steps of the new plan finished: ${finished.length}`,
   };
 }
 

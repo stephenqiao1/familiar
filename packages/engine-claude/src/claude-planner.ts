@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import type { Goal, ItemWant, NameRequest, Plan, Planner, PlanRequest } from "@familiar/contracts";
+import type { Goal, ItemWant, NameRequest, Plan, Planner, PlanRequest, Review, ReviewRequest } from "@familiar/contracts";
 import { asHoldBack, CORTEX_ROLE, DROP_NOTES, EXPECT, fullHoldBack, NOTES, fullSteps, PRIORITY, type PlannerExtras } from "./plan-extras.js";
 import { z } from "zod";
 
@@ -122,6 +122,15 @@ export class ClaudePlanner implements Planner {
   }
 
 
+  async review(request: ReviewRequest, signal?: AbortSignal): Promise<Review> {
+    const response = await this.client.beta.messages.parse(
+      { model: this.model, max_tokens: 2000, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default", output_config: { effort: "low", format: betaZodOutputFormat(ReviewSchema) }, messages: [{ role: "user", content: reviewPrompt(request) }] },
+      signal ? { signal } : undefined,
+    );
+    if (!response.parsed_output) throw new Error(`planner gave no review (stop reason: ${response.stop_reason})`);
+    return response.parsed_output;
+  }
+
   async nameRoutine(request: NameRequest, signal?: AbortSignal): Promise<{ name: string; description: string }> {
     const response = await this.client.beta.messages.parse(
       { model: this.model, max_tokens: 1000, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default", output_config: { effort: "low", format: betaZodOutputFormat(NameSchema) }, messages: [{ role: "user", content: namePrompt(request) }] },
@@ -130,6 +139,25 @@ export class ClaudePlanner implements Planner {
     if (!response.parsed_output) throw new Error(`planner gave no name (stop reason: ${response.stop_reason})`);
     return response.parsed_output;
   }
+}
+
+const ReviewSchema = z.object({
+  notes: z
+    .array(z.object({ key: z.string().describe("A short name for the note."), text: z.string().describe("One line.") }))
+    .describe("Every note to keep from now on: each one you were shown that is still worth keeping (as it is, or reworded), and any new one. At most 5. A note left out is on its way to being dropped."),
+  dropNotes: z.array(z.string()).describe("Keys of notes to drop at once. Empty for none."),
+});
+
+/** The message asking for a review: the notes, what happened today, and the feeling. */
+export function reviewPrompt({ notes, memories, feeling }: ReviewRequest): string {
+  const noted = notes.length ? notes.map((n) => `\n- ${n.key}: ${n.text}`).join("") : " none yet.";
+  const remembered = memories.length ? memories.map((m) => `\n- ${m}`).join("") : " nothing of note.";
+  return (
+    `The agent is resting and nothing needs doing. This is a moment to look back, not to plan.\n\n` +
+    `Your notes (${notes.length} of 5):${noted}\n\nWhat stands out from today:${remembered}\n\nHow it feels: ${feeling ?? "not known"}.\n\n` +
+    `Change only your notes: keep what will still matter for later plans, reword what today has shown to be wrong or vague, ` +
+    `add at most what today taught that a later plan would otherwise miss, and drop what no longer matters. If nothing needs changing, give the notes back as they are.`
+  );
 }
 
 const NameSchema = z.object({

@@ -228,6 +228,56 @@ export interface Needs {
   unmet?: boolean;
 }
 
+/** One thing the body feels: a word for it, how strongly (0 to 1), and the reading it comes from. */
+export interface Felt {
+  word: string;
+  strength: number;
+  from: string;
+}
+
+/** How the bot feels right now, as the insula read it from the body's own readings. It only restates them. */
+export interface Feeling {
+  /** What it feels, strongest first. Empty when nothing presses (it is at ease). */
+  feelings: Felt[];
+  /** How good the body's state is overall, 0 (very bad) to 1. */
+  comfort: number;
+  /** Comfort and recent surprises averaged over minutes, -1 (low) to 1 (high). */
+  mood: number;
+  /** The body did something nothing explains: how strongly (0 to 1), and which readings. */
+  uneasy: { level: number; about: string[] };
+  /** The feeling in a few words, for the deciding layers ("very hungry, a little hurt, uneasy"). */
+  line: string;
+}
+
+/** One event behind the trouble: the kinds of sign it showed (its faces), what it concerns, how strong it is now, and how old it is. */
+export interface TroubleEvent {
+  kinds: string[];
+  about: string[];
+  /** 0 to 1: its strongest face right now. */
+  strength: number;
+  /** Ms since its first sign. */
+  age: number;
+}
+
+/** What the cingulate makes of the trouble: put in more effort, go on as it is, or drop what it is doing. */
+export type Verdict = "try harder" | "carry on" | "leave it";
+
+/** The cingulate's reading this tick: how much trouble there is, whether more effort is worth it, and a few numbers beside. */
+export interface Trouble {
+  /** 0 to 1: every sign of trouble gathered, one event counted once. */
+  level: number;
+  events: TroubleEvent[];
+  /** 0 to 1: how much more effort is worth, trouble × stake × chance − cost. */
+  control: number;
+  verdict: Verdict;
+  /** 0 to 1: how far the running activity is paying worse than things have in general. */
+  leave: number;
+  /** 0 to 1: how far recent surprises run above the usual. */
+  changeable: number;
+  /** While the bot is looking inward (at quiet rest with no trouble): when this spell began. Left out otherwise. */
+  inward?: number;
+}
+
 /** The brain's shared memory: the only way regions communicate. */
 export interface Workspace {
   /** The latest world state. */
@@ -242,6 +292,10 @@ export interface Workspace {
   readonly needs: Needs | null;
   /** Where the agent is on its own map, or null with no map. */
   readonly place: PlaceNow | null;
+  /** How the agent feels, as the insula read it this tick, or null with no insula. */
+  readonly feeling: Feeling | null;
+  /** The cingulate's reading of trouble this tick, or null with no cingulate. */
+  readonly trouble: Trouble | null;
   /** What each area of the cortex last said to its neighbours, by area name: areas talk only through this. */
   readonly cortex: Readonly<Record<string, AreaPorts>>;
   /** Skill lifecycle events, oldest first, at most the last 20. */
@@ -271,6 +325,10 @@ export interface Workspace {
   setNeeds(needs: Needs | null): void;
   /** Writes one area's ports (the ones left out are emptied). */
   setCortex(area: string, ports: Partial<Pick<AreaPorts, "up" | "feedback" | "ask">>): void;
+  /** Shares the cingulate's reading of trouble. */
+  setTrouble(trouble: Trouble | null): void;
+  /** Shares how the agent feels. */
+  setFeeling(feeling: Feeling | null): void;
   /** Shares where the agent is on its map. */
   setPlace(place: PlaceNow | null): void;
 }

@@ -46,10 +46,23 @@ export interface NameRequest {
   taken: string[];
 }
 
+/** What a planner is shown at a review: its notes, the day's notable memories, and how the agent feels. */
+export interface ReviewRequest {
+  notes: { key: string; text: string }[];
+  memories: string[];
+  /** The feeling in a few words; null when it is not known. */
+  feeling: string | null;
+}
+
+/** A review's answer: the notes to keep (as a plan gives them), and keys to drop. A review changes nothing else. */
+export type Review = Pick<Plan, "notes" | "dropNotes">;
+
 /** Anything that turns a described situation into a goal (e.g. an LLM). */
 export interface Planner {
   name: string;
   plan(request: PlanRequest, signal?: AbortSignal): Promise<Plan>;
   /** Names a routine in one word and describes it in one line. Optional: without it the routine is named after its steps. */
   nameRoutine?(request: NameRequest, signal?: AbortSignal): Promise<{ name: string; description: string }>;
+  /** Looks back at rest and changes its notes, nothing else. Optional: without it there are no reviews. */
+  review?(request: ReviewRequest, signal?: AbortSignal): Promise<Review>;
 }

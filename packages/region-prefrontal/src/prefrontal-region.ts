@@ -16,9 +16,10 @@ export interface PrefrontalOptions {
   /**
    * A reason from the cortex to plan at once (a step is stuck): what to tell the planner, and a
    * key that says which reason it is, so each is answered once. Such plans are at least
-   * `URGENT_GAP_MS` after the plan before. Default: never.
+   * `URGENT_GAP_MS` after the plan before. With `wait` the plan is not brought forward: the note
+   * goes with the next plan in its turn (the trace says `told`, not `woken`). Default: never.
    */
-  urgent?(ws: Workspace): { key: string | number; note: string } | null;
+  urgent?(ws: Workspace): { key: string | number; note: string; wait?: boolean } | null;
   /** Whether code can tell when this step is finished (it has a "done when" that can be read): the planner's own count does not move past such a step. Default: none can. */
   checkable?(step: Step): boolean;
   /**
@@ -32,6 +33,15 @@ export interface PrefrontalOptions {
    * it in a line; `named` is told what it said (null if it could not say).
    */
   naming?: { next(): NameRequest | null; named(request: NameRequest, given: { name: string; description: string } | null): string };
+  /**
+   * A review, when one is due: at rest, in place of one plan, the planner is shown its notes, the
+   * day's notable memories and the feeling, and may only change its notes. `key` says which spell
+   * of rest it is, so each has one review; reviews are at least `REVIEW_EVERY_MS` apart. With no
+   * goal standing the plan comes first (a review never sets a goal). Needs `notes` and a planner
+   * that can review. A review that is due goes ahead even while `paused` holds plans back, so
+   * whoever gives this says when not to (asleep). Default: never.
+   */
+  review?(ws: Workspace): { key: string | number; memories: string[]; feeling: string | null } | null;
   /** How often to re-plan, in ms. Default: 15 000. */
   everyMs?: number;
   /** Give up on a plan after this long. Default: 60 000. */
@@ -50,6 +60,8 @@ const MAX_DETAIL = 5;
 const MAX_EXPECT = 3;
 /** A plan the cortex asked for at once comes no sooner than this after the plan before. */
 export const URGENT_GAP_MS = 5000;
+/** One review comes no sooner than this after the one before. */
+export const REVIEW_EVERY_MS = 600_000;
 
 /** A record of lists without the empty ones, for the trace. */
 const trimmed = <T extends object>(lists: T) => Object.fromEntries(Object.entries(lists).filter(([, list]) => (list as unknown[]).length > 0));
@@ -95,19 +107,39 @@ export function createPrefrontalRegion(options: PrefrontalOptions): Region {
   const { planner, describe, everyMs = 15_000, timeoutMs = 60_000, name = "prefrontal", layer = 2 } = options;
   let lastRun = -Infinity;
   let answered: string | number | null = null;
+  let reviewed: { key: string | number | null; at: number } = { key: null, at: -Infinity };
+  /** The review to do in place of this plan, if one is due. */
+  const reviewNow = (ws: Workspace) => {
+    if (!options.notes || !planner.review || ws.goal === null) return null;
+    const review = options.review?.(ws) ?? null;
+    return review && review.key !== reviewed.key && Date.now() - reviewed.at >= REVIEW_EVERY_MS ? review : null;
+  };
   /** The cortex's reason to plan at once, if there is one not yet answered and the last plan is long enough ago. */
   const urgentNow = (ws: Workspace) => {
     const urgent = options.urgent?.(ws) ?? null;
-    return urgent && urgent.key !== answered && Date.now() - lastRun >= URGENT_GAP_MS ? urgent : null;
+    // (One that can wait does not bring the plan forward: its note goes with the next plan in turn.)
+    return urgent && urgent.key !== answered && (urgent.wait || Date.now() - lastRun >= URGENT_GAP_MS) ? urgent : null;
   };
   return {
     name,
     layer,
     everyMs,
     timeoutMs,
-    dueNow: (ws) => !options.paused?.(ws) && ((options.wake?.(ws) ?? false) || urgentNow(ws) !== null),
+    dueNow: (ws) => !options.paused?.(ws) && ((options.wake?.(ws) ?? false) || ((urgent) => urgent !== null && !urgent.wait)(urgentNow(ws))),
     async run(ws, signal) {
-      if (options.paused?.(ws)) return { proposals: [], trace: { paused: true } };
+      // A review that is due does not wait on `paused`: it is what a mind at rest does, and at rest plans are few.
+      const review = reviewNow(ws);
+      if (!review && options.paused?.(ws)) return { proposals: [], trace: { paused: true } };
+      if (review) {
+        // Marked before it is asked, so one that fails is not asked again this spell.
+        reviewed = { key: review.key, at: Date.now() };
+        lastRun = Date.now();
+        const shown = { notes: options.notes!.list().map(({ key, text }) => ({ key, text })), memories: review.memories, feeling: review.feeling };
+        const said = await planner.review!(shown, signal);
+        // Its word on the notes counts as a plan's would; the goal and everything else stay as they are.
+        const change = options.notes!.plan(said.notes ?? [], said.dropNotes ?? []);
+        return { proposals: [], trace: { planner: planner.name, review: { shown, said, notes: { ...trimmed(change), now: options.notes!.list().map((n) => n.key) } } } };
+      }
       const woken = urgentNow(ws);
       if (woken) answered = woken.key;
       lastRun = Date.now();
@@ -148,7 +180,7 @@ export function createPrefrontalRegion(options: PrefrontalOptions): Region {
         const given = await (planner.nameRoutine?.(routine, signal) ?? Promise.resolve(null)).catch(() => null);
         named = { routine: routine.steps, doneWhen: routine.doneWhen, ...(given ? { given } : {}), as: options.naming!.named(routine, given) };
       }
-      return { proposals: [], trace: { planner: planner.name, situation, plan, ...(woken ? { woken: woken.note } : {}), ...(refused ? { goalKept: refused } : advanced ? { stepFinished: true } : {}), ...(notes ? { notes } : {}), ...(named ? { named } : {}) } };
+      return { proposals: [], trace: { planner: planner.name, situation, plan, ...(woken ? { [woken.wait ? "told" : "woken"]: woken.note } : {}), ...(refused ? { goalKept: refused } : advanced ? { stepFinished: true } : {}), ...(notes ? { notes } : {}), ...(named ? { named } : {}) } };
     },
   };
 }

@@ -28,7 +28,7 @@ const column = (x: number, z: number, from: number, to: number, name: string) =>
 
 describe("balanceSense", () => {
   it("flat solid ground with room around: fully steady", () => {
-    expect(balanceSense(world())).toEqual({ support: { on: "stone", kind: "solid", edges: 0, headroom: 3 }, velocity: { x: 0, y: 0, z: 0, onGround: true }, landing: null, balance: 1 });
+    expect(balanceSense(world())).toEqual({ support: { on: "stone", kind: "solid", edges: 0 }, velocity: { x: 0, y: 0, z: 0, onGround: true }, landing: null, balance: 1 });
   });
 
   it("a one-wide ledge: two sides fall away, and balance drops", () => {
@@ -51,10 +51,10 @@ describe("balanceSense", () => {
     expect(balanceSense(bot)).toMatchObject({ support: { on: "sand", kind: "solid" }, balance: 1 });
   });
 
-  it("learned slippery and slow surfaces lower balance; low headroom is reported", () => {
+  it("learned slippery and slow surfaces lower balance", () => {
     const bot = world({ blocks: { "0,63,0": "ice", "0,66,0": "stone" } });
     setKnownSurfaces(bot, (name) => (name === "ice" ? "slippery" : null));
-    expect(balanceSense(bot)).toMatchObject({ support: { on: "ice", kind: "slippery", headroom: 0 }, balance: 0.6 });
+    expect(balanceSense(bot)).toMatchObject({ support: { on: "ice", kind: "slippery" }, balance: 0.6 });
   });
 
   it("a ladder: climbing", () => {

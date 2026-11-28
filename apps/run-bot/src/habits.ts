@@ -16,7 +16,10 @@ const BAD_SURPRISE = 0.2;
  * The player's striatum: habits by the scorebook's situation, aimed the way the scorebook files
  * things (this chest, or any cow), and never used while something notable is going on.
  */
-export function createPlayerStriatum<Ctx>(parts: { habits: Habits; selection: SelectionSettings; skills: readonly Skill<Ctx>[]; log?: (line: string) => void; /** How far a movement that went wrong counts as notable (the cerebellum's `mismatch` strength). Default: 0. */ mismatch?: number }): Striatum {
+/** Trouble at or above this breaks a habit. */
+export const HABIT_YIELDS_AT = 0.3;
+
+export function createPlayerStriatum<Ctx>(parts: { habits: Habits; selection: SelectionSettings; skills: readonly Skill<Ctx>[]; log?: (line: string) => void; /** How far a movement that went wrong counts as notable (the cerebellum's `mismatch` strength). Default: 0. */ mismatch?: number; /** How far a habit gives way to trouble (the cingulate's reading), 0 to 1. Default: 0. */ trouble?: number }): Striatum {
   const level = (ws: Workspace, signal: string, otherwise = 0) => ws.signals[signal]?.value ?? otherwise;
   const risky = { has: (name: string) => parts.skills.find((s) => s.name === name)?.risky === true };
   // Whether the bot's predictions hold, read the way focus reads it (the focus level itself is also up in an unfamiliar place, which is no reason to drop a habit).
@@ -44,6 +47,8 @@ export function createPlayerStriatum<Ctx>(parts: { habits: Habits; selection: Se
       if (level(ws, ORIENTING_SIGNAL) >= STRIKING) return "something striking just happened";
       // A movement just came out far from what the cerebellum predicted: the habit gives way to a fresh look.
       if ((parts.mismatch ?? 0) * level(ws, MISMATCH_SIGNAL) >= LARGE_MISMATCH) return "a movement went wrong";
+      // There is trouble (the cingulate's reading, a tick old): the habit gives way.
+      if ((parts.trouble ?? 0) * (ws.trouble?.level ?? 0) >= HABIT_YIELDS_AT) return "there is trouble";
       if (notHolding) return "predictions are not holding";
       return null;
     },

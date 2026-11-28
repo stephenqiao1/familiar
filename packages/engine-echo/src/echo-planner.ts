@@ -1,10 +1,11 @@
-import type { NameRequest, Plan, Planner, PlanRequest } from "@familiar/contracts";
+import type { NameRequest, Plan, Planner, PlanRequest, Review, ReviewRequest } from "@familiar/contracts";
 
 /**
  * A stand-in planner that returns a fixed plan. For offline runs and tests. Given several plans,
  * it starts on the first and moves to the next each time it is woken out of turn (a step is
  * stuck) or shown that the goal it gave is finished, staying on the last: a planner that changes
- * its plan when told to, with no model. It names a routine after its steps.
+ * its plan when told to, with no model. It names a routine after its steps, and at a review
+ * keeps its notes as they are.
  */
 export class EchoPlanner implements Planner {
   readonly name = "echo";
@@ -21,6 +22,10 @@ export class EchoPlanner implements Planner {
     const fixed = this.plans[this.at]!;
     const { ifThen, holdBack } = fixed;
     return { ...fixed, steps: [...fixed.steps], ...(ifThen ? { ifThen: ifThen.map((r) => ({ ...r })) } : {}), ...(holdBack ? { holdBack: [...holdBack] } : {}) };
+  }
+
+  async review(request: ReviewRequest): Promise<Review> {
+    return { notes: request.notes.map((n) => ({ ...n })) };
   }
 
   async nameRoutine(request: NameRequest): Promise<{ name: string; description: string }> {

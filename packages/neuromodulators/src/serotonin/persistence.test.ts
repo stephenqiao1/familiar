@@ -142,3 +142,76 @@ describe("createPersistence", () => {
     expect(setup(0.5).persistence.backstopMs()).toBe(3 * BASE);
   });
 });
+
+describe("the cingulate's word on staying or leaving", () => {
+  const start = (persistence: ReturnType<typeof createPersistence>, skill = "dig", at = 0) => persistence.observe({ skill, type: "started", timestamp: at });
+  const make = (more: { leave?: () => number; leaveIt?: () => boolean; leaveAfterMs?: number } = {}) => createPersistence({ patience: () => 0.5, chanceOf: () => 0.5, strength: 1, ...(more.leave ? { leaveOf: more.leave } : {}), ...(more.leaveIt ? { leaveIt: more.leaveIt } : {}), ...(more.leaveAfterMs === undefined ? {} : { leaveAfterMs: more.leaveAfterMs }) });
+
+  it("leave shortens the give-up clock: by half at its fullest, and not at all at 0", () => {
+    let leave = 0;
+    const persistence = make({ leave: () => leave });
+    start(persistence);
+    expect(persistence.status(1000)!.giveUpSeconds).toBe(120);
+    leave = 0.5;
+    expect(persistence.status(1000)!.giveUpSeconds).toBe(90);
+    leave = 1;
+    expect(persistence.status(1000)!.giveUpSeconds).toBe(60);
+    expect(persistence.giveUpReason(59_000)).toBeNull();
+    expect(persistence.giveUpReason(60_000)).toMatch(/^gave up after 60 s/);
+  });
+
+  it("leave loosens the stay bonus", () => {
+    let leave = 0;
+    const persistence = make({ leave: () => leave });
+    start(persistence);
+    const full = persistence.stayBonus("dig", 0);
+    expect(full).toBeCloseTo(0.15);
+    leave = 0.5;
+    expect(persistence.stayBonus("dig", 0)).toBeCloseTo(full / 2);
+    leave = 1;
+    expect(persistence.stayBonus("dig", 0)).toBe(0);
+  });
+
+  it("a verdict to leave ends the streak at once, once for each time the verdict comes", () => {
+    let leaving = false;
+    const persistence = make({ leaveIt: () => leaving });
+    start(persistence);
+    expect(persistence.giveUpReason(5000)).toBeNull();
+    leaving = true;
+    expect(persistence.giveUpReason(5500)).toBe("gave up after 6 s (not worth more effort)");
+    // Given up on, it waits before it may be tried again, like any skill the clock gave up on.
+    persistence.observe({ skill: "dig", type: "failed", timestamp: 5600 });
+    expect(persistence.heldBack("dig", 6000)).toBe(true);
+    // The verdict still stands: what is started next is not thrown over by the same verdict.
+    start(persistence, "walk", 6000);
+    for (let at = 6500; at < 20_000; at += 500) expect(persistence.giveUpReason(at)).toBeNull();
+    // It goes and comes again: that is a new verdict.
+    leaving = false;
+    persistence.giveUpReason(20_000);
+    leaving = true;
+    expect(persistence.giveUpReason(20_500)).toMatch(/not worth more effort/);
+  });
+
+  it("the verdict is about what has been kept at: a streak younger than the trouble is not given up on until it has lasted as long", () => {
+    const persistence = make({ leaveIt: () => true, leaveAfterMs: 15_000 });
+    // The verdict already stands when this starts: it was earned by something else.
+    start(persistence, "walk", 0);
+    for (let at = 0; at < 15_000; at += 500) expect(persistence.giveUpReason(at)).toBeNull();
+    expect(persistence.giveUpReason(15_000)).toBe("gave up after 15 s (not worth more effort)");
+    // Progress starts the streak again, so a walk that is getting somewhere is not left.
+    const moving = make({ leaveIt: () => true, leaveAfterMs: 15_000 });
+    start(moving, "walk", 0);
+    for (let at = 500; at < 40_000; at += 500) {
+      if (at % 10_000 === 0) moving.progress(at);
+      expect(moving.giveUpReason(at)).toBeNull();
+    }
+  });
+
+  it("with nothing running there is nothing to leave, and without the cingulate the clock is as it was", () => {
+    const idle = make({ leaveIt: () => true });
+    expect(idle.giveUpReason(1000)).toBeNull();
+    const plain = make();
+    start(plain);
+    expect(plain.status(0)).toMatchObject({ giveUpSeconds: 120, stayBonus: 0.15 });
+  });
+});

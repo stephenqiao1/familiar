@@ -220,12 +220,18 @@ importers:
       '@familiar/region-cerebellum':
         specifier: workspace:*
         version: link:../../packages/region-cerebellum
+      '@familiar/region-cingulate':
+        specifier: workspace:*
+        version: link:../../packages/region-cingulate
       '@familiar/region-hypothalamus':
         specifier: workspace:*
         version: link:../../packages/region-hypothalamus
       '@familiar/region-instinct':
         specifier: workspace:*
         version: link:../../packages/region-instinct
+      '@familiar/region-insula':
+        specifier: workspace:*
+        version: link:../../packages/region-insula
       '@familiar/region-motor':
         specifier: workspace:*
         version: link:../../packages/region-motor
@@ -336,6 +342,9 @@ importers:
       '@familiar/region-instinct':
         specifier: workspace:*
         version: link:../region-instinct
+      '@familiar/region-insula':
+        specifier: workspace:*
+        version: link:../region-insula
       '@familiar/region-reflex':
         specifier: workspace:*
         version: link:../region-reflex
@@ -409,6 +418,16 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/region-cingulate:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/region-hypothalamus:
     dependencies:
       '@familiar/contracts':
@@ -434,6 +453,16 @@ importers:
       '@familiar/engine-echo':
         specifier: workspace:*
         version: link:../engine-echo
+
+  packages/region-insula:
+    dependencies:
+      '@familiar/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@familiar/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/region-motor:
     dependencies:

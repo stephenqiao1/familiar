@@ -4,6 +4,8 @@
 import { readersReport } from "./cerebellum-readers-report.ts";
 import { cerebellumReport } from "./cerebellum-shadow-report.ts";
 import { cortexReport, type CortexTick } from "./cortex-report.ts";
+import { insulaReport, type InsulaTick } from "./insula-report.ts";
+import { cingulateReport, type CingulateTick } from "./cingulate-report.ts";
 import { readdirSync, readFileSync } from "node:fs";
 import { amygdalaReport } from "./amygdala-report.ts";
 import { join } from "node:path";
@@ -481,6 +483,12 @@ console.log(`\nCEREBELLUM\n${[...cerebellumReport(ticks), "", ...readersReport(t
 
 // The cortex: what the motor area carried out, what stuck, and what the goal channel did.
 console.log(`\nCORTEX\n${cortexReport(ticks as unknown as CortexTick[]).join("\n")}`);
+
+// The insula: how the bot felt.
+console.log(`\nINSULA\n${insulaReport(ticks as unknown as InsulaTick[]).join("\n")}`);
+
+// The cingulate: trouble, and whether more effort was worth it (beside what happens today, while it is in shadow).
+console.log(`\nCINGULATE\n${cingulateReport(ticks as unknown as CingulateTick[]).join("\n")}`);
 
 // Planner.
 const plans = ticks.flatMap((t) => t.regions.filter((r) => r.region === "prefrontal" && r.trace?.plan).map((r) => r.trace!.plan as { goal: string }));

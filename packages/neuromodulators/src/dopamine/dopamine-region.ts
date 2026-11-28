@@ -1,7 +1,6 @@
 import type { NeedReading, Region, SkillEvent, State, Workspace } from "@familiar/contracts";
 import { aimAt, cueProposals, type Cue, type Thing } from "./cues.js";
 import { aimOf, createEpisodeTracker, type EndedEpisode } from "./episodes.js";
-import { createMood } from "../mood.js";
 import { needChangeReward } from "./need-change.js";
 import { checkRules, needLevels, type LoggedReward, type RewardMoment, type RewardRule } from "./rewards.js";
 import { type Aim, createScorebook, type Scorebook } from "./scorebook.js";
@@ -34,6 +33,10 @@ export interface DopamineOptions {
   noticed?(ws: Workspace): number;
   /** Told each tick what is wanted in view and how much (the cues), for whoever else needs it: wanting is worked out once, here. Default: nobody. */
   onCues?(cues: Cue[]): void;
+  /** Told of each surprise as a run is learned from: how much better (above 0) or worse it went than expected. Default: nobody. */
+  onSurprise?(surprise: number, at: number): void;
+  /** What the learning step is multiplied by right now (how changeable things are). The step stays inside STEP_BOUNDS. Default: 1, and no bounds are applied. */
+  rateScale?(ws: Workspace): number;
   /**
    * The body's needs, as read this tick (by the hypothalamus; or worked out from the state with
    * it left out). With this, a need is not a rule: each is paid the signed change in its level
@@ -111,6 +114,9 @@ export const DEATH_OUTCOME = -5;
 /** A death with no skill running is blamed on a skill that ended at most this long before. */
 export const BLAME_WINDOW_MS = 10_000;
 
+/** The scorebook's learning step is kept within these, whatever scales it. */
+export const STEP_BOUNDS = { least: 0.02, most: 0.5 };
+
 /**
  * Dopamine, steps 1 to 7. Each tick it:
  *   1. runs every reward rule on what changed since the last tick, and adds the rewards (a need
@@ -137,7 +143,7 @@ export const BLAME_WINDOW_MS = 10_000;
  *      end: its relief) and the work it took, each filed like a skill of its own (see reliefOf);
  *   5. proposes heading toward the things in view that would pay right now (cues): each thing is
  *      weighed by itself, by the relief learned for it, how pressing each need is, and the work of getting there (see cueProposals);
- *   6. logs mood, a running average of recent surprises (only logged for now).
+ *   6. tells whoever asked of each surprise as it is learned from (`onSurprise`): the insula keeps mood from them.
  * The arbiter reads DA and the scorebook. A rule that throws is skipped and named in the trace.
  */
 export function createDopamineRegion(options: DopamineOptions): Region {
@@ -148,7 +154,6 @@ export function createDopamineRegion(options: DopamineOptions): Region {
   let trace = new Map<string, number>();
   const episodes = createEpisodeTracker();
   const tonic = createTonicDopamine(restingDA);
-  const mood = createMood();
   /** The latest episode that ended, and when, for blaming a death between skills. */
   let lastEnded: { episode: EndedEpisode; at: number } | null = null;
   let before: State | null = null;
@@ -161,11 +166,14 @@ export function createDopamineRegion(options: DopamineOptions): Region {
   /** The strongest notable event lately, and when. */
   let noticed = { strength: 0, at: -Infinity };
   let clock = 0;
+  /** What the step is multiplied by this tick. */
+  let scale = 1;
   function learnAt(situation: string, skill: string, outcome: number, aim: Aim | undefined) {
     const event = clock - noticed.at <= NOTICED_MS ? noticed.strength : 0;
     const bySurprise = attentionTo(outcome - scorebook.get(situation, skill, aim).expected);
     const attention = 1 - surpriseLearning * (1 - Math.max(event, bySurprise));
-    return { surprise: scorebook.learn(situation, skill, outcome, learningRate * attention, aim), attention, ...(event > bySurprise ? { noticed: event } : {}) };
+    const step = scale === 1 ? learningRate * attention : Math.min(STEP_BOUNDS.most, Math.max(STEP_BOUNDS.least, learningRate * scale)) * attention;
+    return { surprise: scorebook.learn(situation, skill, outcome, step, aim), attention, ...(event > bySurprise ? { noticed: event } : {}) };
   }
 
   /** Wants that are waiting to be tried again (see retryAfter), by skill and thing, and until when. */
@@ -221,7 +229,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
     const usualWork = scorebook.get(e.situation, effortOf(e.skill), aimOf(e)).expected;
     if (e.effort > 0 || usualWork !== 0) learnAt(e.situation, effortOf(e.skill), cut ? Math.max(e.effort, usualWork) : e.effort, aimOf(e));
     const { surprise, attention, noticed: byEvent } = learnAt(e.situation, e.skill, outcome, aimOf(e));
-    mood.feel(surprise, before?.timestamp ?? 0);
+    options.onSurprise?.(surprise, before?.timestamp ?? 0);
     return {
       ...e,
       outcome,
@@ -242,6 +250,7 @@ export function createDopamineRegion(options: DopamineOptions): Region {
     layer,
     everyMs: 0,
     run(ws) {
+      scale = options.rateScale?.(ws) ?? 1;
       const after = ws.state;
       clock = after.timestamp;
       const event = Math.min(1, options.noticed?.(ws) ?? 0);
@@ -331,7 +340,6 @@ export function createDopamineRegion(options: DopamineOptions): Region {
           situation,
           rewards,
           total,
-          mood: mood.level(after.timestamp),
           ...(learned.length ? { episodes: learned } : {}),
           ...(blamed ? { blamedForDeath: blamed } : {}),
           ...(cues.length ? { cues } : {}),

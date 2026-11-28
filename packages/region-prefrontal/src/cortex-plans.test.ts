@@ -3,7 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Plan, Planner, PlanRequest, Step } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
-import { createPrefrontalRegion, URGENT_GAP_MS, type PrefrontalOptions } from "./prefrontal-region.js";
+import { createNotes } from "./notes.js";
+import { createPrefrontalRegion, REVIEW_EVERY_MS, URGENT_GAP_MS, type PrefrontalOptions } from "./prefrontal-region.js";
 
 const signal = new AbortController().signal;
 /** A region whose planner gives these plans in turn (the last one again after that). */
@@ -129,6 +130,18 @@ describe("woken by the cortex", () => {
     expect(p.region.dueNow!(p.ws)).toBe(true);
   });
 
+  it("a reason that can wait does not bring the plan forward: its note goes with the next plan in turn, once", async () => {
+    const p = setUp([{ goal: "g", steps: [], reason: "" }], { urgent: () => ({ key: 1, note: "There is trouble.", wait: true }) });
+    vi.advanceTimersByTime(60_000);
+    expect(p.region.dueNow!(p.ws)).toBe(false);
+    const { trace } = await p.plan();
+    expect(p.requests[0]).toMatchObject({ woken: "There is trouble." });
+    expect(trace).toMatchObject({ told: "There is trouble." });
+    expect(trace!.woken).toBeUndefined();
+    await p.plan();
+    expect(p.requests[1]!.woken).toBeUndefined();
+  });
+
   it("is not woken while paused", () => {
     const p = setUp([{ goal: "g", steps: [], reason: "" }], { urgent: () => ({ key: 1, note: "stuck" }), paused: () => true });
     expect(p.region.dueNow!(p.ws)).toBe(false);
@@ -164,3 +177,100 @@ describe("naming a routine", () => {
   });
 });
 
+
+describe("a review at rest", () => {
+  const plan: Plan = { goal: "g", steps: [], reason: "", notes: [{ key: "bed", text: "the bed is by the door" }] };
+  /** A planner that plans `plan` and, at a review, says `said`. */
+  function resting(said: Awaited<ReturnType<NonNullable<Planner["review"]>>> | Error, due: () => string | number | null = () => 1) {
+    const store = createWorkspace();
+    const notes = createNotes();
+    const seen: { plans: number; reviews: Parameters<NonNullable<Planner["review"]>>[0][] } = { plans: 0, reviews: [] };
+    const planner: Planner = {
+      name: "fixed",
+      plan: async () => (seen.plans++, plan),
+      review: async (request) => {
+        seen.reviews.push(request);
+        if (said instanceof Error) throw said;
+        return said;
+      },
+    };
+    const region = createPrefrontalRegion({ planner, describe: () => "s", notes, review: () => ((key) => (key === null ? null : { key, memories: ["fell in the pond"], feeling: "at ease" }))(due()) });
+    return { store, notes, seen, run: () => region.run(store.viewFor("prefrontal"), signal) };
+  }
+  beforeEach(() => void vi.useFakeTimers({ now: 1_000_000 }));
+  afterEach(() => void vi.useRealTimers());
+
+  it("with no goal standing the plan comes first, then the review in place of the next plan", async () => {
+    const p = resting({ notes: [{ key: "bed", text: "the bed is by the door" }] });
+    await p.run();
+    expect(p.seen).toMatchObject({ plans: 1, reviews: [] });
+    const { trace } = await p.run();
+    expect(p.seen.plans).toBe(1);
+    expect(p.seen.reviews).toEqual([{ notes: [{ key: "bed", text: "the bed is by the door" }], memories: ["fell in the pond"], feeling: "at ease" }]);
+    expect(trace).toMatchObject({ review: { notes: { kept: ["bed"], now: ["bed"] } } });
+  });
+
+  it("changes the notes and nothing else", async () => {
+    const p = resting({ notes: [{ key: "bed", text: "the bed is upstairs" }, { key: "pond", text: "keep clear of the pond" }] });
+    await p.run();
+    const goal = p.store.goal();
+    const { trace } = await p.run();
+    expect(p.store.goal()).toEqual(goal);
+    expect(p.notes.list().map(({ key, text }) => ({ key, text }))).toEqual([{ key: "bed", text: "the bed is upstairs" }, { key: "pond", text: "keep clear of the pond" }]);
+    expect(trace).toMatchObject({ review: { notes: { changed: ["bed"], added: ["pond"] } } });
+    expect(trace).not.toHaveProperty("plan");
+  });
+
+  it("comes once in a spell, and no sooner than ten minutes after the last", async () => {
+    let spell = 1;
+    const p = resting({ notes: plan.notes! }, () => spell);
+    await p.run();
+    await p.run();
+    await p.run();
+    expect(p.seen).toMatchObject({ plans: 2, reviews: [{}] });
+    // A new spell too soon: a plan as usual.
+    spell = 2;
+    vi.advanceTimersByTime(REVIEW_EVERY_MS - 1);
+    await p.run();
+    expect(p.seen.reviews).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    await p.run();
+    expect(p.seen.reviews).toHaveLength(2);
+  });
+
+  it("is not asked for while not at rest, or of a planner that cannot review", async () => {
+    const p = resting({ notes: [] }, () => null);
+    await p.run();
+    await p.run();
+    expect(p.seen).toMatchObject({ plans: 2, reviews: [] });
+    const store = createWorkspace();
+    let plans = 0;
+    const region = createPrefrontalRegion({ planner: { name: "plain", plan: async () => (plans++, plan) }, describe: () => "s", notes: createNotes(), review: () => ({ key: 1, memories: [], feeling: null }) });
+    await region.run(store.viewFor("prefrontal"), signal);
+    await region.run(store.viewFor("prefrontal"), signal);
+    expect(plans).toBe(2);
+  });
+
+  it("goes ahead while plans are held back", async () => {
+    const store = createWorkspace();
+    const seen = { plans: 0, reviews: 0 };
+    let paused = false;
+    const planner: Planner = { name: "fixed", plan: async () => (seen.plans++, plan), review: async () => (seen.reviews++, {}) };
+    const region = createPrefrontalRegion({ planner, describe: () => "s", notes: createNotes(), paused: () => paused, review: () => ({ key: 1, memories: [], feeling: null }) });
+    const run = () => region.run(store.viewFor("prefrontal"), signal);
+    await run();
+    paused = true;
+    expect((await run()).trace).toHaveProperty("review");
+    expect((await run()).trace).toEqual({ paused: true });
+    expect(seen).toEqual({ plans: 1, reviews: 1 });
+  });
+
+  it("one that fails is not asked again in the same spell", async () => {
+    const p = resting(new Error("no answer"));
+    await p.run();
+    await expect(p.run()).rejects.toThrow("no answer");
+    await p.run();
+    expect(p.seen).toMatchObject({ plans: 2, reviews: [{}] });
+    expect(p.notes.list()).toHaveLength(1);
+  });
+});

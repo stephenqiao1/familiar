@@ -10,7 +10,7 @@ import { createDriveWatch, createReliefIndex, stressOnOutlook } from "./drives.j
 import type { Arbiter, Candidate, DecisionEngine, Goal, NeedReading, Planner, Region, Skill, State, Step, Workspace } from "@familiar/contracts";
 import { createCerebellumRegion, LARGE_MISMATCH, MISMATCH_SIGNAL, type CerebellumOptions } from "@familiar/region-cerebellum";
 import { APPEAL_SIGNAL, createAmygdalaRegion, FEAR_SIGNAL, MATTERS_SIGNAL, NO_READERS, type AmygdalaOptions } from "@familiar/region-amygdala";
-import { createMemoryRegion, memoryNotes, type MemoryStore, type Place, type PlaceKeeper } from "@familiar/memory";
+import { createMemoryRegion, memoryNotes, notableMemories, type MemoryStore, type Place, type PlaceKeeper } from "@familiar/memory";
 import {
   approachableThings,
   conditionsNote,
@@ -29,6 +29,8 @@ import {
   playerBrainstem,
   playerFocus,
   playerInstinct,
+  playerInsula,
+  withFeeling,
   playerMemories,
   createPlayerReflexes,
   DEFAULT_MEDULLA,
@@ -139,6 +141,10 @@ import {
   type ColliculusSettings,
 } from "@familiar/region-brainstem";
 import { areaOf, areaRegions, DEFAULT_CORTEX, NO_CONDITIONS, type Conditions, type CortexSettings } from "@familiar/neocortex";
+import { createCingulateRegion, DEFAULT_CINGULATE, INWARD_SIGNAL, LEAVE_IT, rateScale, TRY_HARDER_AT, WAKE_ABOVE, type CingulateSettings } from "@familiar/region-cingulate";
+import { createCallCounter, playerCingulate, troubleNote } from "./cingulate.js";
+import { HABIT_YIELDS_AT } from "./habits.js";
+import { createInsulaRegion, DEFAULT_INSULA, told, type InsulaSettings } from "@familiar/region-insula";
 import { createInstinctArea } from "@familiar/region-instinct";
 import { createMotorArea, type Chunks, type Stuck } from "@familiar/region-motor";
 import type { LearnedStore } from "./learned-skills.js";
@@ -147,6 +153,8 @@ import { createReflexRegion, REFLEX_SIGNAL } from "@familiar/region-reflex";
 import { createSensoryArea, STRONG_SURPRISE, UNEXPECTED_SIGNAL, type Surprise, type UsualSource } from "@familiar/region-sensory";
 import { surpriseKept } from "./surprise.js";
 
+/** A review looks back over this long: one day in the game. */
+const DAY_MS = 20 * 60_000;
 /** Alarm below this counts as calm enough to consolidate memories. */
 const CALM_ALARM = 0.2;
 /** The alarm level at which a reflex's gain is exactly 1 (0.6 + 0.8 × 0.5). */
@@ -157,6 +165,12 @@ const USUAL_MS = { instinct: 500, planner: 15_000 };
 const FRAZZLED_NOTE = "You are badly rattled right now: keep the plan short and simple, and put safety first.";
 /** Fear at its strongest raises alarm to this, before any harm has come. */
 const FEAR_ALARM = 0.5;
+/** Control at its highest raises alarm to this: a call for alertness, not a fright. */
+/** Trouble that passed before the planner's turn is still told for this long. */
+const TOLD_WITHIN_MS = 30_000;
+const CONTROL_ALARM = 0.2;
+/** Control at its highest enlarges instinct's view by this share. */
+const VIEW_GROWS = 0.3;
 /** A full mismatch (a movement that went badly wrong) raises alarm to this: a small start, not a fright. */
 const MISMATCH_ALARM = 0.2;
 /** A thing that stood out this recently and a surprise are taken for the same event. */
@@ -228,6 +242,10 @@ export interface BrainParts<Ctx> {
   amygdala?: AmygdalaOptions;
   /** The cerebellum: the movements it is told of and the models it has learned. Default: none. */
   cerebellum?: CerebellumOptions;
+  /** This bot's insula: how it feels, and what the deciding layers are told of that (from bots.json). Default: all on, the line beside the numbers. */
+  insula?: InsulaSettings;
+  /** This bot's cingulate: how trouble is gathered and weighed (from bots.json). Default: all on. In shadow so far: nothing reads it. */
+  cingulate?: CingulateSettings;
   /** This bot's cortex: the motor area, conditions, graded hold-backs and the goal channel (from bots.json). Default: all on. */
   cortex?: CortexSettings;
   /** The game side's vocabulary of conditions, for a step's "done when". Default: none, so no step is one the code can judge. */
@@ -274,7 +292,10 @@ export interface BrainParts<Ctx> {
  * To run without some regions (a lesion experiment): --regions reflex,instinct
  */
 export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Region[] {
-  const { engine, planner, scorebook, novelty, personality, patience, noradrenaline, focus, brainstem, memory, persistence, storage, skills, ctx } = parts;
+  // The thinking the bot does is counted, for what more of it would cost (the cingulate).
+  const calls = createCallCounter();
+  const [engine, planner] = [calls.engine(parts.engine), calls.planner(parts.planner)];
+  const { scorebook, novelty, personality, patience, noradrenaline, focus, brainstem, memory, persistence, storage, skills, ctx } = parts;
   // The menu is read afresh each time: a skill the bot saves for itself is on it from then on.
   const menu = () => menuSkills(skills, parts.showPrimitives);
   // With the brainstem lesioned (--regions), reflex gains stay at 1 and nothing is ever paused.
@@ -290,6 +311,48 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   const thalamus = parts.thalamus ?? DEFAULT_THALAMUS;
   const selection = parts.selection ?? DEFAULT_SELECTION;
   const cortex = parts.cortex ?? DEFAULT_CORTEX;
+  // The insula: with it left out (or off) there is no feeling, and the deciding layers are told the numbers alone.
+  const insula = parts.insula ?? DEFAULT_INSULA;
+  const hasInsula = insula.feeling > 0 && (!only || only.includes("insula"));
+  const tell = told(hasInsula ? insula : { feeling: 0, tell: 0 });
+  // The cingulate: with it left out (or its gathering off) no trouble is read.
+  const cingulate = parts.cingulate ?? DEFAULT_CINGULATE;
+  const hasCingulate = cingulate.gather > 0 && (!only || only.includes("cingulate"));
+  /** At quiet rest with no trouble the bot looks inward: memories are sorted then, and the planner reviews its notes. */
+  const looksInward = hasCingulate && cingulate.inward > 0;
+  // WHO READS THE CINGULATE. Each reader goes by it as far as its own strength says; at 0 (or with no cingulate) it keeps the rule it had before.
+  const reads = (reader: keyof CingulateSettings["readers"]) => (hasCingulate ? cingulate.readers[reader] : 0);
+  /** Control as the cingulate last worked it out (this tick's for what is listed after it, last tick's for what is listed before). */
+  const control = (ws: Workspace) => ws.trouble?.control ?? 0;
+  /** The planner is woken for this: the verdict is to try harder, and control is high. */
+  const worthWaking = (ws: Workspace) => ws.trouble?.verdict === "try harder" && reads("planner") * control(ws) > WAKE_ABOVE;
+  /** What a learning rate is multiplied by: (0.5 + changeable), as far as the reader's strength goes. */
+  const learningScale = (ws: Workspace) => (ws.trouble ? rateScale(ws.trouble.changeable, reads("learning")) : 1);
+  const round3 = (n: number) => Math.round(n * 1000) / 1000;
+  /** What each reader takes from the reading in `ws`, for the trace: only readers above strength 0. */
+  const readBy = (ws: Workspace): Record<string, unknown> => {
+    const took: Record<keyof CingulateSettings["readers"], unknown> = {
+      planner: worthWaking(ws) ? "woken" : "not woken",
+      gate: reads("gate") * control(ws) >= TRY_HARDER_AT ? "hurried" : "not hurried",
+      view: round3(1 + VIEW_GROWS * reads("view") * control(ws)),
+      focus: round3(reads("focus") * control(ws)),
+      alarm: round3(CONTROL_ALARM * reads("alarm") * control(ws)),
+      patience: round3(reads("patience") * (ws.trouble?.leave ?? 0)),
+      habit: reads("habit") * (ws.trouble?.level ?? 0) >= HABIT_YIELDS_AT ? "gives way" : "kept",
+      learning: round3(learningScale(ws)),
+    };
+    return Object.fromEntries(Object.entries(took).filter(([reader]) => reads(reader as keyof CingulateSettings["readers"]) > 0));
+  };
+  /** The stuck step that is still about the goal's current step, for the cingulate and for the planner's note. */
+  const stuckNow = (ws: Workspace) => ((stuck) => (stuck && freshStuck(stuck, ws) ? stuck : null))(stuckStep(ws));
+  /** The last trouble worth telling the planner, kept in case it passes before the planner's turn. */
+  let unsaid: { key: string; note: string; at: number } | null = null;
+  /** When the newest event of trouble the planner has been given began. */
+  let newestTold = 0;
+  /** The amygdala's latest surprise, for how changeable things are (taken once). */
+  let harmSurprise = 0;
+  /** The surprise dopamine felt this tick, for the insula's mood (taken once). */
+  let surprised: number | null = null;
   // The motor area carries out steps the code can judge: with it or the conditions off, no step is one.
   const hasMotor = cortex.motor > 0 && (!only || only.includes(MOTOR));
   const conditions = hasMotor ? conditionsIn(cortex, parts.conditions) : NO_CONDITIONS;
@@ -345,7 +408,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
   // A call a signal has asked for at once (an alarm interrupt, a plan that just failed) is never held.
   const gates = { instinct: createRateGate(USUAL_MS.instinct), planner: createRateGate(USUAL_MS.planner) };
   // A near tie the basal ganglia are waiting on sets them to full rate too: what they say next may settle it.
-  const held = (gate: keyof typeof gates, ws: Workspace, urgent: boolean) => gates[gate].hold(level(ws, UPPER_RATE_SIGNAL, 1), ws.state.timestamp, urgent || up(ws, CONFLICT_SIGNAL));
+  const held = (gate: keyof typeof gates, ws: Workspace, urgent: boolean) => gates[gate].hold(level(ws, UPPER_RATE_SIGNAL, 1), ws.state.timestamp, urgent || (reads("gate") > 0 ? reads("gate") * control(ws) >= TRY_HARDER_AT : up(ws, CONFLICT_SIGNAL)));
   // The prefrontal cortex is two regions: the planning (in the background) and what it holds (every tick).
   const [prefrontalHold, prefrontal] = areaRegions(
     createPrefrontalArea({
@@ -354,7 +417,8 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
         describeSituation(ws, menu(), storage, [
           ...memoryNotes(memory, placeOf(ws.state), ws.state.timestamp, (parts.attentionBudget?.() ?? NEUTRAL_BUDGET).remembered, parts.wayTo),
           ...(hasBrainstem && brainstem.holdBack > 0 ? [REFLEX_NOTE] : []),
-          ...(drives.tellPlanner > 0 ? [describeDrives(ws.needs)].filter((line) => line !== null) : []),
+          // (Told the feeling line alone, the planner is not also given the needs as numbers.)
+          ...(drives.tellPlanner > 0 && tell.numbers ? [describeDrives(ws.needs)].filter((line) => line !== null) : []),
           // The words a step's "done when" and an expectation can be written in.
           ...(vocabulary.forms.length ? [conditionsNote(vocabulary, [...new Set(needs(ws).flatMap((n) => [n.name, n.kind]))])] : []),
         ]),
@@ -363,11 +427,27 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
         const notes = [...(up(ws, RETHINK_SIGNAL) ? [RETHINK_INSTRUCTION] : []), ...(up(ws, FRAZZLED_SIGNAL) ? [FRAZZLED_NOTE] : []), ...(horizon.instruction ? [horizon.instruction] : [])];
         return notes.length ? { ...horizon, instruction: notes.join(" ") } : horizon;
       },
-      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL) || held("planner", ws, up(ws, REPLAN_SIGNAL) || up(ws, BURST_SIGNAL) || freshStuck(stuckStep(ws), ws) || strongSurprise(ws) !== null),
+      paused: (ws) => up(ws, PLANNER_OFFLINE_SIGNAL) || up(ws, UPPER_PAUSED_SIGNAL) || held("planner", ws, reads("planner") > 0 ? worthWaking(ws) : up(ws, REPLAN_SIGNAL) || up(ws, BURST_SIGNAL) || freshStuck(stuckStep(ws), ws) || strongSurprise(ws) !== null),
       wake: (ws) => up(ws, REPLAN_SIGNAL),
       // A stuck step (the motor area's report upward) wakes the planner at once, and it is told why.
       // So does a strong surprise (the sensory area's report upward): the place is not as it usually is, or an expectation broke.
       urgent: (ws) => {
+        // With the cingulate read: woken when more effort is worth it, once for each event, and told what the trouble is.
+        if (reads("planner") > 0) {
+          const first = ws.trouble?.events[0];
+          const wake = worthWaking(ws);
+          // Trouble not worth waking it for is still told, with the next plan in its turn. (A stuck step reported again is a new thing to tell.)
+          // A new plan being wanted is the planner's own business (`wake` below brings it): by itself it is nothing to tell.
+          const worthTelling = first !== undefined && (wake || (ws.trouble!.level >= LEAVE_IT.trouble && first.kinds.some((kind) => kind !== "replan")));
+          // Trouble that has passed before the planner's turn came is still told, for a while.
+          if (!worthTelling) return unsaid && ws.state.timestamp - unsaid.at <= TOLD_WITHIN_MS ? { key: unsaid.key, note: unsaid.note, wait: true } : null;
+          const stuck = first.kinds.includes("stuck step") ? stuckNow(ws) : null;
+          // One telling for each event: the key moves on only when an event worth telling has begun since the last one told
+          // (the strongest event changing, or one passing, is nothing new).
+          for (const e of ws.trouble!.events) if (e.kinds.some((kind) => kind !== "replan")) newestTold = Math.max(newestTold, ws.state.timestamp - e.age);
+          unsaid = { key: `trouble ${newestTold}${stuck ? ` ${stuck.at}` : ""}`, note: troubleNote(ws, { stuckStep: stuckNow, surprises }), at: ws.state.timestamp };
+          return { key: unsaid.key, note: unsaid.note, ...(wake ? {} : { wait: true }) };
+        }
         const stuck = stuckStep(ws);
         if (stuck && freshStuck(stuck, ws)) return { key: stuck.at, note: `Step ${stuck.step + 1} of the current goal ("${stuck.text}") is stuck: ${stuck.why}. Plan another way.` };
         const surprise = strongSurprise(ws);
@@ -389,6 +469,9 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
         : {}),
       // Working memory: a few notes the planner keeps between plans.
       ...(cortex.notes > 0 && parts.notes ? { notes: parts.notes } : {}),
+      // Looking inward: once in each spell, in place of a plan, the planner looks back over the day and changes only its notes.
+      // The drowsy gate does not hold it back (at rest plans are minutes apart); asleep, or with the planner offline, there is none.
+      ...(looksInward ? { review: (ws: Workspace) => (ws.trouble?.inward === undefined || up(ws, UPPER_PAUSED_SIGNAL) || up(ws, PLANNER_OFFLINE_SIGNAL) ? null : { key: ws.trouble.inward, memories: notableMemories(memory, ws.state.timestamp - DAY_MS), feeling: ws.feeling?.line ?? null }) } : {}),
     }),
     LADDER,
   ) as [Region, Region];
@@ -402,7 +485,7 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     // the error between what it predicted and what happened, and shares `mismatch` when a movement comes out far
     // from its prediction. Straight after the reflexes, so focus, alarm and the striatum read this tick's.
     // Its numbers (pace, each skill's usual time, expectations, timing) go to their readers outside this list.
-    ...(parts.cerebellum ? [createCerebellumRegion(parts.cerebellum)] : []), //            layer 0, every tick
+    ...(parts.cerebellum ? [createCerebellumRegion({ ...parts.cerebellum, ...(reads("learning") > 0 ? { rateScale: learningScale } : {}) })] : []), //            layer 0, every tick
     // The medulla: vital signs, and the graded urges of upkeep. Left out (--regions), the hard reflexes above still fire.
     createMedullaRegion({ vitals: playerVitals, share: medulla.vitals, urges: medullaUrges(medulla), asleep, analgesiaOf: (ws) => level(ws, ANALGESIA_SIGNAL), ...(upkeepGain ? { gainOf: upkeepGain } : {}) }), // layer 0, every tick
     // The hypothalamus: reads every need once and shares the reading. Straight after the medulla, so everything
@@ -460,9 +543,20 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createFocusRegion({
       // A thing that stood out strongly raises focus for a moment.
       // So does a near tie the basal ganglia are waiting on: look closely while the choice hangs.
-      inputs: [...playerFocus(memory), ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []), ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : []), ...(fears.focus > 0 ? [{ name: "promising", read: (ws: Workspace) => fears.focus * level(ws, APPEAL_SIGNAL) }] : []), ...(mismatch > 0 ? [{ name: "mismatch", read: (ws: Workspace) => level(ws, MISMATCH_SIGNAL) }] : []),
-        // What is unexpected here raises focus, less what a thing that just stood out has already raised it by (the same event is not counted twice).
-        ...(hasSensory ? [{ name: "unexpected", read: (ws: Workspace) => Math.max(0, level(ws, UNEXPECTED_SIGNAL) - focus.orienting * stoodOut(ws)) }] : []),
+      inputs: [
+        ...playerFocus(memory),
+        ...(focus.orienting > 0 ? [justNoticed((ws) => focus.orienting * level(ws, ORIENTING_SIGNAL))] : []),
+        ...(fears.focus > 0 ? [{ name: "promising", read: (ws: Workspace) => fears.focus * level(ws, APPEAL_SIGNAL) }] : []),
+        // With the cingulate read, control is the one input for trouble. Before: a near tie, a movement gone wrong and the unexpected were three.
+        ...(reads("focus") > 0
+          ? [{ name: "control", read: (ws: Workspace) => reads("focus") * control(ws) }]
+          : [
+              // A near tie the basal ganglia are waiting on: look closely while the choice hangs.
+              ...(selection.wait > 0 ? [{ name: "near_tie", read: (ws: Workspace) => level(ws, CONFLICT_SIGNAL) }] : []),
+              ...(mismatch > 0 ? [{ name: "mismatch", read: (ws: Workspace) => level(ws, MISMATCH_SIGNAL) }] : []),
+              // What is unexpected here raises focus, less what a thing that just stood out has already raised it by (the same event is not counted twice).
+              ...(hasSensory ? [{ name: "unexpected", read: (ws: Workspace) => Math.max(0, level(ws, UNEXPECTED_SIGNAL) - focus.orienting * stoodOut(ws)) }] : []),
+            ]),
       ],
       settings: focus,
       asleep,
@@ -484,12 +578,15 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       surpriseLearning: focus.surpriseLearning,
       noticed: (ws) => focus.eventLearning * level(ws, ORIENTING_SIGNAL),
       onCues: wants.set,
+      onSurprise: (surprise) => (surprised = surprise),
+      // The scorebook's step follows how changeable things are.
+      ...(reads("learning") > 0 ? { rateScale: learningScale } : {}),
     }), //                                                                                  layer 0, every tick
     createNoradrenalineRegion({
       // Alarm is read from the same needs; search from whether a pressing one is being answered.
       // Fear counts beside the vital needs: what is around predicts harm, so alarm rises before any has come.
       // A movement that went badly wrong is a small start: only a large mismatch counts.
-      needs: (ws) => [...needs(ws), ...(fears.alarm > 0 ? [{ name: "fear", level: fears.alarm * FEAR_ALARM * level(ws, FEAR_SIGNAL), rank: 1, weight: 1 }] : []), ...(level(ws, MISMATCH_SIGNAL) >= LARGE_MISMATCH ? [{ name: "mismatch", level: MISMATCH_ALARM * level(ws, MISMATCH_SIGNAL), rank: 1, weight: 1 }] : [])],
+      needs: (ws) => [...needs(ws), ...(fears.alarm > 0 ? [{ name: "fear", level: fears.alarm * FEAR_ALARM * level(ws, FEAR_SIGNAL), rank: 1, weight: 1 }] : []), ...(reads("alarm") > 0 ? (control(ws) > 0 ? [{ name: "control", level: CONTROL_ALARM * reads("alarm") * control(ws), rank: 1, weight: 1 }] : []) : level(ws, MISMATCH_SIGNAL) >= LARGE_MISMATCH ? [{ name: "mismatch", level: MISMATCH_ALARM * level(ws, MISMATCH_SIGNAL), rank: 1, weight: 1 }] : [])],
       startle: startleOf,
       // Search rises while a pressing need is not being answered, and while the top need has not eased for minutes whatever the skill reports.
       searchInputs: [gettingNowhere((ws) => unanswered(needs(ws)), (_ws, now) => persistence.status(now)?.progress ?? 0), { name: "unmet", read: (ws) => level(ws, UNMET_SIGNAL) }],
@@ -511,13 +608,30 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       // A fresh memory is stamped by alarm, and by how much the moment matters to the amygdala (good or bad).
       ...(noradrenaline.memoryTag > 0 || fears.memory > 0 ? { alarmOf: (ws: Workspace) => Math.max(noradrenaline.memoryTag > 0 ? level(ws, ALARM_SIGNAL) : 0, fears.memory * level(ws, MATTERS_SIGNAL)) } : {}),
       ...(focus.memoryWrite > 0 ? { focusOf: (ws: Workspace) => level(ws, FOCUS_SIGNAL, focus.resting) } : {}),
-      // Consolidate only while resting safely: focus and alarm both very low (in practice, asleep), or a long quiet spell awake.
-      ...(focus.consolidation > 0 ? { resting: (ws: Workspace) => level(ws, ALARM_SIGNAL) < CALM_ALARM && (level(ws, FOCUS_SIGNAL, focus.resting) < LOW_FOCUS || up(ws, QUIET_SIGNAL)) } : {}),
+      // Consolidate only while resting safely: focus and alarm both very low (in practice, asleep), or while looking inward
+      // (the cingulate's word, a tick old; without it, a long quiet spell awake).
+      ...(focus.consolidation > 0 ? { resting: (ws: Workspace) => level(ws, ALARM_SIGNAL) < CALM_ALARM && (level(ws, FOCUS_SIGNAL, focus.resting) < LOW_FOCUS || up(ws, looksInward ? INWARD_SIGNAL : QUIET_SIGNAL)) } : {}),
     }), //                                                                                  layer 0, every tick
     // The amygdala: learns what predicts harm and good. After the hippocampus, so it knows where the bot is.
     // It shares `fear`, `appeal` and `matters`; each reader takes them by its own strength (amygdala.readers).
     // Left out (--regions), fear reads as 0 and the readers outside this list keep the last thing it learned.
-    ...(parts.amygdala ? [createAmygdalaRegion(parts.amygdala)] : []), //                  layer 0, every tick
+    ...(parts.amygdala ? [createAmygdalaRegion({ ...parts.amygdala, onSurprise: (size) => (harmSurprise = Math.max(harmSurprise, size)), ...(reads("learning") > 0 ? { rateScale: learningScale } : {}) })] : []), //                  layer 0, every tick
+    // The insula: how the bot feels. It restates the body's readings (the needs, the medulla's signals, pain, stress,
+    // fear, arousal) as a few named feelings, comfort and mood, and notices the body doing something nothing explains.
+    // After the hypothalamus and the amygdala, whose readings it restates; before the thalamus, which passes it on.
+    ...(hasInsula
+      ? [
+          createInsulaRegion({
+            ...playerInsula(),
+            settings: insula,
+            surpriseOf: () => {
+              const felt = surprised;
+              surprised = null;
+              return felt;
+            },
+          }),
+        ]
+      : []), //                                                                             layer 0, every tick
     // What the prefrontal cortex holds, said again every tick: the goal (its feedback to the areas below) and
     // what it asks the thalamus for. Before the thalamus and instinct, so both read this tick's.
     prefrontalHold, //                                                                      layer 2, every tick
@@ -527,6 +641,10 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
     createThalamusRegion({
       ...playerThalamus(),
       readers: DECIDERS,
+      // A harder moment gets a little more information: control enlarges instinct's view.
+      ...(reads("view") > 0 ? { enlarge: (reader: string, ws: Workspace) => (reader === "instinct" ? 1 + VIEW_GROWS * reads("view") * control(ws) : 1) } : {}),
+      // The feeling goes with the body, which is always passed whole: a line of words, with or without the numbers it restates.
+      ...(hasInsula && (tell.line || !tell.numbers) ? { dress: (view: State, ws: Workspace) => withFeeling(view, ws.feeling, tell) } : {}),
       // The sensory area is told everything the body can know of, with no budget.
       ...(hasSensory ? { whole: [SENSORY], unexpected: (item: { id: string }, ws: Workspace) => surprises(ws).some((s) => s.ids.includes(item.id)) } : {}),
       settings: thalamus,
@@ -594,6 +712,38 @@ export function createBrain<Ctx>(parts: BrainParts<Ctx>, only?: string[]): Regio
       }),
       LADDER,
     ), //                                                                                   layer 1, every tick
+    // The cingulate: gathers every sign of trouble into one reading (one event counted once), works out whether more
+    // effort is worth it (control = trouble × stake × chance − cost) and gives a verdict, and keeps `leave` and
+    // `changeable`. After the cerebellum, the sensory and motor areas and the insula, whose signs it gathers.
+    // Its readers are listed above (`reads`): the planner's waking, the deciders' gate, instinct's view, focus, alarm,
+    // the give-up clock, habits and the three learning rates, each by its own strength.
+    ...(hasCingulate
+      ? [
+          createCingulateRegion({
+            ...playerCingulate({
+              scorebook,
+              skills,
+              situationOf,
+              stuckStep: stuckNow,
+              surprises,
+              amygdalaSurprise: () => {
+                const felt = harmSurprise;
+                harmSurprise = 0;
+                return felt;
+              },
+              placeOf,
+              resting: asleep,
+              calls,
+            }),
+            settings: cingulate,
+            quiet: (ws) => up(ws, QUIET_SIGNAL),
+            // What the rules from before the cingulate would do, beside what it asks for.
+            today: (ws) => ({ plannerWoken: up(ws, REPLAN_SIGNAL) || up(ws, BURST_SIGNAL) || freshStuck(stuckStep(ws), ws) || strongSurprise(ws) !== null, decidersHurried: up(ws, CONFLICT_SIGNAL) }),
+            // Who read what this tick (the give-up clock and the habits read it in the loop, by the same strengths).
+            readBy: (ws) => readBy(ws),
+          }),
+        ]
+      : []), //                                                                             layer 0, every tick
     ...areaRegions(
       createInstinctArea({
         // Jev is asked about, and shown, only what the thalamus passes on (`ws.view("instinct")`).
@@ -679,6 +829,10 @@ export function createPlayerDopamine(parts: {
   noticed?(ws: Workspace): number;
   /** Told each tick what is wanted in view. Default: nobody. */
   onCues?(cues: Cue[]): void;
+  /** Told of each surprise as a run is learned from. Default: nobody. */
+  onSurprise?(surprise: number, at: number): void;
+  /** What the learning step is multiplied by right now. Default: 1. */
+  rateScale?(ws: Workspace): number;
   /** Whether a skill uses any part of the body: time on one that does not is rest, not effort. Default: every skill does. */
   usesBody?(skill: string): boolean;
 }): Region {
@@ -712,6 +866,8 @@ export function createPlayerDopamine(parts: {
     ...(parts.surpriseLearning === undefined ? {} : { surpriseLearning: parts.surpriseLearning }),
     ...(parts.noticed ? { noticed: parts.noticed } : {}),
     ...(parts.onCues ? { onCues: parts.onCues } : {}),
+    ...(parts.onSurprise ? { onSurprise: parts.onSurprise } : {}),
+    ...(parts.rateScale ? { rateScale: parts.rateScale } : {}),
   });
 }
 

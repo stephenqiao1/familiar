@@ -7,7 +7,7 @@ import { buildPlaza, rcon, sleep } from "./primitive-check/world.ts";
 /** Everything but instinct: the reflexes, upkeep and every neuromodulator, with the echo planner. */
 // LESION=hypothalamus (or any names, comma-separated) leaves those out too, to see what the brain does without them.
 const LESION = (process.env.LESION ?? "").split(",").filter(Boolean);
-const NO_INSTINCT = "reflex,cerebellum,medulla,hypothalamus,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,motor,serotonin,prefrontal"
+const NO_INSTINCT = "reflex,cerebellum,medulla,hypothalamus,brainstem,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,insula,motor,cingulate,serotonin,prefrontal"
   .split(",")
   .filter((name) => !LESION.includes(name))
   .join(",");
@@ -35,6 +35,14 @@ export interface Row {
  * `settings` are the bot's settings for this run, as its entry in bots.json would be (default:
  * whatever FAMILIAR_BOTS_FILE or bots.json says); `keep` leaves what it learned last run in place.
  */
+/** One set of settings laid over another: an object is merged key by key, anything else replaces. */
+function over(base: Record<string, unknown>, top: Record<string, unknown>): Record<string, unknown> {
+  const plain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+  const out = { ...base };
+  for (const [key, value] of Object.entries(top)) out[key] = plain(value) && plain(out[key]) ? over(out[key] as Record<string, unknown>, value) : value;
+  return out;
+}
+
 export async function play(act: (bot: { say(command: string): void }) => Promise<void>, options: { plan?: object; whole?: boolean; settings?: object; keep?: boolean; also?: string[]; flags?: string[]; without?: string[]; before?: string[]; awakeDays?: number; start?: string } = {}): Promise<Tick[]> {
   if (!options.keep) rmSync(`data/${BOT}`, { recursive: true, force: true });
   // `before`: world commands before the bot joins. `awakeDays`: how long it has been awake (kept as the world's age when it last woke). `start`: where it stands.
@@ -45,14 +53,16 @@ export async function play(act: (bot: { say(command: string): void }) => Promise
     writeFileSync(`data/${BOT}/body.json`, JSON.stringify({ sleptAtAge: Math.max(0, age - Math.round(options.awakeDays * 24_000)) }));
   }
   const env = { ...process.env };
-  if (options.settings) {
+  // LIVE_SETTINGS=<json>: settings laid over every scene's own, to run a check with and without something (an A/B) without touching the scenes.
+  const settings = process.env.LIVE_SETTINGS ? over((options.settings ?? {}) as Record<string, unknown>, JSON.parse(process.env.LIVE_SETTINGS) as Record<string, unknown>) : options.settings;
+  if (settings) {
     mkdirSync("logs", { recursive: true });
     env.FAMILIAR_BOTS_FILE = "logs/live-bots.json";
-    writeFileSync(env.FAMILIAR_BOTS_FILE, JSON.stringify({ [BOT]: options.settings }));
+    writeFileSync(env.FAMILIAR_BOTS_FILE, JSON.stringify({ [BOT]: settings }));
   }
   // `also`: regions the usual list leaves out (the colliculus); `flags`: more command-line flags.
   // `without`: the whole brain less these regions (to see what one adds).
-  const everything = "reflex,cerebellum,medulla,hypothalamus,brainstem,reticular,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,thalamus,sensory,motor,instinct,serotonin,prefrontal".split(",").filter((name) => !(options.without ?? []).includes(name));
+  const everything = "reflex,cerebellum,medulla,hypothalamus,brainstem,reticular,colliculus,acetylcholine,dopamine,noradrenaline,hippocampus,amygdala,insula,thalamus,sensory,motor,cingulate,instinct,serotonin,prefrontal".split(",").filter((name) => !(options.without ?? []).includes(name));
   const brain = options.whole ? ["--engine", "jev", ...(options.without ? ["--regions", everything.join(",")] : [])] : ["--engine", "echo", "--regions", [NO_INSTINCT, ...(options.also ?? [])].join(",")];
   const child = spawn("node", ["--env-file-if-exists=.env", "apps/run-bot/dist/index.js", ...brain, "--planner", "echo", ...(options.plan ? ["--plan", JSON.stringify(options.plan)] : []), ...(options.flags ?? []), "--manual", "--name", BOT], { stdio: ["pipe", "pipe", "pipe"], env });
   let output = "";

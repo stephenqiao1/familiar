@@ -35,3 +35,26 @@ describe("the striatum reads the cerebellum's mismatch", () => {
     expect(habitWith(0.8, 0).acted).toBe(true);
   });
 });
+
+describe("the striatum reads the cingulate's trouble", () => {
+  /** The same well-worn habit, with the cingulate's reading of trouble at this level. */
+  function habitInTrouble(level: number, strength: number) {
+    const habits = createHabits();
+    for (let i = 0; i < 14; i++) habits.won(situationOf(state(0)), "eat", { urgency: 0.7, drive: null }, 0);
+    const striatum = createPlayerStriatum({ habits, selection: DEFAULT_SELECTION, skills: [], trouble: strength });
+    const store = createWorkspace();
+    store.update(state(1000), null);
+    store.viewFor("cingulate").setTrouble({ level, events: [], control: 0, verdict: "carry on", leave: 0, changeable: 0 });
+    const out = striatum.region.run(store.viewFor("striatum"), new AbortController().signal) as { proposals: { action: { skill?: string } }[]; trace?: { why?: string } };
+    return { acted: out.proposals.some((p) => p.action.skill === "eat"), why: out.trace?.why };
+  }
+
+  it("a habit gives way when trouble is above a low level, and acts below it", () => {
+    expect(habitInTrouble(0.2, 1).acted).toBe(true);
+    expect(habitInTrouble(0.3, 1)).toEqual({ acted: false, why: "there is trouble" });
+  });
+
+  it("at strength 0 the trouble is not read", () => {
+    expect(habitInTrouble(1, 0).acted).toBe(true);
+  });
+});

@@ -1,7 +1,7 @@
 import type { SkillEvent, State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { describe, expect, it } from "vitest";
-import { BLAME_WINDOW_MS, createDopamineRegion, DEATH_OUTCOME, SITUATION } from "./dopamine-region.js";
+import { BLAME_WINDOW_MS, createDopamineRegion, DEATH_OUTCOME, SITUATION, STEP_BOUNDS } from "./dopamine-region.js";
 import type { RewardRule } from "./rewards.js";
 import { createScorebook } from "./scorebook.js";
 import { reliefOf } from "./wanting.js";
@@ -50,7 +50,7 @@ describe("createDopamineRegion", () => {
     expect(await tick(2)).toEqual({ proposals: [] });
     expect(await tick(5)).toEqual({
       proposals: [],
-      trace: { situation: "night", rewards: [{ rule: "fed", need: "hunger", amount: 3, reason: "0 events" }], total: 3, mood: 0 },
+      trace: { situation: "night", rewards: [{ rule: "fed", need: "hunger", amount: 3, reason: "0 events" }], total: 3 },
     });
   });
 
@@ -75,6 +75,31 @@ describe("createDopamineRegion", () => {
     expect(episode).toMatchObject({ skill: "eat", situation: "night", outcome: 3, ended: "done", surprise: expect.closeTo(2.5, 2) });
     expect(episode).toMatchObject(scorebook.get("night", "eat"));
     expect(scorebook.get("night", "eat").expected).toBeCloseTo(0.5 + 2.5 * 0.19, 2); // two levels, a tenth each
+  });
+
+  it("takes a bigger or smaller learning step by `rateScale`, inside STEP_BOUNDS", async () => {
+    const learnt = async (scale?: number) => {
+      const store = createWorkspace();
+      const scorebook = createScorebook();
+      const region = createDopamineRegion({ rules: [fed], situationOf, scorebook, ...(scale === undefined ? {} : { rateScale: () => scale }) });
+      const tick = (n: number) => (store.update(state(n), null), region.run(store.viewFor("dopamine"), signal));
+      await tick(1);
+      store.addEvent({ skill: "eat", type: "started", timestamp: 0 });
+      await tick(2);
+      await tick(4);
+      store.addEvent({ skill: "eat", type: "done", timestamp: 0 });
+      const [episode] = (await tick(5)).trace?.episodes as { surprise: number }[];
+      return scorebook.get("night", "eat").expected / episode!.surprise;
+    };
+    const [plain, half, more, huge, tiny] = [await learnt(), await learnt(0.5), await learnt(1.5), await learnt(1000), await learnt(0.0001)];
+    expect(await learnt(1)).toBe(plain);
+    expect(half).toBeLessThan(plain);
+    expect(more).toBeGreaterThan(plain);
+    // The step never passes the most nor falls under the least, whatever the scale. (The scorebook files a lesson at two levels, so a little more than one step is taken in.)
+    expect(huge).toBeGreaterThan(more);
+    expect(huge).toBeLessThan(2 * STEP_BOUNDS.most);
+    expect(tiny).toBeGreaterThan(STEP_BOUNDS.least / 2);
+    expect(tiny).toBeLessThan(half);
   });
 
   it("counts how each skill run ended: done and failed, but not interrupted", async () => {
@@ -437,7 +462,6 @@ describe("createDopamineRegion", () => {
       situation: "day",
       rewards: [{ rule: "fed", need: "hunger", amount: 1, reason: "0 events" }],
       total: 1,
-      mood: 0,
       errors: { broken: "bad data" },
     });
   });

@@ -1,7 +1,7 @@
 import type { State } from "@familiar/contracts";
 import { createWorkspace } from "@familiar/core";
 import { describe, expect, it } from "vitest";
-import { createCerebellumRegion } from "./cerebellum-region.js";
+import { createCerebellumRegion, SETTLED_RATE_BOUNDS } from "./cerebellum-region.js";
 import { MISMATCH_SIGNAL } from "./mismatch.js";
 import { createModels, modelId, type Movement } from "./model.js";
 import { DEFAULT_CEREBELLUM } from "./settings.js";
@@ -115,5 +115,39 @@ describe("the cerebellum region", () => {
       await region.run(view, new AbortController().signal);
     }
     expect(Object.keys(view.signals)).toEqual([]);
+  });
+});
+
+describe("the settled rate follows how changeable things are", () => {
+  /** A dig learned as 2 s many times over, then one that took 4: how far the estimate moved, with the rate scaled by this. */
+  function movedBy(scale: number | undefined) {
+    const store = createModels();
+    let pending: Movement[] = [];
+    const region = createCerebellumRegion({ store, movements: () => pending.splice(0), ...(scale === undefined ? {} : { rateScale: () => scale }) });
+    const ws = createWorkspace();
+    const tick = (now: number, movement: Movement) => {
+      pending = [movement];
+      ws.update(state(now), null);
+      region.run(ws.viewFor("cerebellum"), new AbortController().signal);
+    };
+    for (let i = 0; i < 40; i++) tick(i * 1000, dig(2, i * 1000));
+    tick(50_000, dig(4, 50_000));
+    return store.get(modelId("primitive", "break_block", "stone"))!.measures.seconds!.value - 2;
+  }
+
+  it("a higher scale learns faster and a lower one slower, and with none it is as it was", () => {
+    const usual = movedBy(undefined);
+    expect(movedBy(1)).toBe(usual);
+    expect(movedBy(1.5)).toBeCloseTo(usual * 1.5, 5);
+    expect(movedBy(0.5)).toBeCloseTo(usual * 0.5, 5);
+  });
+
+  it("the rate stays inside its bounds whatever the scale says", () => {
+    const usual = movedBy(undefined);
+    // The settled rate is 0.1: it may be at most 0.5 and at least 0.02.
+    expect(movedBy(100)).toBeCloseTo(usual * (SETTLED_RATE_BOUNDS.most / DEFAULT_CEREBELLUM.settledRate), 5);
+    // (At the low end a model this young still learns at one over its count of runs, which is above the bound.)
+    expect(movedBy(0.001)).toBeGreaterThan(usual * (SETTLED_RATE_BOUNDS.least / DEFAULT_CEREBELLUM.settledRate) - 1e-9);
+    expect(movedBy(0.001)).toBeLessThan(movedBy(0.5));
   });
 });
